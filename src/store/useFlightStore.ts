@@ -14,6 +14,13 @@ import {
 } from '../physics/destinations';
 import { computeCriticalWindows, firstWindowStartingIn, type CriticalWindow } from '../physics/criticalEvents';
 import {
+  computeEyeTimeline,
+  computePhotometryAndEyeState,
+  type EyeTimeline,
+  type PhotometryAndEyeState,
+} from '../physics/EyeAndPhotometry';
+import { computeBodyAngularRadii } from '../physics/sky';
+import {
   COUNTDOWN_FROM_S,
   computeMilestones,
   detectFlightEvents,
@@ -45,6 +52,8 @@ export interface FlightStore {
   readonly profile: MissionProfile;
   readonly criticalWindows: readonly CriticalWindow[];
   readonly milestones: readonly Milestone[];
+  /** Adaptação do olho pré-calculada para a missão inteira. */
+  readonly eyeTimeline: EyeTimeline;
   /** Tempo próprio do Autopilot (s). */
   readonly tau: number;
   readonly playing: boolean;
@@ -57,6 +66,8 @@ export interface FlightStore {
   readonly manualEta: number;
   /** Snapshot cinemático lido pelos monitores e pelo HUD. */
   readonly flight: FlightState;
+  /** Luz da CMB à frente, olho do piloto e auto-zoom, no mesmo instante de `flight`. */
+  readonly photometry: PhotometryAndEyeState;
 
   setMode: (mode: FlightMode) => void;
   setDestination: (id: DestinationId) => void;
@@ -78,6 +89,14 @@ function deriveFlight(profile: MissionProfile, tau: number, mode: FlightMode, ma
   return mode === 'manual' ? withRapidity(state, manualEta) : state;
 }
 
+function derivePhotometry(
+  flight: FlightState,
+  { profile, eyeTimeline, destination }: Pick<FlightStore, 'profile' | 'eyeTimeline' | 'destination'>,
+): PhotometryAndEyeState {
+  const targetRadiusRad = computeBodyAngularRadii(flight, destination).targetRadiusRad;
+  return computePhotometryAndEyeState(flight, profile, eyeTimeline, targetRadiusRad);
+}
+
 /** Nova missão parada no instante da partida. */
 function newMission(destination: Destination, accelG: number) {
   const profile = destinationMissionProfile(destination, accelG);
@@ -88,6 +107,7 @@ function newMission(destination: Destination, accelG: number) {
     profile,
     criticalWindows,
     milestones: computeMilestones(profile, criticalWindows),
+    eyeTimeline: computeEyeTimeline(profile),
     tau: 0,
     playing: false,
     ignitionCountdownS: null,
@@ -101,13 +121,15 @@ const countdown = (target: MilestoneKind, secondsLeft: number): FlightEvent => (
 });
 
 export const useFlightStore = create<FlightStore>()((set, get) => {
-  /** Aplica `patch` e recalcula o snapshot `flight`. */
+  /** Aplica `patch` e recalcula os snapshots `flight` e `photometry`. */
   const update = (patch: Partial<FlightStore>) => {
     const next = { ...get(), ...patch };
-    set({ ...patch, flight: deriveFlight(next.profile, next.tau, next.mode, next.manualEta) });
+    const flight = deriveFlight(next.profile, next.tau, next.mode, next.manualEta);
+    set({ ...patch, flight, photometry: derivePhotometry(flight, next) });
   };
 
   const initial = newMission(DESTINATIONS.proxima, DESTINATIONS.proxima.defaultAccelG);
+  const initialFlight = computeFlightState(initial.profile, 0);
 
   return {
     ...initial,
@@ -115,7 +137,8 @@ export const useFlightStore = create<FlightStore>()((set, get) => {
     timeScale: 1,
     autoStepDown: true,
     manualEta: 0,
-    flight: computeFlightState(initial.profile, 0),
+    flight: initialFlight,
+    photometry: derivePhotometry(initialFlight, initial),
 
     setMode: (mode) => {
       if (mode === get().mode) return;

@@ -5,7 +5,9 @@ import {
   formatDistance,
   formatDuration,
   formatGamma,
+  formatRouteDistance,
   formatScientific,
+  formatSpaceNumber,
   formatVelocity,
 } from './format';
 
@@ -43,6 +45,16 @@ describe('formatação pt-BR', () => {
     expect(formatDistance(18.99 * LIGHT_SECOND_M)).toBe('18,99 s-luz');
     expect(formatDistance(1234)).toBe('1,234 km');
     expect(formatDistance(0)).toBe('0 km');
+  });
+
+  it('milhares separados por espaço e distâncias da rota', () => {
+    expect(formatSpaceNumber(3_123_953)).toBe('3 123 953');
+    expect(formatSpaceNumber(11_065.4)).toBe('11 065');
+    expect(formatSpaceNumber(42)).toBe('42');
+    expect(formatRouteDistance(15 * 1.495978707e11)).toBe('15.0 AU');
+    expect(formatRouteDistance(1.495978707e11)).toBe('1.00 AU');
+    expect(formatRouteDistance(4.25 * LIGHT_YEAR_M)).toBe('4.25 ly');
+    expect(formatRouteDistance(2.537e6 * LIGHT_YEAR_M)).toBe('2 537 000 ly');
   });
 
   it('velocidade: fração de c até 0,99c, depois c − v', () => {

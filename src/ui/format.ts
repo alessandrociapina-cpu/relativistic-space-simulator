@@ -79,6 +79,21 @@ function formatSpeed(metersPerSecond: number): string {
   return `${formatScientific(metersPerSecond)} m/s`;
 }
 
+/** Inteiros com espaço como separador de milhar, no estilo das telas de referência: "3 123 953". */
+export function formatSpaceNumber(n: number): string {
+  return Math.round(n)
+    .toString()
+    .replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+}
+
+/** Distâncias do mapa de rota, no estilo das telas de referência: UA até 600 UA, depois anos-luz. */
+export function formatRouteDistance(meters: number): string {
+  const au = meters / AU_M;
+  if (au < 600) return `${au.toFixed(au < 10 ? 2 : au < 100 ? 1 : 0)} AU`;
+  const ly = meters / LIGHT_YEAR_M;
+  return ly < 1000 ? `${ly.toFixed(ly < 10 ? 2 : 1)} ly` : `${formatSpaceNumber(ly)} ly`;
+}
+
 /** v em frações de c até 0,99c; acima, quanto falta para c (c − v). */
 export function formatVelocity(beta: number, oneMinusBeta: number): string {
   return beta < 0.99 ? `${fixed(beta, 4)} c` : `c − ${formatSpeed(C * oneMinusBeta)}`;
