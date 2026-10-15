@@ -1,3 +1,4 @@
+import { useFlightAudio } from './audio/useFlightAudio';
 import { FlightControls } from './components/FlightControls';
 import { MainViewport } from './components/MainViewport';
 import { RearCameraPIP } from './components/RearCameraPIP';
@@ -7,12 +8,14 @@ import { useFlightLoop } from './store/useFlightLoop';
 
 export default function App() {
   useFlightLoop();
+  useFlightAudio();
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-black select-none">
       <MainViewport className="absolute inset-0" />
-      {/* Áreas vazias deixam o arrasto passar para o para-brisa. */}
-      <div className="pointer-events-none absolute inset-0 flex flex-col justify-between gap-3 p-3">
+      {/* Áreas vazias deixam o arrasto passar para o para-brisa. O padding respeita
+          entalhe e barra de gestos quando o PWA roda em tela cheia. */}
+      <div className="pointer-events-none absolute inset-0 flex flex-col justify-between gap-3 pt-[max(0.75rem,env(safe-area-inset-top))] pr-[max(0.75rem,env(safe-area-inset-right))] pb-[max(0.75rem,env(safe-area-inset-bottom))] pl-[max(0.75rem,env(safe-area-inset-left))]">
         <div className="flex items-start justify-between gap-3">
           <TelescopePIP className="pointer-events-auto w-[44%] max-w-xs" />
           <RearCameraPIP className="pointer-events-auto w-[44%] max-w-xs" />

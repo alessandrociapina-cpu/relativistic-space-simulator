@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useAudioSettings } from '../audio/audioSettings';
 import { log10GammaFromRapidity, rapidityFromLog10Gamma } from '../physics/RelativityEngine';
 import { DEFAULT_ACCEL_G, DESTINATION_LIST, type DestinationId } from '../physics/destinations';
 import {
@@ -102,6 +103,7 @@ function Timeline() {
   const tau = useFlightStore((s) => s.tau);
   const tauTotal = useFlightStore((s) => s.profile.tauTotal);
   const playing = useFlightStore((s) => s.playing);
+  const countingDown = useFlightStore((s) => s.ignitionCountdownS !== null);
   const togglePlay = useFlightStore((s) => s.togglePlay);
   const seek = useFlightStore((s) => s.seek);
   const arrived = tau >= tauTotal;
@@ -113,7 +115,15 @@ function Timeline() {
         className="w-24 shrink-0 rounded-sm bg-cyan-400/80 px-2 py-1 text-[11px] tracking-wider text-black hover:bg-cyan-300"
         onClick={togglePlay}
       >
-        {playing ? '❚❚ Pausar' : arrived ? '↺ Repetir' : tau > 0 ? '▶ Retomar' : '▶ Partida'}
+        {countingDown
+          ? '✕ Abortar'
+          : playing
+            ? '❚❚ Pausar'
+            : arrived
+              ? '↺ Repetir'
+              : tau > 0
+                ? '▶ Retomar'
+                : '▶ Partida'}
       </button>
       <input
         type="range"
@@ -194,6 +204,22 @@ function CruiseControl() {
   );
 }
 
+function SoundToggle() {
+  const enabled = useAudioSettings((s) => s.enabled);
+  const toggle = useAudioSettings((s) => s.toggle);
+  return (
+    <button
+      type="button"
+      aria-pressed={enabled}
+      title={enabled ? 'Silenciar motor e alertas' : 'Ligar motor e alertas sonoros'}
+      className="px-1 text-slate-400 hover:text-slate-200"
+      onClick={toggle}
+    >
+      {enabled ? '🔊 Som' : '🔇 Mudo'}
+    </button>
+  );
+}
+
 /** Painel de voo: Autopilot (Flip-and-Burn) ou Cruzeiro Livre (§7). */
 export function FlightControls({ className = '' }: { className?: string }) {
   const mode = useFlightStore((s) => s.mode);
@@ -206,14 +232,17 @@ export function FlightControls({ className = '' }: { className?: string }) {
     >
       <div className="flex items-center justify-between gap-2">
         <ModeToggle />
-        <button
-          type="button"
-          aria-expanded={open}
-          className="px-1 text-slate-400 hover:text-slate-200"
-          onClick={() => setOpen((o) => !o)}
-        >
-          {open ? 'Ocultar ▾' : 'Controles ▴'}
-        </button>
+        <div className="flex items-center gap-2">
+          <SoundToggle />
+          <button
+            type="button"
+            aria-expanded={open}
+            className="px-1 text-slate-400 hover:text-slate-200"
+            onClick={() => setOpen((o) => !o)}
+          >
+            {open ? 'Ocultar ▾' : 'Controles ▴'}
+          </button>
+        </div>
       </div>
       {open &&
         (mode === 'autopilot' ? (

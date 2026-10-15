@@ -13,6 +13,15 @@ import {
   type DestinationId,
 } from '../physics/destinations';
 import { computeCriticalWindows, firstWindowStartingIn, type CriticalWindow } from '../physics/criticalEvents';
+import {
+  COUNTDOWN_FROM_S,
+  computeMilestones,
+  detectFlightEvents,
+  emitFlightEvents,
+  type FlightEvent,
+  type Milestone,
+  type MilestoneKind,
+} from './flightEvents';
 
 // Estado cinemático global em 64 bits. Os monitores 3D leem com
 // `useFlightStore.getState()` dentro do useFrame, sem re-render do React; o
@@ -28,16 +37,19 @@ export type TimeScale = (typeof TIME_SCALES)[number];
 export const MAX_LOG10_GAMMA = 7.5;
 export const MAX_MANUAL_ETA = rapidityFromLog10Gamma(MAX_LOG10_GAMMA);
 
-interface FlightStore {
+export interface FlightStore {
   readonly mode: FlightMode;
   readonly destination: Destination;
   /** Aceleração própria em múltiplos de g₀. */
   readonly accelG: number;
   readonly profile: MissionProfile;
   readonly criticalWindows: readonly CriticalWindow[];
+  readonly milestones: readonly Milestone[];
   /** Tempo próprio do Autopilot (s). */
   readonly tau: number;
   readonly playing: boolean;
+  /** Segundos reais até a ignição durante a contagem regressiva; `null` fora dela. */
+  readonly ignitionCountdownS: number | null;
   readonly timeScale: TimeScale;
   /** Reduz M_τ para 1x ao entrar em um evento crítico. */
   readonly autoStepDown: boolean;
@@ -49,6 +61,7 @@ interface FlightStore {
   setMode: (mode: FlightMode) => void;
   setDestination: (id: DestinationId) => void;
   setAccelG: (accelG: number) => void;
+  /** Partida (com contagem regressiva a partir de τ = 0), pausa, retomada ou aborto da contagem. */
   togglePlay: () => void;
   seek: (tau: number) => void;
   setTimeScale: (timeScale: TimeScale) => void;
@@ -68,15 +81,24 @@ function deriveFlight(profile: MissionProfile, tau: number, mode: FlightMode, ma
 /** Nova missão parada no instante da partida. */
 function newMission(destination: Destination, accelG: number) {
   const profile = destinationMissionProfile(destination, accelG);
+  const criticalWindows = computeCriticalWindows(profile);
   return {
     destination,
     accelG,
     profile,
-    criticalWindows: computeCriticalWindows(profile),
+    criticalWindows,
+    milestones: computeMilestones(profile, criticalWindows),
     tau: 0,
     playing: false,
+    ignitionCountdownS: null,
   };
 }
+
+const countdown = (target: MilestoneKind, secondsLeft: number): FlightEvent => ({
+  type: 'countdown',
+  target,
+  secondsLeft,
+});
 
 export const useFlightStore = create<FlightStore>()((set, get) => {
   /** Aplica `patch` e recalcula o snapshot `flight`. */
@@ -100,16 +122,25 @@ export const useFlightStore = create<FlightStore>()((set, get) => {
       // O Cruzeiro Livre começa na rapidez atual e congela posição e relógios.
       update(
         mode === 'manual'
-          ? { mode, playing: false, manualEta: Math.min(get().flight.eta, MAX_MANUAL_ETA) }
+          ? {
+              mode,
+              playing: false,
+              ignitionCountdownS: null,
+              manualEta: Math.min(get().flight.eta, MAX_MANUAL_ETA),
+            }
           : { mode },
       );
     },
     setDestination: (id) => update(newMission(DESTINATIONS[id], get().accelG)),
     setAccelG: (accelG) => update(newMission(get().destination, accelG)),
     togglePlay: () => {
-      const { playing, tau, profile } = get();
-      if (playing) update({ playing: false });
-      else update({ playing: true, tau: tau >= profile.tauTotal ? 0 : tau });
+      const { playing, ignitionCountdownS, tau, profile } = get();
+      if (ignitionCountdownS !== null) return update({ ignitionCountdownS: null });
+      if (playing) return update({ playing: false });
+      if (tau > 0 && tau < profile.tauTotal) return update({ playing: true });
+      // Partida (ou repetição): contagem regressiva antes da ignição.
+      update({ tau: 0, ignitionCountdownS: COUNTDOWN_FROM_S });
+      emitFlightEvents([countdown('ignition', COUNTDOWN_FROM_S)]);
     },
     seek: (tau) => update({ tau: clamp(tau, 0, get().profile.tauTotal) }),
     setTimeScale: (timeScale) => set({ timeScale }),
@@ -118,7 +149,26 @@ export const useFlightStore = create<FlightStore>()((set, get) => {
 
     tick: (dtRealS) => {
       const s = get();
-      if (s.mode !== 'autopilot' || !s.playing) return;
+      if (s.mode !== 'autopilot') return;
+
+      if (s.ignitionCountdownS !== null) {
+        // Contagem em segundos reais, independente de M_τ.
+        const left = s.ignitionCountdownS - dtRealS;
+        const events: FlightEvent[] = [];
+        for (let n = 1; n < COUNTDOWN_FROM_S; n++) {
+          if (s.ignitionCountdownS > n && left <= n) events.push(countdown('ignition', n));
+        }
+        if (left <= 0) {
+          set({ ignitionCountdownS: null, playing: true });
+          events.push({ type: 'milestone', kind: 'ignition' });
+        } else {
+          set({ ignitionCountdownS: left });
+        }
+        emitFlightEvents(events);
+        return;
+      }
+
+      if (!s.playing) return;
       let tau = Math.min(s.tau + dtRealS * s.timeScale, s.profile.tauTotal);
       let timeScale = s.timeScale;
       if (s.autoStepDown && timeScale > 1) {
@@ -130,6 +180,7 @@ export const useFlightStore = create<FlightStore>()((set, get) => {
         }
       }
       update({ tau, timeScale, playing: tau < s.profile.tauTotal });
+      emitFlightEvents(detectFlightEvents(s.milestones, s.tau, tau, s.timeScale));
     },
   };
 });

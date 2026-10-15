@@ -37,6 +37,7 @@ export function TelemetryHUD({ className = '' }: { className?: string }) {
   const mode = useFlightStore((s) => s.mode);
   const windows = useFlightStore((s) => s.criticalWindows);
   const tauHalf = useFlightStore((s) => s.profile.tauHalf);
+  const ignitionCountdownS = useFlightStore((s) => s.ignitionCountdownS);
 
   const cmbVisible = flight.gamma >= CMB_VISIBLE_GAMMA.min && flight.gamma <= CMB_VISIBLE_GAMMA.max;
   const preFlip =
@@ -49,6 +50,11 @@ export function TelemetryHUD({ className = '' }: { className?: string }) {
     >
       <div className="mb-1 flex flex-wrap items-center gap-2 text-[10px] tracking-widest uppercase">
         <span className="text-cyan-300">{PHASE_LABEL[flight.phase]}</span>
+        {ignitionCountdownS !== null && (
+          <span className="rounded-sm bg-cyan-300 px-1.5 text-black">
+            Ignição em {Math.ceil(ignitionCountdownS)}
+          </span>
+        )}
         {cmbVisible && (
           <span className="rounded-sm bg-amber-400/90 px-1.5 text-black">CMB no visível</span>
         )}

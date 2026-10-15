@@ -12,7 +12,9 @@ Simulador interativo de viagem espacial relativística em primeira pessoa (3D/We
 - **UI & Estado:** React 18 + Zustand (gerenciamento do estado cinemático de 64 bits fora do ciclo de re-render pesado do React) + TailwindCSS (HUD, telemetria e controles).
 - **Renderização 3D:** Three.js + `@react-three/fiber` + `@react-three/drei` + `@react-three/postprocessing` (efeito de Bloom HDR para ofuscamento da CMB e estrelas).
 - **Testes:** Vitest para validação matemática do motor relativístico (`RelativityEngine.test.ts`).
-- **Deploy:** GitHub Pages via GitHub Actions (`vite.config.ts` configurado com `base: './'`).
+- **Áudio:** Web Audio API pura (sem arquivos de som): motor procedural e alertas de contagem regressiva.
+- **PWA:** `vite-plugin-pwa` (manifest + service worker Workbox que pré-carrega o app para uso offline). Ícones em `public/icons/`.
+- **Deploy:** GitHub Pages via GitHub Actions (`vite.config.ts` configurado com `base: './'`). O workflow `.github/workflows/deploy.yml` roda testes e build em todo PR e publica a cada push na `main`. Pré-requisito: Settings → Pages → Source: "GitHub Actions".
 ---
 ## 3. Regras Inegociáveis de Precisão Numérica (64-bit CPU -> 32-bit GPU)
 ### 3.1 Proibição de `v/c` como Variável de Estado Primária
@@ -238,7 +240,13 @@ void main() {
 ```text
 relativistic-space-simulator/
 ├── .github/workflows/deploy.yml   # CI/CD automático para GitHub Pages
+├── public/icons/                  # Ícones do PWA (SVG + PNG 192/512/maskable/apple-touch)
 ├── src/
+│   ├── audio/
+│   │   ├── FlightAudio.ts         # Sintetizador Web Audio: motor e alertas
+│   │   ├── engineSound.ts         # Timbre do motor em função de γ e do empuxo + teste
+│   │   ├── audioSettings.ts       # Som ligado/mudo (persistido no localStorage)
+│   │   └── useFlightAudio.ts      # Liga o áudio ao store e aos eventos de voo
 │   ├── physics/
 │   │   ├── RelativityEngine.ts    # Cinemática hiperbólica 64-bit e uniforms
 │   │   ├── RelativityEngine.test.ts # Testes unitários Vitest validando os marcos do vídeo
@@ -259,6 +267,7 @@ relativistic-space-simulator/
 │   │   └── SpectrumAnalyzer.tsx   # Gráfico Canvas 2D do pico de Planck da CMB vs. faixa visível
 │   ├── store/
 │   │   ├── useFlightStore.ts      # Estado global e loop de tempo próprio com Auto-Step Down + teste
+│   │   ├── flightEvents.ts        # Marcos do voo e contagens regressivas + teste
 │   │   └── useFlightLoop.ts       # requestAnimationFrame que chama tick(dt)
 │   ├── ui/
 │   │   └── format.ts              # Formatação pt-BR (relógios, distâncias, γ, c − v) + teste
@@ -280,6 +289,10 @@ relativistic-space-simulator/
    - O Auto-Step Down age na **entrada** de cada janela crítica (a da CMB acontece na aceleração e na frenagem). Se um frame longo pularia o início da janela, $\tau$ é posicionado exatamente nele. Dentro da janela, o usuário pode voltar a acelerar.
    - O Cruzeiro Livre começa na rapidez atual, pausa o Autopilot e congela a posição e os relógios. Só $\eta$ muda: Doppler, aberração, $\gamma$ e $L_{\text{contraída}}$.
    - Trocar o destino ou $\alpha$ reinicia a missão parada em $\tau = 0$.
+4. **Áudio procedural:**
+   - **Motor:** ruído marrom filtrado, zumbido dente-de-serra e sub-harmônico. O empuxo (Autopilot rodando, na aceleração ou na frenagem) liga o ronco; $\log_{10}\gamma$ sobe o tom e abre o filtro, saturando em $\gamma = 10^7$. No flip, o motor corta por 0,7 s.
+   - **Contagem regressiva:** a partida tem 3 s reais de contagem (o botão aborta). Antes de cada marco em voo (entrada da CMB no visível, na aceleração e na frenagem; flip; chegada), soam bipes quando o tempo **real** restante, $(\tau_{\text{marco}} - \tau)/M_\tau$, cruza 3, 2 e 1 s. Cada marco tem um som próprio.
+   - O loop (`tick`) emite os eventos e o áudio só os toca, então o scrub não dispara alertas. O áudio é liberado no primeiro gesto do usuário, como os navegadores exigem.
 ---
 ## 8. Critérios de Aceite (Testes Unitários Obrigatórios)
 O arquivo `src/physics/RelativityEngine.test.ts` deve passar nos seguintes testes antes de considerar o motor concluído:

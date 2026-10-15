@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { DEFAULT_ACCEL_G } from '../physics/destinations';
+import { COUNTDOWN_FROM_S, onFlightEvent, type FlightEvent } from './flightEvents';
 import { MAX_MANUAL_ETA, useFlightStore } from './useFlightStore';
 
 const initialState = useFlightStore.getState();
@@ -10,6 +11,25 @@ beforeEach(() => useFlightStore.setState(initialState, true));
 /** Roda o loop em passos de `dt` segundos reais até `until` (ou o limite de passos). */
 function run(dt: number, steps: number, until: () => boolean = () => false) {
   for (let i = 0; i < steps && !until(); i++) store().tick(dt);
+}
+
+/** Partida a partir de τ = 0, pulando a contagem regressiva. */
+function launch() {
+  store().togglePlay();
+  store().tick(COUNTDOWN_FROM_S);
+  expect(store().playing).toBe(true);
+}
+
+/** Captura os eventos emitidos durante `fn`. */
+function captureEvents(fn: () => void): FlightEvent[] {
+  const events: FlightEvent[] = [];
+  const off = onFlightEvent((e) => events.push(e));
+  try {
+    fn();
+  } finally {
+    off();
+  }
+  return events;
 }
 
 describe('estado inicial', () => {
@@ -35,23 +55,103 @@ describe('loop de tempo próprio', () => {
 
   it('avança dt × M_τ e atualiza o snapshot', () => {
     store().setTimeScale(5);
-    store().togglePlay();
+    launch();
     store().tick(0.5);
     expect(store().tau).toBe(2.5);
     expect(store().flight.tau).toBe(2.5);
     expect(store().flight.gamma).toBeGreaterThan(1);
   });
 
-  it('para na chegada e Repetir recomeça do zero', () => {
+  it('para na chegada e Repetir recomeça do zero com nova contagem', () => {
     store().setAutoStepDown(false);
     store().setTimeScale(100);
-    store().togglePlay();
+    launch();
     run(0.1, 1000);
     expect(store().tau).toBe(store().profile.tauTotal);
     expect(store().playing).toBe(false);
     expect(store().flight.phase).toBe('arrived');
     store().togglePlay();
-    expect(store()).toMatchObject({ tau: 0, playing: true });
+    expect(store()).toMatchObject({ tau: 0, playing: false, ignitionCountdownS: COUNTDOWN_FROM_S });
+  });
+
+  it('pausar e retomar no meio do voo não repete a contagem', () => {
+    launch();
+    store().tick(1);
+    store().togglePlay();
+    expect(store().playing).toBe(false);
+    store().togglePlay();
+    expect(store()).toMatchObject({ playing: true, ignitionCountdownS: null, tau: 1 });
+  });
+});
+
+describe('contagem regressiva e marcos (alertas sonoros)', () => {
+  it('ignição: 3, 2, 1 em segundos reais (mesmo a 100x) e então a partida', () => {
+    store().setTimeScale(100);
+    const events = captureEvents(() => {
+      store().togglePlay();
+      run(0.1, 29);
+      expect(store()).toMatchObject({ tau: 0, playing: false });
+      store().tick(0.1);
+    });
+    expect(store()).toMatchObject({ playing: true, ignitionCountdownS: null, tau: 0 });
+    expect(events).toEqual([
+      { type: 'countdown', target: 'ignition', secondsLeft: 3 },
+      { type: 'countdown', target: 'ignition', secondsLeft: 2 },
+      { type: 'countdown', target: 'ignition', secondsLeft: 1 },
+      { type: 'milestone', kind: 'ignition' },
+    ]);
+  });
+
+  it('o botão durante a contagem aborta a partida', () => {
+    store().togglePlay();
+    store().tick(1);
+    store().togglePlay();
+    expect(store()).toMatchObject({ ignitionCountdownS: null, playing: false, tau: 0 });
+    store().tick(5);
+    expect(store().playing).toBe(false);
+  });
+
+  it('flip a 1x: bipes 3, 2, 1 e o marco no instante τ½', () => {
+    store().setAutoStepDown(false);
+    store().seek(store().profile.tauHalf - 3.5);
+    store().togglePlay();
+    const events = captureEvents(() => run(0.1, 40));
+    expect(events.filter((e) => e.type === 'countdown' || e.kind === 'flip')).toEqual([
+      { type: 'countdown', target: 'flip', secondsLeft: 3 },
+      { type: 'countdown', target: 'flip', secondsLeft: 2 },
+      { type: 'countdown', target: 'flip', secondsLeft: 1 },
+      { type: 'milestone', kind: 'flip' },
+    ]);
+  });
+
+  it('missão completa: ignição, CMB, flip, CMB e chegada, nessa ordem', () => {
+    store().setAutoStepDown(false);
+    store().setTimeScale(20);
+    const events = captureEvents(() => {
+      store().togglePlay();
+      run(0.1, 1000, () => store().flight.phase === 'arrived');
+    });
+    expect(events.filter((e) => e.type === 'milestone').map((e) => e.kind)).toEqual([
+      'ignition',
+      'cmb-entry',
+      'flip',
+      'cmb-entry',
+      'arrival',
+    ]);
+    // cada bipe aponta para o próximo marco
+    let expectedTarget: string | null = null;
+    for (const e of [...events].reverse()) {
+      if (e.type === 'milestone') expectedTarget = e.kind;
+      else expect(e.target).toBe(expectedTarget);
+    }
+  });
+
+  it('scrub não dispara marcos nem bipes', () => {
+    const events = captureEvents(() => {
+      store().seek(store().profile.tauHalf + 1);
+      store().seek(store().profile.tauTotal);
+    });
+    expect(events).toEqual([]);
   });
 });
 
