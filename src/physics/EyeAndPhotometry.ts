@@ -72,9 +72,29 @@ export function visibleLuxAhead(eta: number): number {
   return table[i]! * (1 - f) + table[i + 1]! * f;
 }
 
+let luxPeak: { readonly lux: number; readonly eta: number } | null = null;
+
+function getLuxPeak() {
+  if (!luxPeak) {
+    const table = getLuxTable();
+    let peak = 0;
+    for (let i = 1; i < table.length; i++) if (table[i]! > table[peak]!) peak = i;
+    luxPeak = { lux: table[peak]!, eta: peak * LUX_ETA_STEP };
+  }
+  return luxPeak;
+}
+
 /** Maior iluminância que a CMB pode produzir à frente, em qualquer γ (≈ 11 069 lux). */
 export function peakCmbLux(): number {
-  return getLuxTable().reduce((a, b) => Math.max(a, b), 0);
+  return getLuxPeak().lux;
+}
+
+/**
+ * Rapidez do pico de iluminância (γ ≈ 6 955). Acima dela o cone quente à frente
+ * encolhe (∝ 1/γ²) mais rápido do que o brilho visível cresce (∝ T), e E cai.
+ */
+export function peakCmbLuxRapidity(): number {
+  return getLuxPeak().eta;
 }
 
 // ── Olho do piloto ───────────────────────────────────────────────────────────
@@ -205,6 +225,7 @@ export interface PhotometryAndEyeState {
   /** Instante da ida com a mesma luz de agora (τ_total − τ), na frenagem. */
   readonly whiteoutTau: number | null;
   readonly whiteoutRetinaStops: number | null;
+  readonly whiteoutPupilMm: number | null;
   readonly eyeSensitivity: number;
   readonly glareIntensity: number;
   readonly glareColor: readonly [number, number, number];
@@ -230,13 +251,14 @@ export function computePhotometryAndEyeState(
   let dimmerFactor = 1;
   let whiteoutTau: number | null = null;
   let whiteoutRetinaStops: number | null = null;
+  let whiteoutPupilMm: number | null = null;
   if (flight.phase === 'decelerating') {
     // E(τ) = E(τ_total − τ): a mesma luz da ida, vista com o olho de agora.
     whiteoutTau = profile.tauTotal - flight.tau;
     const mirrorStops = sample(timeline.stops, timeline, whiteoutTau);
-    const mirrorPupil = sample(timeline.pupilMm, timeline, whiteoutTau);
+    whiteoutPupilMm = sample(timeline.pupilMm, timeline, whiteoutTau);
     whiteoutRetinaStops = -mirrorStops;
-    dimmerFactor = 2 ** (stops - mirrorStops) * (mirrorPupil / pupil) ** 2;
+    dimmerFactor = 2 ** (stops - mirrorStops) * (whiteoutPupilMm / pupil) ** 2;
   }
 
   const eyeSensitivity = 2 ** (-SCENE_ADAPTATION * stops);
@@ -253,6 +275,7 @@ export function computePhotometryAndEyeState(
     dimmerFactor,
     whiteoutTau,
     whiteoutRetinaStops,
+    whiteoutPupilMm,
     eyeSensitivity,
     glareIntensity,
     glareColor: blackbodyLinearRgb(cmbTempAheadK),

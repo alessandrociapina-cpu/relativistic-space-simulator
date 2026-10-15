@@ -155,6 +155,55 @@ describe('contagem regressiva e marcos (alertas sonoros)', () => {
   });
 });
 
+describe('explicações (modo Explicar)', () => {
+  it('anuncia cada efeito quando ele começa em voo', () => {
+    launch();
+    store().tick(0.1);
+    expect(store().insight).toBe('kinematics');
+    run(0.1, 200, () => store().insight === 'aberration');
+    expect(store().flight.beta).toBeCloseTo(0.5, 2);
+    expect(store().announcedEffects).toEqual(['kinematics', 'aberration']);
+  });
+
+  it('uma vez por missão: a CMB que volta ao visível na frenagem não é anunciada de novo', () => {
+    store().setAutoStepDown(false);
+    store().setTimeScale(20);
+    launch();
+    const seen: string[] = [];
+    run(0.1, 1000, () => {
+      const { insight } = store();
+      if (insight !== null && seen.at(-1) !== insight) seen.push(insight);
+      return store().flight.phase === 'arrived';
+    });
+    expect(seen.filter((id) => id === 'cmb-visible')).toHaveLength(1);
+    expect(store().insight).toBe('arrival');
+    expect(new Set(store().announcedEffects).size).toBe(store().announcedEffects.length);
+  });
+
+  it('o scrub não anuncia e dispensa o cartão', () => {
+    launch();
+    store().tick(0.1);
+    store().seek(200);
+    expect(store().insight).toBeNull();
+    expect(store().announcedEffects).toEqual(['kinematics']);
+  });
+
+  it('nova partida e nova missão zeram os anúncios', () => {
+    launch();
+    run(0.1, 120);
+    expect(store().announcedEffects.length).toBeGreaterThan(1);
+    store().togglePlay(); // pausa
+    store().seek(store().profile.tauTotal);
+    store().togglePlay(); // Repetir
+    expect(store()).toMatchObject({ insight: null, announcedEffects: [] });
+    store().tick(COUNTDOWN_FROM_S);
+    store().tick(0.1);
+    expect(store().announcedEffects).toEqual(['kinematics']);
+    store().setDestination('sirius');
+    expect(store()).toMatchObject({ insight: null, announcedEffects: [] });
+  });
+});
+
 describe('Auto-Step Down (§7.2)', () => {
   it('reduz para 1x exatamente na entrada da janela da CMB', () => {
     const [cmb] = store().criticalWindows;

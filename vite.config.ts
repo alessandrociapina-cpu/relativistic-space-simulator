@@ -38,7 +38,8 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,webmanifest}'],
+        // woff2: fontes do KaTeX nas fórmulas das explicações (os navegadores atuais não pedem woff/ttf).
+        globPatterns: ['**/*.{js,css,html,svg,png,webmanifest,woff2}'],
         // O bundle principal (Three.js + R3F) passa de 1 MB.
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         cleanupOutdatedCaches: true,

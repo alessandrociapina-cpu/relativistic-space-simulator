@@ -3,6 +3,7 @@ import { blackbodyCssColor, planckSpectralRadiance } from '../physics/blackbody'
 import { WIEN_NM_K, type EyeTimeline } from '../physics/EyeAndPhotometry';
 import { AU_M } from '../physics/sky';
 import { useFlightStore } from '../store/useFlightStore';
+import { useExplainSettings } from '../ui/explainSettings';
 import { formatSpaceNumber } from '../ui/format';
 import { HOLOGRAM_COUNTDOWN_S, selectHologramMode, type HologramMode } from '../ui/hologramMode';
 
@@ -299,6 +300,8 @@ export function CenterHologramProjector() {
   const destination = useFlightStore((s) => s.destination);
   const timeline = useFlightStore((s) => s.eyeTimeline);
   const p = useFlightStore((s) => s.photometry);
+  // O painel de efeitos traz o mesmo conteúdo, com as fórmulas, e precisa da altura.
+  const effectsPanelOpen = useExplainSettings((s) => s.panelOpen);
 
   const sunDistanceAu = (AU_M + flight.positionM) / AU_M;
   const hologram: HologramMode = selectHologramMode({
@@ -309,7 +312,7 @@ export function CenterHologramProjector() {
     cmbTempK: p.cmbTempAheadK,
     cmbPeakNm: p.cmbWienPeakNm,
   });
-  if (hologram === 'none') return null;
+  if (hologram === 'none' || effectsPanelOpen) return null;
 
   let content: ReactNode;
   switch (hologram) {
