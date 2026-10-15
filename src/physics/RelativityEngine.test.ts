@@ -9,6 +9,9 @@ import {
   computeMissionProfile,
   computeNoBrakeProperTime,
   computeShaderKinematics,
+  log10GammaFromRapidity,
+  rapidityFromLog10Gamma,
+  withRapidity,
 } from './RelativityEngine';
 import { DESTINATIONS, DESTINATION_LIST, destinationMissionProfile } from './destinations';
 
@@ -157,6 +160,34 @@ describe('perfil Flip-and-Burn para Proxima', () => {
       if (s.tau <= proxima.tauHalf) expect(s.gamma).toBeGreaterThan(prev.gamma);
       prev = s;
     }
+  });
+});
+
+describe('Cruzeiro Livre (§7.1)', () => {
+  it('withRapidity mantém posição e relógios e recalcula γ e L_contraída', () => {
+    const base = computeFlightState(proxima, 100);
+    const cruise = withRapidity(base, 10);
+    expect(cruise).toMatchObject({
+      phase: 'cruise',
+      eta: 10,
+      tau: base.tau,
+      positionM: base.positionM,
+      earthTimeS: base.earthTimeS,
+      restDistanceRemainingM: base.restDistanceRemainingM,
+    });
+    expect(cruise.gamma).toBe(Math.cosh(10));
+    expect(cruise.oneMinusBeta).toBe(computeShaderKinematics(10).uOneMinusBeta);
+    expect(cruise.contractedDistanceRemainingM).toBe(base.restDistanceRemainingM / Math.cosh(10));
+  });
+
+  it('log₁₀γ ↔ η: ida e volta exatas, inclusive perto de γ = 1', () => {
+    expect(rapidityFromLog10Gamma(0)).toBe(0);
+    expect(rapidityFromLog10Gamma(7.5)).toBeCloseTo(Math.acosh(10 ** 7.5), 12);
+    for (const s of [1e-12, 1e-6, 0.01, 1, 3.5, 7.5]) {
+      expect(relErr(log10GammaFromRapidity(rapidityFromLog10Gamma(s)), s)).toBeLessThan(1e-9);
+    }
+    // η = 18 ↔ log₁₀γ ≈ 7,5 (as duas faixas da §7.1 coincidem)
+    expect(log10GammaFromRapidity(18)).toBeCloseTo(7.52, 2);
   });
 });
 

@@ -243,6 +243,7 @@ relativistic-space-simulator/
 │   │   ├── RelativityEngine.ts    # Cinemática hiperbólica 64-bit e uniforms
 │   │   ├── RelativityEngine.test.ts # Testes unitários Vitest validando os marcos do vídeo
 │   │   ├── destinations.ts        # Catálogo de estrelas e galáxias
+│   │   ├── criticalEvents.ts      # Janelas críticas do Auto-Step Down (§7.2) + teste
 │   │   └── sky.ts                 # Raios angulares do Sol e do alvo (64 bits) + sky.test.ts
 │   ├── shaders/
 │   │   ├── RelativisticSky.vert
@@ -257,7 +258,10 @@ relativistic-space-simulator/
 │   │   ├── TelemetryHUD.tsx       # Relógios (Nave vs. Terra), gamma, distância contraída
 │   │   └── SpectrumAnalyzer.tsx   # Gráfico Canvas 2D do pico de Planck da CMB vs. faixa visível
 │   ├── store/
-│   │   └── useFlightStore.ts      # Estado global e loop de tempo próprio com Auto-Step Down
+│   │   ├── useFlightStore.ts      # Estado global e loop de tempo próprio com Auto-Step Down + teste
+│   │   └── useFlightLoop.ts       # requestAnimationFrame que chama tick(dt)
+│   ├── ui/
+│   │   └── format.ts              # Formatação pt-BR (relógios, distâncias, γ, c − v) + teste
 │   ├── App.tsx
 │   └── main.tsx
 ├── CLAUDE.md
@@ -272,6 +276,10 @@ relativistic-space-simulator/
 2. **Multiplicador de Tempo Próprio ($M_\tau$) com *Auto-Step Down*:**
    - Botões de escala de tempo próprio: `0.1x`, `1x (Real Time)`, `5x`, `20x`, `100x`.
    - Opção "Reduzir automaticamente para 1x em eventos críticos" (quando a CMB atravessa o espectro visível em $\gamma \in [400, 15000]$ e nos 10 segundos finais antes do *Flip* de desaceleração).
+3. **Comportamento implementado:**
+   - O Auto-Step Down age na **entrada** de cada janela crítica (a da CMB acontece na aceleração e na frenagem). Se um frame longo pularia o início da janela, $\tau$ é posicionado exatamente nele. Dentro da janela, o usuário pode voltar a acelerar.
+   - O Cruzeiro Livre começa na rapidez atual, pausa o Autopilot e congela a posição e os relógios. Só $\eta$ muda: Doppler, aberração, $\gamma$ e $L_{\text{contraída}}$.
+   - Trocar o destino ou $\alpha$ reinicia a missão parada em $\tau = 0$.
 ---
 ## 8. Critérios de Aceite (Testes Unitários Obrigatórios)
 O arquivo `src/physics/RelativityEngine.test.ts` deve passar nos seguintes testes antes de considerar o motor concluído:

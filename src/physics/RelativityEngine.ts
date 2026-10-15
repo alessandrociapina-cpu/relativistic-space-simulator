@@ -101,7 +101,8 @@ export function computeMissionProfile(distanceM: number, properAccel: number): M
   };
 }
 
-export type FlightPhase = 'accelerating' | 'decelerating' | 'arrived';
+/** `cruise`: Cruzeiro Livre, com rapidez imposta pelo usuário (ver `withRapidity`). */
+export type FlightPhase = 'accelerating' | 'decelerating' | 'arrived' | 'cruise';
 
 export interface FlightState {
   /** Tempo próprio de bordo τ (s), limitado a [0, τ_total]. */
@@ -164,6 +165,33 @@ export function computeFlightState(profile: MissionProfile, tau: number): Flight
     restDistanceRemainingM,
     contractedDistanceRemainingM: restDistanceRemainingM / k.uGamma,
   };
+}
+
+/**
+ * Cruzeiro Livre (§7.1): mantém a posição e os relógios de `state` e impõe a
+ * rapidez `eta`, recalculando a cinemática e a distância contraída.
+ */
+export function withRapidity(state: FlightState, eta: number): FlightState {
+  const k = computeShaderKinematics(eta);
+  return {
+    ...state,
+    phase: 'cruise',
+    eta,
+    beta: k.uBeta,
+    gamma: k.uGamma,
+    oneMinusBeta: k.uOneMinusBeta,
+    contractedDistanceRemainingM: state.restDistanceRemainingM / k.uGamma,
+  };
+}
+
+/** η a partir de log₁₀γ, sem perder precisão perto de γ = 1 (slider logarítmico). */
+export function rapidityFromLog10Gamma(log10Gamma: number): number {
+  return acosh1p(Math.expm1(log10Gamma * Math.LN10));
+}
+
+/** log₁₀γ a partir de η: inversa de `rapidityFromLog10Gamma`. */
+export function log10GammaFromRapidity(eta: number): number {
+  return Math.log1p(coshm1(eta)) / Math.LN10;
 }
 
 /**
