@@ -13,6 +13,7 @@ Simulador interativo de viagem espacial relativística em primeira pessoa (3D/We
 - **Renderização 3D:** Three.js + `@react-three/fiber` + `@react-three/drei` + `@react-three/postprocessing` (efeito de Bloom HDR para ofuscamento da CMB e estrelas).
 - **Testes:** Vitest para validação matemática do motor relativístico (`RelativityEngine.test.ts`).
 - **Áudio:** Web Audio API pura (sem arquivos de som): motor procedural e alertas de contagem regressiva.
+- **Fórmulas:** KaTeX nas explicações (§10), num chunk carregado à parte (`React.lazy`) para não atrasar o cockpit; as fontes `woff2` entram no pré-cache do PWA.
 - **PWA:** `vite-plugin-pwa` (manifest + service worker Workbox que pré-carrega o app para uso offline). Ícones em `public/icons/`.
 - **Deploy:** GitHub Pages via GitHub Actions (`vite.config.ts` configurado com `base: './'`). O workflow `.github/workflows/deploy.yml` roda testes e build em todo PR e publica a cada push na `main`. Pré-requisito: Settings → Pages → Source: "GitHub Actions".
 ---
@@ -471,6 +472,10 @@ relativistic-space-simulator/
 │   │   ├── RouteMapAndRearMonitor.tsx # Monitor direito: "ROUTE · LOG SCALE" / câmera traseira
 │   │   ├── TelescopePIP.tsx       # Monitor esquerdo: auto-zoom "TELESCOPE · x N", IR / Visível / UV / Raios-X
 │   │   ├── CenterHologramProjector.tsx # Hologramas contextuais no centro inferior (§9)
+│   │   ├── ExplanationCard.tsx    # Cartão do modo Explicar: o efeito que acabou de começar (§10)
+│   │   ├── ActiveEffectsPanel.tsx # Painel de efeitos ativos com explicações e fórmulas (§10)
+│   │   ├── TeX.tsx                # Fórmula TeX renderizada pelo KaTeX
+│   │   ├── useLiveExplainContext.ts # Estado do voo para as explicações, a 4 Hz
 │   │   ├── FlightControls.tsx     # Alternância Modo Missão Flip-and-Burn vs. Modo Manual
 │   │   ├── TelemetryHUD.tsx       # Relógios (Nave vs. Terra), gamma, distância contraída
 │   │   └── SpectrumAnalyzer.tsx   # Gráfico Canvas 2D do pico de Planck da CMB vs. faixa visível
@@ -480,6 +485,9 @@ relativistic-space-simulator/
 │   │   └── useFlightLoop.ts       # requestAnimationFrame que chama tick(dt)
 │   ├── ui/
 │   │   ├── format.ts              # Formatação (relógios, distâncias, γ, c − v, milhares com espaço) + teste
+│   │   ├── tex.ts                 # Números e unidades em TeX (vírgula decimal) + tex.test.ts
+│   │   ├── explanations.ts        # Catálogo de efeitos: critérios físicos, textos e fórmulas (§10) + teste
+│   │   ├── explainSettings.ts     # Modo Explicar (persistido) e painel aberto ao pausar
 │   │   ├── hologramMode.ts        # Seleção automática do holograma + teste
 │   │   └── routeScale.ts          # Escala logarítmica do mapa de rota
 │   ├── App.tsx
@@ -534,3 +542,30 @@ O arquivo `src/physics/RelativityEngine.test.ts` deve passar nos seguintes teste
    4. Espectro da CMB ("PEAK nm"): pico de Wien entre 260 e 980 nm.
    5. Curva de lux: aceleração, $T_{\text{CMB}} \in (15\,000, 180\,000)$ K.
    6. Blueshift do alvo: frenagem, $\gamma \in [8, 220]$.
+
+---
+## 10. Explicações dos Efeitos (Modo Explicar)
+1. **Catálogo** (`src/ui/explanations.ts`): cada efeito tem um critério físico de atividade, válido para qualquer destino e $\alpha$, um resumo, parágrafos de "Saiba mais" e fórmulas em TeX com os valores do instante. Ordem do painel e prioridade do cartão: marcos do instante, depois óptica, depois cinemática.
+
+   | Efeito | Ativo quando | Proxima a 1x (τ) |
+   | :--- | :--- | :--- |
+   | Rapidez η | $\eta > 0$ | 0 s |
+   | Aberração | $\beta \ge 0{,}5$ | 10 s |
+   | Doppler e beaming | $D_{\text{frente}} = e^{\eta} \ge 3$ | 21 s |
+   | Dilatação do tempo | $\gamma \ge 3$ | 34 s |
+   | Contração de Lorentz | $\gamma \ge 10$ | 57 s |
+   | Sistema Solar | aceleração, 5,2–120 UA do Sol | 103 s |
+   | CMB no visível | $\gamma \in [400, 15\,000]$ | 127 s |
+   | Ofuscamento | $E \ge 1\,500$ lux | 147 s |
+   | Cone quente | $\gamma$ acima do pico de lux ($\approx 6\,955$) | 181 s |
+   | CMB em raios X | pico de Wien $\le 10$ nm | 220 s |
+   | Flip | 10 s antes de $\tau_{1/2}$ | 289 s |
+   | Frenagem | fase de frenagem | 299 s |
+   | Olhos adaptados | frenagem, $T_{\text{CMB}} \in (5\,000, 60\,000)$ K | 409 s |
+   | Alvo azulado | frenagem, $\gamma \in [8, 220]$ | 483 s |
+   | Chegada | fase de chegada | 599 s |
+   | Missão | sempre no Autopilot (só no painel) | — |
+
+2. **Cartão** (botão "💡 Explicar" ao lado da partida, ligado por padrão e persistido): o loop (`tick`) anuncia cada efeito na **transição** inativo → ativo, uma vez por missão, só no Autopilot. O scrub não anuncia e dispensa o cartão. A nova partida e a troca de missão zeram os anúncios. Cada cartão fica ≥ 6 s reais na tela (a 20x/100x mostra o mais recente ao fim do prazo). Ligar o modo no meio do voo mostra o efeito mais próprio do instante.
+3. **Painel de efeitos ativos** (botão "∑ Efeitos", ou automático ao pausar com o modo Explicar ligado; retomar fecha, Esc fecha): todos os efeitos ativos com resumo, fórmulas com os valores atuais e "Saiba mais". Acompanha o scrub e o slider do Cruzeiro Livre a 4 Hz. O efeito vindo do cartão aparece destacado no topo até o instante mudar. Enquanto o painel está aberto, o holograma central se esconde. No celular, o painel ocupa a tela inteira e tem "▶ Retomar".
+4. **Texto pt-BR:** vírgula decimal (`{,}` no TeX), milhares com espaço ("11 069", nunca "11.069") e durações por extenso ("22 min 28 s"). Todas as fórmulas passam no KaTeX em modo estrito em qualquer instante, destino e modo (teste em `explanations.test.ts`).

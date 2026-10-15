@@ -19,6 +19,12 @@ export type HologramMode =
 /** Duração das contagens holográficas antes do flip e da chegada (s de tempo próprio). */
 export const HOLOGRAM_COUNTDOWN_S = 10;
 
+/** "YOUR EYES": temperatura da CMB à frente, na frenagem, em que a luz é a do white-out. */
+export const EYE_HOLOGRAM_CMB_K = { min: 5000, max: 60_000 } as const;
+
+/** Blueshift do alvo: faixa de γ na frenagem. */
+export const BLUESHIFT_HOLOGRAM_GAMMA = { min: 8, max: 220 } as const;
+
 export interface HologramContext {
   readonly mode: FlightMode;
   readonly flight: FlightState;
@@ -45,9 +51,11 @@ export function selectHologramMode({ mode, flight, profile, sunDistanceAu, cmbTe
   if (accelerating && inRange(sunDistanceAu, 5, 32)) return 'solar-system';
   // Na frenagem, o olho tem prioridade enquanto a luz é a mesma do white-out da ida
   // (o instante espelho de τ ≈ 150 s, quando ela parece ~1 260× mais fraca).
-  if (decelerating && cmbTempK > 5000 && cmbTempK < 60_000) return 'eye-adaptation';
+  if (decelerating && cmbTempK > EYE_HOLOGRAM_CMB_K.min && cmbTempK < EYE_HOLOGRAM_CMB_K.max) return 'eye-adaptation';
   if ((accelerating || decelerating) && cmbNearVisible) return 'cmb-spectrum';
   if (accelerating && cmbTempK > 15_000 && cmbTempK < 180_000) return 'lux-curve';
-  if (decelerating && inRange(flight.gamma, 8, 220)) return 'target-blueshift';
+  if (decelerating && inRange(flight.gamma, BLUESHIFT_HOLOGRAM_GAMMA.min, BLUESHIFT_HOLOGRAM_GAMMA.max)) {
+    return 'target-blueshift';
+  }
   return 'none';
 }

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAudioSettings } from '../audio/audioSettings';
+import { useExplainSettings } from '../ui/explainSettings';
 import { log10GammaFromRapidity, rapidityFromLog10Gamma } from '../physics/RelativityEngine';
 import { DEFAULT_ACCEL_G, DESTINATION_LIST, type DestinationId } from '../physics/destinations';
 import {
@@ -125,6 +126,7 @@ function Timeline() {
                 ? '▶ Retomar'
                 : '▶ Partida'}
       </button>
+      <ExplainToggle />
       <input
         type="range"
         aria-label="Linha do tempo do voo (tempo próprio)"
@@ -204,6 +206,49 @@ function CruiseControl() {
   );
 }
 
+/** Modo Explicar: um cartão a cada efeito que começa e o painel de fórmulas ao pausar. */
+function ExplainToggle() {
+  const enabled = useExplainSettings((s) => s.enabled);
+  const setEnabled = useExplainSettings((s) => s.setEnabled);
+  return (
+    <button
+      type="button"
+      aria-pressed={enabled}
+      aria-label="Explicar"
+      title={
+        enabled
+          ? 'Explicações ligadas: um cartão a cada efeito novo e as fórmulas ao pausar'
+          : 'Ligar as explicações dos efeitos relativísticos'
+      }
+      className={`shrink-0 rounded-sm px-2 py-1 text-[11px] tracking-wider transition-colors ${
+        enabled ? 'bg-amber-400/90 text-black hover:bg-amber-300' : 'bg-slate-800/80 text-slate-300 hover:bg-slate-700'
+      }`}
+      onClick={() => setEnabled(!enabled)}
+    >
+      💡<span className="ml-1 hidden sm:inline">Explicar</span>
+    </button>
+  );
+}
+
+/** Abre o painel de efeitos ativos a qualquer momento (também no Cruzeiro Livre). */
+function EffectsButton() {
+  const open = useExplainSettings((s) => s.panelOpen);
+  const openPanel = useExplainSettings((s) => s.openPanel);
+  const closePanel = useExplainSettings((s) => s.closePanel);
+  return (
+    <button
+      type="button"
+      aria-pressed={open}
+      aria-label="Efeitos ativos"
+      title="Efeitos ativos agora, com explicações e fórmulas"
+      className={`px-1 hover:text-slate-200 ${open ? 'text-amber-300' : 'text-slate-400'}`}
+      onClick={() => (open ? closePanel() : openPanel())}
+    >
+      ∑<span className="ml-1 hidden sm:inline">Efeitos</span>
+    </button>
+  );
+}
+
 function SoundToggle() {
   const enabled = useAudioSettings((s) => s.enabled);
   const toggle = useAudioSettings((s) => s.toggle);
@@ -235,6 +280,7 @@ export function FlightControls({ className = '' }: { className?: string }) {
       <div className="flex items-center justify-between gap-2">
         <ModeToggle />
         <div className="flex items-center gap-2">
+          <EffectsButton />
           <SoundToggle />
           <button
             type="button"

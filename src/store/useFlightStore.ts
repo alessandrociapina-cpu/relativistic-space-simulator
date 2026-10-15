@@ -20,6 +20,7 @@ import {
   type PhotometryAndEyeState,
 } from '../physics/EyeAndPhotometry';
 import { computeBodyAngularRadii } from '../physics/sky';
+import { activeEffects, newAnnouncements, type EffectId } from '../ui/explanations';
 import {
   COUNTDOWN_FROM_S,
   computeMilestones,
@@ -68,6 +69,10 @@ export interface FlightStore {
   readonly flight: FlightState;
   /** Luz da CMB à frente, olho do piloto e auto-zoom, no mesmo instante de `flight`. */
   readonly photometry: PhotometryAndEyeState;
+  /** Último efeito que começou em voo (cartão do modo Explicar); `null` se não há ou foi dispensado. */
+  readonly insight: EffectId | null;
+  /** Efeitos já anunciados nesta missão: cada um ganha um cartão por voo. */
+  readonly announcedEffects: readonly EffectId[];
 
   setMode: (mode: FlightMode) => void;
   setDestination: (id: DestinationId) => void;
@@ -78,6 +83,7 @@ export interface FlightStore {
   setTimeScale: (timeScale: TimeScale) => void;
   setAutoStepDown: (on: boolean) => void;
   setManualEta: (eta: number) => void;
+  showInsight: (id: EffectId | null) => void;
   /** Avança o relógio de bordo por `dtRealS` segundos reais (chamado a cada frame). */
   tick: (dtRealS: number) => void;
 }
@@ -97,6 +103,11 @@ function derivePhotometry(
   return computePhotometryAndEyeState(flight, profile, eyeTimeline, targetRadiusRad);
 }
 
+/** Explicações de um voo novo: nenhum efeito anunciado ainda. */
+function newFlightLog(): Pick<FlightStore, 'insight' | 'announcedEffects'> {
+  return { insight: null, announcedEffects: [] };
+}
+
 /** Nova missão parada no instante da partida. */
 function newMission(destination: Destination, accelG: number) {
   const profile = destinationMissionProfile(destination, accelG);
@@ -111,6 +122,7 @@ function newMission(destination: Destination, accelG: number) {
     tau: 0,
     playing: false,
     ignitionCountdownS: null,
+    ...newFlightLog(),
   };
 }
 
@@ -162,13 +174,15 @@ export const useFlightStore = create<FlightStore>()((set, get) => {
       if (playing) return update({ playing: false });
       if (tau > 0 && tau < profile.tauTotal) return update({ playing: true });
       // Partida (ou repetição): contagem regressiva antes da ignição.
-      update({ tau: 0, ignitionCountdownS: COUNTDOWN_FROM_S });
+      update({ tau: 0, ignitionCountdownS: COUNTDOWN_FROM_S, ...newFlightLog() });
       emitFlightEvents([countdown('ignition', COUNTDOWN_FROM_S)]);
     },
-    seek: (tau) => update({ tau: clamp(tau, 0, get().profile.tauTotal) }),
+    // O scrub não anuncia efeitos e dispensa o cartão, que falaria de outro instante.
+    seek: (tau) => update({ tau: clamp(tau, 0, get().profile.tauTotal), insight: null }),
     setTimeScale: (timeScale) => set({ timeScale }),
     setAutoStepDown: (autoStepDown) => set({ autoStepDown }),
     setManualEta: (eta) => update({ manualEta: clamp(eta, 0, MAX_MANUAL_ETA) }),
+    showInsight: (insight) => set({ insight }),
 
     tick: (dtRealS) => {
       const s = get();
@@ -204,6 +218,10 @@ export const useFlightStore = create<FlightStore>()((set, get) => {
       }
       update({ tau, timeScale, playing: tau < s.profile.tauTotal });
       emitFlightEvents(detectFlightEvents(s.milestones, s.tau, tau, s.timeScale));
+
+      // Efeitos que começaram neste passo: o mais próprio do instante vira o cartão.
+      const fresh = newAnnouncements(activeEffects(s), activeEffects(get()), s.announcedEffects);
+      if (fresh.length > 0) set({ insight: fresh[0]!, announcedEffects: [...s.announcedEffects, ...fresh] });
     },
   };
 });
