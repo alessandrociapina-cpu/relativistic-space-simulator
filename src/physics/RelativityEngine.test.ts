@@ -52,6 +52,20 @@ describe('§8.2 precisão de uOneMinusBeta', () => {
   });
 });
 
+describe('§3.1 Regra 3: 1 − β·cosθ como soma de termos não-negativos', () => {
+  it('δ + β(1 − cosθ) = 1 − β·cosθ em toda a esfera', () => {
+    for (const eta of [0, 0.5, 3, 10]) {
+      const { uBeta, uOneMinusBeta } = computeShaderKinematics(eta);
+      for (let deg = 0; deg <= 180; deg += 15) {
+        const theta = (deg * Math.PI) / 180;
+        const cos = Math.cos(theta);
+        const oneMinusCos = cos >= 0 ? Math.sin(theta) ** 2 / (1 + cos) : 1 - cos;
+        expect(uOneMinusBeta + uBeta * oneMinusCos).toBeCloseTo(1 - uBeta * cos, 12);
+      }
+    }
+  });
+});
+
 // ── Consistência adicional do motor ──────────────────────────────────────────
 describe('computeShaderKinematics', () => {
   it.each([0, 1e-6, 0.5, 3, 10, 16, 18, 24.5, 29.1])('η = %f: δ exato, positivo e β + δ = 1', (eta) => {

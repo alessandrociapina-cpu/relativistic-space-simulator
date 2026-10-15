@@ -16,13 +16,14 @@ Simulador interativo de viagem espacial relativística em primeira pessoa (3D/We
 ---
 ## 3. Regras Inegociáveis de Precisão Numérica (64-bit CPU -> 32-bit GPU)
 ### 3.1 Proibição de `v/c` como Variável de Estado Primária
-No ponto médio da missão para Proxima Centauri ($1,61 \times 10^6\text{ G}$), a nave fica a $12\text{ }\mu\text{m/s}$ abaixo de $c$, onde $\gamma \approx 3,55 \times 10^6$ e $1 - \beta \approx 3,96 \times 10^{-14}$.
+No ponto médio da missão para Proxima Centauri ($1,61 \times 10^6\text{ G}$), a nave fica a $12\text{ }\mu\text{m/s}$ abaixo de $c$, onde $\gamma \approx 3,53 \times 10^6$ e $1 - \beta \approx 4,01 \times 10^{-14}$.
 - Em `float` de 32 bits no GLSL, qualquer operação `1.0 - uBeta` sofre *underflow* para `0.0` acima de $\gamma \approx 2896$.
 - **Regra 1:** A variável primária de estado na CPU (TypeScript `number` IEEE 754 de 64 bits) DEVE ser a **Rapidez ($\eta$)**, onde $\beta = \tanh(\eta)$ e $\gamma = \cosh(\eta)$.
 - **Regra 2:** Calcule `uOneMinusBeta` na CPU sem subtração usando a identidade hiperbólica exata:
   $$\delta = 1 - \beta = 1 - \tanh(\eta) = \frac{e^{-\eta}}{\cosh(\eta)}$$
-- **Regra 3:** No Fragment Shader GLSL, calcule $1 - \beta\cos\theta$ exclusivamente como soma de termos não-negativos no hemisfério frontal:
-  $$1 - \beta\cos\theta = \delta\cos\theta + \beta(1 - \cos\theta), \quad \text{onde } 1 - \cos\theta = \frac{\sin^2\theta}{1 + \cos\theta} = \frac{\vert{}\vec{d}_\perp\vert{}^2}{1 + \cos\theta}$$
+- **Regra 3:** No Fragment Shader GLSL, calcule $1 - \beta\cos\theta$ exclusivamente como soma de termos não-negativos (válida na esfera inteira):
+  $$1 - \beta\cos\theta = \delta + \beta(1 - \cos\theta)$$
+  No hemisfério frontal ($\cos\theta \ge 0$), calcule $1 - \cos\theta$ sem subtração: $1 - \cos\theta = \frac{\sin^2\theta}{1 + \cos\theta} = \frac{\vert{}\vec{d}_\perp\vert{}^2}{1 + \cos\theta}$. No traseiro, $1 - \cos\theta$ é soma de positivos e pode ser calculado direto.
 ---
 ## 4. Equações do Motor Físico (`src/physics/RelativityEngine.ts`)
 ### 4.1 Constantes Físicas Exatas
@@ -60,7 +61,7 @@ Dado um destino a distância em repouso $D_{\text{total}}$ (metros) e aceleraç�
 | `sirius` | Sirius A | $8.60\text{ ly}$ | $9940\text{ K}$ | $1.711$ | $1.61 \times 10^6\text{ G}$ |
 | `trappist1` | TRAPPIST-1 | $39.6\text{ ly}$ | $2566\text{ K}$ | $0.119$ | $1.61 \times 10^6\text{ G}$ |
 | `sgrA` | Centro Galáctico (Sagittarius A*) | $26700\text{ ly}$ | $12000\text{ K}$ (disco/aglomerado) | $15.0$ | $1.61 \times 10^6\text{ G}$ (~15.5 min de bordo) |
-| `andromeda` | Galáxia de Andrômeda (M31) | $2.537 \times 10^6\text{ ly}$ | $5800\text{ K}$ (núcleo integrado) | $1000.0$ | $1.61 \times 10^6\text{ G}$ (~18.3 min de bordo) |
+| `andromeda` | Galáxia de Andrômeda (M31) | $2.537 \times 10^6\text{ ly}$ | $5800\text{ K}$ (núcleo integrado) | $1000.0$ | $1.61 \times 10^6\text{ G}$ (~18.4 min de bordo) |
 
 ---
 ## 5. Especificação do Fragment Shader (`src/shaders/RelativisticSky.frag`)
@@ -98,7 +99,7 @@ RelativisticRay computeRelativisticRay(vec3 obsDir, vec3 forward) {
     float oneMinusCos = (cosTheta >= 0.0)
         ? (sin2Theta / (1.0 + cosTheta))
         : (1.0 - cosTheta);
-    float oneMinusBetaCos = uOneMinusBeta * cosTheta + uBeta * oneMinusCos;
+    float oneMinusBetaCos = uOneMinusBeta + uBeta * oneMinusCos;
     oneMinusBetaCos = max(oneMinusBetaCos, 1e-30);
     float D = 1.0 / (uGamma * oneMinusBetaCos);
     float cosMinusBeta = uOneMinusBeta - oneMinusCos;
@@ -248,4 +249,4 @@ O arquivo `src/physics/RelativityEngine.test.ts` deve passar nos seguintes teste
    - O tempo próprio total $\tau_{\text{total}}$ deve ser $600\text{ s} \pm 5\text{ s}$ (~10 minutos).
    - O tempo da Terra $t_{\text{total}}$ deve ser $\approx 4.25\text{ anos}$.
    - No ponto médio ($\tau = \tau_{1/2}$), a distância contraída de Lorentz $L_{\text{contraída}}$ deve ser $19\text{ segundos-luz} \pm 1\text{ ls}$ ($\approx 5.7 \times 10^6\text{ km}$).
-2. Para $\eta = 16.0$, `computeShaderKinematics(16.0).uOneMinusBeta` deve ser estritamente maior que zero ($\approx 2.539 \times 10^{-14}$) e nunca `0`.
+2. Para $\eta = 16.0$, `computeShaderKinematics(16.0).uOneMinusBeta` deve ser estritamente maior que zero ($\approx 2.533 \times 10^{-14}$) e nunca `0`.
