@@ -211,11 +211,13 @@ function SoundToggle() {
     <button
       type="button"
       aria-pressed={enabled}
+      aria-label="Som"
       title={enabled ? 'Silenciar motor e alertas' : 'Ligar motor e alertas sonoros'}
       className="px-1 text-slate-400 hover:text-slate-200"
       onClick={toggle}
     >
-      {enabled ? '🔊 Som' : '🔇 Mudo'}
+      {enabled ? '🔊' : '🔇'}
+      <span className="ml-1 hidden sm:inline">{enabled ? 'Som' : 'Mudo'}</span>
     </button>
   );
 }

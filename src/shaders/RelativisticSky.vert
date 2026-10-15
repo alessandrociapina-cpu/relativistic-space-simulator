@@ -1,10 +1,7 @@
-varying vec3 vWorldDir;
-
+// A esfera só cobre a tela; a direção de cada pixel é reconstruída no
+// fragment shader a partir de gl_FragCoord e da base da câmera.
 void main() {
-    vec4 worldPos = modelMatrix * vec4(position, 1.0);
-    // Direção de observação a partir da câmera (normalizada no fragment shader).
-    vWorldDir = worldPos.xyz - cameraPosition;
-    gl_Position = projectionMatrix * viewMatrix * worldPos;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
     // Céu no infinito: profundidade máxima, nunca recortado pelo far plane.
     gl_Position.z = gl_Position.w;
 }
