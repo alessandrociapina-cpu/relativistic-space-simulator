@@ -66,7 +66,12 @@ Dado um destino a distância em repouso $D_{\text{total}}$ (metros) e aceleraç�
 ---
 ## 5. Especificação do Fragment Shader (`src/shaders/RelativisticSky.frag`)
 Use exatamente a implementação abaixo como base para o material da esfera celeste (`THREE.BackSide`):
+(É o conteúdo de `src/shaders/RelativisticSky.frag`; mantenha os dois em sincronia.)
 ```glsl
+// Esfera celeste relativística (CLAUDE.md §5).
+// Convenção: o eixo de voo é exatamente −Z (uForward = (0,0,−1), Sol em +Z,
+// alvo em −Z). Com o eixo alinhado a um eixo de coordenadas, dPerp e a direção
+// de origem saem sem cancelamento em float32, mesmo para γ ~ 10¹².
 precision highp float;
 varying vec3 vWorldDir;
 uniform float uBeta;
@@ -99,6 +104,7 @@ RelativisticRay computeRelativisticRay(vec3 obsDir, vec3 forward) {
     float oneMinusCos = (cosTheta >= 0.0)
         ? (sin2Theta / (1.0 + cosTheta))
         : (1.0 - cosTheta);
+    // Regra 3: 1 − β·cosθ = δ + β(1 − cosθ), soma de termos não-negativos
     float oneMinusBetaCos = uOneMinusBeta + uBeta * oneMinusCos;
     oneMinusBetaCos = max(oneMinusBetaCos, 1e-30);
     float D = 1.0 / (uGamma * oneMinusBetaCos);
@@ -113,6 +119,11 @@ RelativisticRay computeRelativisticRay(vec3 obsDir, vec3 forward) {
     ray.solidAngleJac = D * D;
     ray.psfDilution   = psfDilution;
     return ray;
+}
+// Ângulo entre direções sem acos: acos(x) perto de x = 1 só resolve ~3×10⁻⁴ rad
+// em float32; atan(|a×b|, a·b) mantém precisão relativa em ângulos pequenos.
+float angleBetween(vec3 a, vec3 b) {
+    return atan(length(cross(a, b)), dot(a, b));
 }
 float planckSafe(float lambdaNm, float tempK) {
     if (tempK <= 15.0) return 0.0;
@@ -144,6 +155,9 @@ vec3 sampleBlackbodySensor(float apparentTempK) {
     else if (uSensorMode == 2) scaleFactor = 0.15;
     else if (uSensorMode == 3) scaleFactor = 0.01;
     float effectiveTemp = apparentTempK * scaleFactor;
+    // Abaixo de ~254 K, x > 80 em todas as amostras (λ ≤ 708 nm) e o resultado
+    // é exatamente 0: evita 64 exp() por pixel para a CMB em repouso.
+    if (effectiveTemp < 250.0) return vec3(0.0);
     vec3 xyz = vec3(0.0);
     const int SAMPLES = 8;
     float dLambda = (730.0 - 380.0) / float(SAMPLES);
@@ -165,7 +179,7 @@ vec3 hash33(vec3 p3) {
     return fract((p3.xxy + p3.yxx) * p3.zyx);
 }
 vec3 renderStarfield(RelativisticRay ray) {
-    vec3 accum = vec3(0.0);
+    vec3 stars = vec3(0.0);
     float gridScale = 140.0;
     vec3 cell = floor(ray.sourceDir * gridScale);
     vec3 rnd  = hash33(cell);
@@ -176,23 +190,26 @@ vec3 renderStarfield(RelativisticRay ray) {
         float apparentTemp = starTemp0 * ray.doppler;
         float profile = exp(-angDist2 / 1.8e-6);
         float beaming = clamp(ray.solidAngleJac * ray.psfDilution, 0.0, 50.0);
-        accum += sampleBlackbodySensor(apparentTemp) * profile * beaming * (0.2 + 0.8 * rnd.z);
+        stars += sampleBlackbodySensor(apparentTemp) * profile * beaming * (0.2 + 0.8 * rnd.z);
     }
-    float cosSun = dot(ray.sourceDir, normalize(uSunDir));
-    float angSun = acos(clamp(cosSun, -1.0, 1.0));
+    vec3 bodies = vec3(0.0);
+    float occlusion = 0.0;
+    float angSun = angleBetween(ray.sourceDir, normalize(uSunDir));
     if (angSun < uSunRadiusRad * 4.0) {
-        float limb = smoothstep(uSunRadiusRad, uSunRadiusRad * 0.85, angSun);
+        float limb = 1.0 - smoothstep(uSunRadiusRad * 0.85, uSunRadiusRad, angSun);
         float corona = exp(-angSun / max(uSunRadiusRad * 0.6, 1e-5)) * 0.15;
-        accum += sampleBlackbodySensor(T_SUN * ray.doppler) * (limb + corona);
+        bodies += sampleBlackbodySensor(T_SUN * ray.doppler) * (limb + corona);
+        occlusion = max(occlusion, limb);
     }
-    float cosTarget = dot(ray.sourceDir, normalize(uTargetDir));
-    float angTarget = acos(clamp(cosTarget, -1.0, 1.0));
+    float angTarget = angleBetween(ray.sourceDir, normalize(uTargetDir));
     if (angTarget < uTargetRadiusRad * 4.0) {
-        float limb = smoothstep(uTargetRadiusRad, uTargetRadiusRad * 0.85, angTarget);
+        float limb = 1.0 - smoothstep(uTargetRadiusRad * 0.85, uTargetRadiusRad, angTarget);
         float corona = exp(-angTarget / max(uTargetRadiusRad * 0.6, 1e-5)) * 0.25;
-        accum += sampleBlackbodySensor(uTargetTemp * ray.doppler) * (limb + corona) * ray.psfDilution;
+        bodies += sampleBlackbodySensor(uTargetTemp * ray.doppler) * (limb + corona) * ray.psfDilution;
+        occlusion = max(occlusion, limb);
     }
-    return accum;
+    // Os discos do Sol e do alvo são opacos: escondem as estrelas atrás deles.
+    return stars * (1.0 - occlusion) + bodies;
 }
 vec3 acesToneMapping(vec3 x) {
     return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
@@ -206,6 +223,16 @@ void main() {
     gl_FragColor = vec4(pow(mappedColor, vec3(1.0 / 2.2)), 1.0);
 }
 ```
+
+**Notas de implementação:**
+- **Eixo de voo exatamente em −Z:** `uForward = uTargetDir = (0,0,−1)` e `uSunDir = (0,0,1)`. Com o eixo alinhado a um eixo de coordenadas, `dPerp` e `sourceDir` saem sem cancelamento em float32, mesmo para $\gamma \sim 10^{12}$ (Andrômeda).
+- **`uSunRadiusRad` e `uTargetRadiusRad`** são raios angulares no referencial de repouso, calculados em 64 bits em `src/physics/sky.ts`. O Sol fica a $1\text{ UA} + x(\tau)$, porque a nave parte da órbita da Terra. O alvo fica a $L_{\text{repouso}} + 10\,R_{\text{alvo}}$, porque o motor termina no centro do alvo. A aberração (ampliação $e^{\eta}$ atrás, compressão $e^{-\eta}$ à frente) sai do mapeamento `sourceDir`.
+- **`uPsfAngleRad`** é o ângulo de um pixel físico de cada monitor: FOV vertical ÷ (altura em px × DPR).
+- **Ângulos pequenos** são calculados com `atan(|a×b|, a·b)`, não com `acos`, que em float32 só resolve cerca de $3 \times 10^{-4}$ rad perto de 1.
+- **`smoothstep`** recebe os limites em ordem crescente (`1 − smoothstep(0,85R, R, θ)`), porque a ordem invertida é indefinida em GLSL.
+- **Os discos do Sol e do alvo são opacos** e escondem as estrelas atrás deles.
+- **Saída antecipada:** abaixo de 250 K, `sampleBlackbodySensor` retorna 0 sem amostrar Planck. Abaixo de cerca de 254 K todas as amostras já dariam $x > 80$, então o resultado não muda.
+- **Tone mapping:** o shader aplica ACES e gama 2,2 na própria saída. Ao introduzir o Bloom do `@react-three/postprocessing`, a saída deve passar a ser HDR linear, com tone mapping e conversão de cor feitos no `EffectComposer`; senão a gama é aplicada duas vezes e o Bloom atua sobre cores já comprimidas.
 ---
 ## 6. Arquitetura de Diretórios Esperada
 ```text
@@ -215,11 +242,14 @@ relativistic-space-simulator/
 │   ├── physics/
 │   │   ├── RelativityEngine.ts    # Cinemática hiperbólica 64-bit e uniforms
 │   │   ├── RelativityEngine.test.ts # Testes unitários Vitest validando os marcos do vídeo
-│   │   └── destinations.ts        # Catálogo de estrelas e galáxias
+│   │   ├── destinations.ts        # Catálogo de estrelas e galáxias
+│   │   └── sky.ts                 # Raios angulares do Sol e do alvo (64 bits) + sky.test.ts
 │   ├── shaders/
 │   │   ├── RelativisticSky.vert
 │   │   └── RelativisticSky.frag
 │   ├── components/
+│   │   ├── RelativisticSky.tsx    # Esfera celeste + uniforms, compartilhada pelos monitores
+│   │   ├── CockpitMonitor.tsx     # Moldura dos monitores PIP
 │   │   ├── MainViewport.tsx       # Cena 3D principal (para-brisa do cockpit)
 │   │   ├── RearCameraPIP.tsx      # Monitor traseiro (visão do Sol e redshift IR)
 │   │   ├── TelescopePIP.tsx       # Monitor esquerdo (seletor IR / Visível / UV / Raios-X)
