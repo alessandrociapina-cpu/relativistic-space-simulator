@@ -10,7 +10,7 @@ import './audioSettings';
 const UNLOCK_EVENTS = ['pointerdown', 'pointerup', 'keydown'] as const;
 
 function syncEngine(s: FlightStore): void {
-  flightAudio.updateEngine(engineSound(s.flight.gamma, isThrusting(s.playing, s.flight.phase)));
+  flightAudio.updateEngine(engineSound(s.flight.gamma, isThrusting(s.playing, s.flight.engine)));
 }
 
 /** Liga o sintetizador ao estado de voo e aos eventos do loop de tempo próprio. */

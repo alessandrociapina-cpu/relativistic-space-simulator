@@ -16,7 +16,7 @@ const andromeda1g = destinationMissionProfile(DESTINATIONS.andromeda, 1);
 
 describe('degraus do multiplicador', () => {
   it('a escada vai de 0,01x a 25 anos/s, em ordem crescente', () => {
-    expect(TIME_SCALE_LADDER[0]!.label).toBe('0,01x');
+    expect(TIME_SCALE_LADDER[0]!.label).toBe('0,01 s/s');
     expect(TIME_SCALE_LADDER.at(-1)!.label).toBe('25 anos/s');
     for (let i = 1; i < TIME_SCALE_LADDER.length; i++) {
       expect(TIME_SCALE_LADDER[i]!.value).toBeGreaterThan(TIME_SCALE_LADDER[i - 1]!.value);

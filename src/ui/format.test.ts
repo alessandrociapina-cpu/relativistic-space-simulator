@@ -12,6 +12,7 @@ import {
   formatScientific,
   formatSpaceNumber,
   formatSpan,
+  formatSpeedKms,
   formatVelocity,
 } from './format';
 
@@ -76,6 +77,14 @@ describe('formatação pt-BR', () => {
     // O texto corrido continua sem zeros à direita.
     expect(formatProse(4.4)).toBe('4,4');
     expect(formatProse(1)).toBe('1');
+  });
+
+  it('velocidade em km/s, e em m/s abaixo de 1 km/s', () => {
+    expect(formatSpeedKms(0)).toBe('0 km/s');
+    expect(formatSpeedKms(850 / 299_792_458)).toBe('850 m/s');
+    expect(formatSpeedKms(0.00106)).toBe('318 km/s');
+    expect(formatSpeedKms(0.5)).toBe('149 896 km/s');
+    expect(formatSpeedKms(1 - 1e-14)).toBe('299 792 km/s');
   });
 
   it('velocidade: fração de c até 0,99c, depois c − v', () => {

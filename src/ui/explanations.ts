@@ -10,9 +10,11 @@ import {
   C,
   G0,
   T_CMB_0,
+  computeFlightState,
   computeMissionProfile,
   computeNoBrakeProperTime,
   computeShaderKinematics,
+  flipTauOf,
   rocketMassRatio,
   type FlightState,
   type MissionProfile,
@@ -20,15 +22,7 @@ import {
 import type { CrewKind } from '../physics/accelerationPresets';
 import type { Destination } from '../physics/destinations';
 import { CMB_VISIBLE_GAMMA, preFlipWindowS } from '../physics/criticalEvents';
-import {
-  EYE,
-  WIEN_NM_K,
-  peakCmbLux,
-  peakCmbLuxRapidity,
-  retinaTargetStops,
-  steadyPupilMm,
-  type PhotometryAndEyeState,
-} from '../physics/EyeAndPhotometry';
+import { WIEN_NM_K, peakCmbLux, peakCmbLuxRapidity, type PhotometryAndEyeState } from '../physics/EyeAndPhotometry';
 import { AU_M } from '../physics/sky';
 import {
   formatAngle,
@@ -41,7 +35,7 @@ import {
   formatVelocity,
   formatWavelengthNm,
 } from './format';
-import { BLUESHIFT_HOLOGRAM_GAMMA, EYE_HOLOGRAM_CMB_K } from './hologramMode';
+import { BLUESHIFT_HOLOGRAM_GAMMA } from './hologramMode';
 import {
   texAngle,
   texDistance,
@@ -67,7 +61,6 @@ export type EffectId =
   | 'flip'
   | 'braking'
   | 'coasting'
-  | 'eye-adaptation'
   | 'target-blueshift'
   | 'solar-system'
   | 'cmb-xray'
@@ -84,14 +77,13 @@ export type EffectId =
 
 /**
  * Ordem do painel e prioridade do cartão: primeiro o que é próprio do
- * instante (marcos, olho), depois a óptica e por fim a cinemática de base.
+ * instante (marcos), depois a óptica e por fim a cinemática de base.
  */
 export const EFFECT_ORDER: readonly EffectId[] = [
   'arrival',
   'flip',
   'braking',
   'coasting',
-  'eye-adaptation',
   'target-blueshift',
   'solar-system',
   'cmb-xray',
@@ -138,8 +130,6 @@ export const EFFECT_THRESHOLDS = {
   dopplerAhead: 2.5,
   timeDilationGamma: 2,
   contractionGamma: 3,
-  /** Fator "mais escuro" a partir do qual o olho adaptado merece explicação. */
-  eyeDimmer: 2,
   /** Da órbita de Júpiter à heliopausa. */
   solarSystemAu: { min: 5.2, max: 120 },
   /** Mesmo limiar de luz do aviso de ofuscamento. */
@@ -220,12 +210,8 @@ const missionTotalsFormulas = (p: MissionProfile): Formula[] =>
 
 /** Distância percorrida por inércia: D − 2·(c²/α)(γ_c − 1). */
 const coastDistanceM = (p: MissionProfile) => p.distanceM - (2 * C2 * (p.gammaMax - 1)) / p.properAccel;
-/** Distância (em repouso) que falta ao começar a frenagem: (c²/α)(γ_max − 1). */
-const brakingDistanceM = (p: MissionProfile) => (C2 * (p.gammaMax - 1)) / p.properAccel;
 
 const velocityOf = (f: FlightState) => formatVelocity(f.beta, f.oneMinusBeta);
-/** O olho ainda adaptado à ida faz a mesma luz parecer bem mais fraca (só em viagens rápidas). */
-const photometryDimmer = (p: PhotometryAndEyeState) => p.dimmerFactor >= EFFECT_THRESHOLDS.eyeDimmer;
 /** γ no texto: "1,67", "1 348", "3,53 × 10⁶". */
 const gammaText = (gamma: number) => (gamma < 100 ? formatFixed(gamma, 2) : num(gamma));
 
@@ -496,12 +482,8 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
     title: 'Ofuscamento: a luz à frente',
     announce: true,
     isActive: (s) => s.photometry.visibleLuxAhead >= EFFECT_THRESHOLDS.illuminanceLux,
-    explain: ({ photometry, profile, crewed }) => {
+    explain: ({ photometry, crewed }) => {
       const lux = photometry.visibleLuxAhead;
-      const pupilNow = formatFixed(photometry.pupilDiameterMm, 2);
-      // Viagens que duram muitas vezes os 20 min da adaptação ao escuro: o olho acompanha a luz.
-      const eyeKeepsUp = profile.tauTotal > 100 * EYE.darkAdaptationS;
-      const stopsNow = formatFixed(-photometry.retinaStops, 1);
       const physics =
         'A iluminância sai da física: a luminância de Planck da CMB, já com o Doppler, integrada sobre o hemisfério ' +
         'à frente e pesada pela sensibilidade do olho V(λ). O máximo possível é ' +
@@ -529,30 +511,13 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
         summary:
           `A CMB concentrada à frente ilumina a cabine com ${num(lux)} lux. Um escritório tem cerca de ` +
           '500 lux e um dia nublado, 10 000. Daí o aviso de ofuscamento.',
-        details: [
-          physics,
-          `O olho reage. A pupila se fecha em meio segundo (${pupilNow} mm agora) e a retina perde sensibilidade em ` +
-            `cerca de um minuto (já perdeu ${stopsNow} stops, ou seja, está ${num(2 ** -photometry.retinaStops)} vezes ` +
-            'menos sensível). Recuperar a sensibilidade no escuro leva uns 20 minutos.' +
-            (eyeKeepsUp
-              ? ' Nesta viagem a luz muda ao longo de meses, então o olho fica sempre em equilíbrio com ela.'
-              : ''),
-          'No para-brisa, o véu claro simula a luz espalhada dentro do próprio olho.',
-        ],
+        details: [physics, 'No para-brisa, o véu claro simula a luz espalhada dentro do próprio olho.'],
         formulas: [
           {
             tex: tex`E = 2\pi\int_0^1 L_v\big(T_0\,D(u)\big)\,(1 - u)\,du = ${n(lux)}\ \mathrm{lx}`,
             note: 'u = 1 − cos θ′: a integral percorre o hemisfério à frente.',
           },
           { tex: tex`L_v = 683\ \tfrac{\mathrm{lm}}{\mathrm{W}} \int B_\lambda(T)\,\bar y(\lambda)\,d\lambda` },
-          {
-            tex: tex`d_{\text{eq}} = 4{,}9 - 3\tanh(0{,}4\,\log_{10}E) = ${n(steadyPupilMm(lux))}\ \mathrm{mm}`,
-            note: `Pupila de equilíbrio (Moon & Spencer); a do piloto tem ${pupilNow} mm agora.`,
-          },
-          {
-            tex: tex`R_{\text{eq}} = \log_2\!\left(1 + \frac{E}{${n(EYE.referenceLux)}\ \mathrm{lx}}\right) = ${n(retinaTargetStops(lux))}\ \text{stops}`,
-            note: `Dessensibilização de equilíbrio da retina; a do piloto já é de ${stopsNow} stops.`,
-          },
         ],
       };
     },
@@ -624,15 +589,23 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
   flip: {
     title: 'Flip-and-burn: o ponto médio',
     announce: true,
-    isActive: (s) =>
-      (s.flight.phase === 'accelerating' || s.flight.phase === 'coasting') &&
-      s.flight.tau >= s.profile.brakeStartTau - preFlipWindowS(s.profile),
+    isActive: (s) => {
+      const flip = flipTauOf(s.profile);
+      return (
+        flip !== null &&
+        (s.flight.phase === 'accelerating' || s.flight.phase === 'coasting') &&
+        s.flight.tau >= flip - preFlipWindowS(s.profile)
+      );
+    },
     explain: ({ flight, profile }) => {
-      const peak = computeShaderKinematics(profile.etaMax);
-      const remaining = brakingDistanceM(profile);
-      const contracted = remaining / profile.gammaMax;
-      const toFlip = profile.brakeStartTau - flight.tau;
-      const flipAndBurn = profile.coastEta === null;
+      // O estado no flip (o do plano ou o do piloto automático, depois de religar o motor).
+      const flip = flipTauOf(profile) ?? profile.brakeStartTau;
+      const atFlip = computeFlightState(profile, flip);
+      const peak = computeShaderKinematics(atFlip.eta);
+      const remaining = atFlip.restDistanceRemainingM;
+      const contracted = atFlip.contractedDistanceRemainingM;
+      const toFlip = flip - flight.tau;
+      const flipAndBurn = profile.coastEta === null && !profile.maneuvers;
       const noBrake = computeNoBrakeProperTime(profile);
       return {
         summary:
@@ -640,7 +613,7 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
             ? `Em ${formatSpan(toFlip)} a nave gira 180° e liga o motor para frear com a mesma aceleração. `
             : 'A nave girou 180° e passou a frear com a mesma aceleração. ') +
           `É o ponto de velocidade máxima: v = ${formatVelocity(peak.uBeta, peak.uOneMinusBeta)}, ` +
-          `γ = ${gammaText(profile.gammaMax)}.`,
+          `γ = ${gammaText(peak.uGamma)}.`,
         details: [
           `Ao começar a frenagem, a distância que falta, medida pela nave, é de só ${formatDistance(contracted)}: ` +
             `são ${formatDistance(remaining)} contraídos por γ.`,
@@ -672,7 +645,7 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
     title: 'Frenagem',
     announce: true,
     isActive: (s) => s.flight.phase === 'decelerating',
-    explain: ({ flight, profile, photometry, crewed }) => {
+    explain: ({ flight, profile }) => {
       const mirror = profile.tauTotal - flight.tau;
       return {
         summary:
@@ -681,56 +654,11 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
         details: [
           'Aberração, Doppler e a cor da CMB dependem só da velocidade, não da aceleração. O instante τ da frenagem ' +
             `mostra o mesmo céu do instante espelho τ_total − τ da ida: agora, τ = ${formatSpan(mirror)}.`,
-          !crewed
-            ? 'As câmeras da sonda não se adaptam como um olho: a mesma luz aparece igual nos dois sentidos.'
-            : photometryDimmer(photometry)
-              ? 'O que muda é o seu olho, que chega da ida adaptado à luz forte: a mesma luz parece bem mais fraca na volta.'
-              : 'Nesta viagem o olho tem tempo de sobra para se readaptar, e a mesma luz parece igual nos dois sentidos.',
         ],
         formulas: [
           { tex: tex`\eta = \frac{\alpha\,(\tau_{\text{total}} - \tau)}{c} = ${n(flight.eta, 4)}` },
           { tex: tex`L_0 = D - x = \frac{c^2}{\alpha}\,(\gamma - 1) = ${texDistance(flight.restDistanceRemainingM)}` },
           { card: true, tex: tex`\tau_{\text{espelho}} = \tau_{\text{total}} - \tau = ${texDuration(mirror)}` },
-        ],
-      };
-    },
-  },
-
-  'eye-adaptation': {
-    title: 'Seus olhos se adaptaram',
-    announce: true,
-    isActive: (s) =>
-      s.crewed &&
-      s.flight.phase === 'decelerating' &&
-      s.photometry.cmbTempAheadK > EYE_HOLOGRAM_CMB_K.min &&
-      s.photometry.cmbTempAheadK < EYE_HOLOGRAM_CMB_K.max &&
-      photometryDimmer(s.photometry),
-    explain: ({ photometry: p }) => {
-      const mirrorTau = p.whiteoutTau ?? 0;
-      const stopsNow = -p.retinaStops;
-      const stopsMirror = -(p.whiteoutRetinaStops ?? p.retinaStops);
-      const pupilMirror = p.whiteoutPupilMm ?? p.pupilDiameterMm;
-      return {
-        summary:
-          `A luz à frente agora é a mesma que ofuscou a ida em τ = ${formatSpan(mirrorTau)}, mas parece ` +
-          `${num(p.dimmerFactor)} vezes mais fraca: depois do clarão, a pupila continua fechada e a retina, menos ` +
-          'sensível. No escuro, o olho leva uns 20 minutos para se recuperar.',
-        details: [
-          'A pupila fecha em meio segundo, mas leva minutos para reabrir: tem ' +
-            `${formatFixed(p.pupilDiameterMm, 2)} mm agora e tinha ${formatFixed(pupilMirror, 2)} mm no instante ` +
-            'espelho. A retina perde sensibilidade em cerca de um minuto e leva uns 20 para recuperá-la; chega à ' +
-            `frenagem ${formatFixed(stopsNow, 1)} stops menos sensível, contra ${formatFixed(stopsMirror, 1)} na ida.`,
-          'O simulador integra esse olho ao longo da missão inteira, em tempo de bordo. Arrastar a linha do tempo ' +
-            'mostra o mesmo estado do voo contínuo.',
-        ],
-        formulas: [
-          {
-            tex: tex`\text{fator} = 2^{\,R_{\text{agora}} - R_{\text{espelho}}}\left(\frac{d_{\text{espelho}}}{d_{\text{agora}}}\right)^{2} = 2^{\,${n(stopsNow)} - ${n(stopsMirror)}}\left(\frac{${n(pupilMirror)}}{${n(p.pupilDiameterMm)}}\right)^{2} = ${n(p.dimmerFactor)}`,
-            note: 'R: dessensibilização da retina em stops (o holograma mostra −R); d: diâmetro da pupila.',
-          },
-          {
-            tex: tex`\frac{dR}{d\tau} = \frac{R_{\text{eq}}(E) - R}{\tau_R}, \qquad \tau_R = \begin{cases} ${EYE.lightAdaptationS}\ \mathrm{s} & \text{(clareando)} \\ ${EYE.darkAdaptationS}\ \mathrm{s} & \text{(escurecendo)} \end{cases}`,
-          },
         ],
       };
     },
@@ -769,6 +697,31 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
     announce: true,
     isActive: (s) => s.flight.phase === 'coasting',
     explain: ({ flight, profile }) => {
+      const m = profile.maneuvers;
+      if (m && flight.tau >= m.firstTau) {
+        // Inércia depois de o piloto desligar o motor.
+        const speed = C * Math.sinh(flight.eta);
+        const toTarget = speed > 0 ? flight.restDistanceRemainingM / speed : Infinity;
+        return {
+          summary:
+            `O motor foi desligado e a nave segue por inércia a v = ${velocityOf(flight)}: ninguém sente peso a bordo ` +
+            'e o céu congela, porque aberração, Doppler e a cor da CMB só mudam com a velocidade. ' +
+            (m.end === 'flyby'
+              ? `Sem frear, a nave passa pelo alvo em ${formatSpan(toTarget)} de bordo. `
+              : 'A nave está quase parada e não chega ao alvo. ') +
+            'Religue o motor para o piloto automático refazer a rota até o alvo.',
+          details: [
+            'Sem empuxo, a rapidez η fica constante: dx/dτ = c·sinh η e dt/dτ = cosh η. O relógio da Terra continua ' +
+              'correndo γ vezes mais depressa que o de bordo.',
+            'Ao religar, o piloto automático acelera e faz o flip no ponto certo para parar no alvo; se já não houver ' +
+              'distância para frear com a aceleração planejada, freia na hora com a aceleração que for preciso.',
+          ],
+          formulas: [
+            { card: true, tex: tex`\eta = ${n(flight.eta, 4)}, \qquad \frac{dx}{d\tau} = c\,\sinh\eta = ${texSpeed(speed)}` },
+            { tex: tex`\frac{dt}{d\tau} = \cosh\eta = \gamma = ${n(flight.gamma, 4)}` },
+          ],
+        };
+      }
       const coastTau = profile.brakeStartTau - profile.burnEndTau;
       const toBrake = profile.brakeStartTau - flight.tau;
       const flipAndBurnRatio = rocketMassRatio(computeMissionProfile(profile.distanceM, profile.properAccel));

@@ -4,6 +4,7 @@ import { useFlightStore } from '../store/useFlightStore';
 import { formatRouteDistance } from '../ui/format';
 import { OORT_CLOUD_AU, SATURN_AU, routeGeometry, routePosition, sunMarkerPosition } from '../ui/routeScale';
 import { CockpitMonitor } from './CockpitMonitor';
+import { InfoTip } from './InfoTip';
 
 const X0 = 24;
 const X1 = 296;
@@ -27,15 +28,19 @@ function useRoute() {
     .map((m) => ({ ...m, u: sunMarkerPosition(m.au, geometry) }));
 
   const status =
-    flight.phase === 'coasting'
-      ? 'INÉRCIA'
-      : flight.phase === 'arrived'
-        ? 'CHEGADA'
-        : flight.phase === 'decelerating'
-          ? '◂◂ FREANDO'
-          : playing || flight.tau > 0
-            ? 'ACELERANDO ▸▸'
-            : 'PRONTA';
+    flight.phase === 'arrived'
+      ? 'CHEGADA'
+      : flight.phase === 'flyby'
+        ? 'PASSOU PELO ALVO'
+        : flight.engine === 'ramp'
+          ? 'DESLIGANDO O MOTOR'
+          : flight.phase === 'coasting'
+            ? 'INÉRCIA'
+            : flight.phase === 'decelerating'
+              ? '◂◂ FREANDO'
+              : playing || flight.tau > 0
+                ? 'ACELERANDO ▸▸'
+                : 'PRONTA';
 
   return {
     destination,
@@ -132,7 +137,9 @@ export function RouteStrip({ className = '' }: { className?: string }) {
   return (
     <div className={`instrument-well min-w-0 rounded-md px-2 py-1 ${className}`}>
       <div className="flex items-baseline justify-between gap-2">
-        <span className="font-display text-[8px] tracking-[0.22em] text-slate-400 uppercase">Rota · escala log</span>
+        <span className="font-display flex items-center gap-1 text-[8px] tracking-[0.22em] text-slate-400 uppercase">
+          Rota · escala log <InfoTip id="route" />
+        </span>
         <span className="font-readout text-[10px] tracking-wider text-amber-400">{status}</span>
       </div>
       <svg viewBox="0 0 300 22" className="block w-full" aria-label="Mapa da rota">
@@ -192,6 +199,7 @@ export function RouteMonitor({ className = '' }: { className?: string }) {
       subtitle="Sol → metade → alvo"
       className={className}
       tilt="right"
+      help="route"
       footer={<RouteFooter />}
     >
       <RouteMap />

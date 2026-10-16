@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { blackbodyCssColor, planckSpectralRadiance } from '../physics/blackbody';
 import { WIEN_NM_K, type EyeTimeline } from '../physics/EyeAndPhotometry';
+import { flipTauOf } from '../physics/RelativityEngine';
 import { AU_M } from '../physics/sky';
 import { useFlightStore } from '../store/useFlightStore';
 import { useCockpitUi, useIsWideCockpit } from '../ui/cockpitUi';
@@ -187,73 +188,6 @@ function CountdownHologram({ label, remaining, window }: { label: string; remain
   );
 }
 
-// ── Modo: adaptação do olho ──────────────────────────────────────────────────
-/** Um olho de perfil frontal, com a pupila no diâmetro dado (mm). */
-function EyeIcon({ pupilMm, dazzled }: { pupilMm: number; dazzled: boolean }) {
-  return (
-    <svg viewBox="0 0 115 65" className="h-9 w-16 sm:h-[54px] sm:w-24" aria-hidden>
-      {dazzled && <circle cx="57.5" cy="32" r="30" fill="#fde68a" fillOpacity="0.18" />}
-      <path d="M 5 32 Q 57 -5 110 32 Q 57 69 5 32 Z" fill="none" stroke={CYAN} strokeOpacity="0.75" strokeWidth="1.5" />
-      <circle cx="57.5" cy="32" r="20" fill="none" stroke={CYAN} strokeOpacity="0.5" />
-      <circle cx="57.5" cy="32" r={Math.max(3, pupilMm * 2.4)} fill="#020617" stroke="#7dd3fc" strokeWidth="1.5" />
-    </svg>
-  );
-}
-
-/** Sensibilidade da retina em vezes: −12,8 stops → "7 100× menos sensível". */
-const sensitivityText = (stops: number) =>
-  stops > -0.5 ? 'sensível' : `${formatSpaceNumber(2 ** -stops)}× menos sensível`;
-
-/**
- * A mesma luz da ida, vista agora: o olho que passou pelo clarão ainda está
- * com a pupila fechada e a retina dessensibilizada, e por isso a vê mais fraca.
- */
-function EyeAdaptationHologram(props: {
-  pupilMm: number;
-  retinaStops: number;
-  whiteoutPupilMm: number;
-  whiteoutStops: number;
-  whiteoutTau: number;
-  tau: number;
-  lux: number;
-  dimmer: number;
-}) {
-  return (
-    <div className="flex flex-col items-center px-2 py-1">
-      <div className="text-xs tracking-widest text-slate-200 uppercase">Seus olhos depois do clarão</div>
-      <div className="mb-1 text-[11px] text-slate-400">
-        A mesma luz à frente, {formatSpaceNumber(props.lux)} lux<span className="hidden sm:inline">, em dois momentos</span>
-      </div>
-      <div className="flex items-center gap-3 sm:gap-5">
-        <div className="flex flex-col items-center">
-          <span className="text-[10px] tracking-widest text-amber-200">
-            <span className="uppercase">Na ida</span> · τ {formatSpan(props.whiteoutTau)}
-          </span>
-          <EyeIcon pupilMm={props.whiteoutPupilMm} dazzled />
-          <span className="text-[11px] text-slate-300">pupila {formatFixed(props.whiteoutPupilMm, 1)} mm</span>
-          <span className="text-[11px] text-slate-300">retina {sensitivityText(props.whiteoutStops)}</span>
-          <span className="text-[11px] font-medium text-amber-300">ofuscante</span>
-        </div>
-        <svg width="34" height="16" viewBox="0 0 34 16" aria-hidden>
-          <path d="M 2 8 H 28 M 22 3 L 30 8 L 22 13" fill="none" stroke={CYAN} strokeWidth="1.5" />
-        </svg>
-        <div className="flex flex-col items-center">
-          <span className="text-[10px] tracking-widest text-sky-200">
-            <span className="uppercase">Agora</span> · τ {formatSpan(props.tau)}
-          </span>
-          <EyeIcon pupilMm={props.pupilMm} dazzled={false} />
-          <span className="text-[11px] text-slate-300">pupila {formatFixed(props.pupilMm, 1)} mm</span>
-          <span className="text-[11px] text-slate-300">retina {sensitivityText(props.retinaStops)}</span>
-          <span className="text-[11px] font-medium text-sky-300">{formatSpaceNumber(props.dimmer)}× mais fraca</span>
-        </div>
-      </div>
-      <div className="mt-1 hidden max-w-sm text-center text-[10px] leading-snug text-slate-400 sm:block">
-        A retina perde sensibilidade em ~1 min de luz forte e leva ~20 min para recuperá-la no escuro.
-      </div>
-    </div>
-  );
-}
-
 // ── Modo: blueshift do alvo ──────────────────────────────────────────────────
 function Swatch({ temperatureK }: { temperatureK: number }) {
   const color = blackbodyCssColor(temperatureK);
@@ -332,13 +266,11 @@ export function CenterHologramProjector() {
 
   const sunDistanceAu = (AU_M + flight.positionM) / AU_M;
   const hologram: HologramMode = selectHologramMode({
-    crew,
     flight,
     profile,
     sunDistanceAu,
     cmbTempK: p.cmbTempAheadK,
     cmbPeakNm: p.cmbWienPeakNm,
-    eyeDimmer: p.dimmerFactor,
   });
   if (hologram === 'none' || effectsPanelOpen || (telescopeOpen && !wide)) return null;
 
@@ -357,7 +289,7 @@ export function CenterHologramProjector() {
       content = (
         <CountdownHologram
           label="FRENAGEM EM"
-          remaining={profile.brakeStartTau - flight.tau}
+          remaining={(flipTauOf(profile) ?? profile.brakeStartTau) - flight.tau}
           window={hologramCountdownS(profile)}
         />
       );
@@ -365,23 +297,9 @@ export function CenterHologramProjector() {
     case 'countdown-arrival':
       content = (
         <CountdownHologram
-          label="CHEGADA EM"
+          label={profile.maneuvers?.end === 'flyby' ? 'PASSAGEM PELO ALVO EM' : 'CHEGADA EM'}
           remaining={profile.tauTotal - flight.tau}
           window={hologramCountdownS(profile)}
-        />
-      );
-      break;
-    case 'eye-adaptation':
-      content = (
-        <EyeAdaptationHologram
-          pupilMm={p.pupilDiameterMm}
-          retinaStops={p.retinaStops}
-          whiteoutPupilMm={p.whiteoutPupilMm ?? p.pupilDiameterMm}
-          whiteoutStops={p.whiteoutRetinaStops ?? 0}
-          whiteoutTau={p.whiteoutTau ?? 0}
-          tau={flight.tau}
-          lux={p.visibleLuxAhead}
-          dimmer={p.dimmerFactor}
         />
       );
       break;

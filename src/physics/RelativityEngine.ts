@@ -77,6 +77,119 @@ export interface MissionProfile {
   readonly brakeStartTau: number;
   /** Rapidez de cruzeiro da fase de inércia; `null` no Flip-and-Burn puro. */
   readonly coastEta: number | null;
+  /** O voo depois de o piloto desligar ou religar o motor (ausente: o plano analítico). */
+  readonly maneuvers?: Maneuvers;
+}
+
+// ── Motor desligado e religado pelo piloto: o voo em segmentos ──────────────
+/** Empuxo constante, rampa da aceleração até zero (desligando o motor) ou inércia. */
+export type SegmentKind = 'thrust' | 'ramp' | 'coast';
+
+export interface FlightSegment {
+  readonly kind: SegmentKind;
+  readonly startTau: number;
+  /** Duração em tempo próprio (s). */
+  readonly duration: number;
+  /** Aceleração própria no início (m/s²): > 0 acelera rumo ao alvo, < 0 freia. Na rampa, cai linearmente até 0. */
+  readonly accel: number;
+  /** Estado no início: rapidez, distância que falta (m) e tempo da Terra (s). */
+  readonly eta0: number;
+  readonly remaining0: number;
+  readonly earth0: number;
+  /** Frenagem que termina parada no alvo: a distância sai exata de (c²/|a|)(cosh η − 1). */
+  readonly toArrival?: boolean;
+}
+
+/** Como o voo termina: parado no alvo, passando por ele sem frear ou à deriva (parado ou lento demais). */
+export type ManeuverEnd = 'arrival' | 'flyby' | 'drift';
+
+export interface Maneuvers {
+  /** O plano original (Flip-and-Burn ou com cruzeiro). */
+  readonly plan: MissionProfile;
+  /** Primeiro comando do piloto: antes dele, o voo é o do plano. */
+  readonly firstTau: number;
+  readonly segments: readonly FlightSegment[];
+  readonly end: ManeuverEnd;
+  /** Início da frenagem depois de um flip do piloto automático; `null` se não há flip depois do comando. */
+  readonly flipTau: number | null;
+}
+
+/** Instante do flip (início da frenagem depois de acelerar), ou `null` se o voo não tem um. */
+export function flipTauOf(profile: MissionProfile): number | null {
+  const m = profile.maneuvers;
+  if (!m) return profile.brakeStartTau;
+  if (m.flipTau !== null) return m.flipTau;
+  return m.plan.brakeStartTau <= m.firstTau ? m.plan.brakeStartTau : null;
+}
+
+// Gauss–Legendre de 16 pontos em [−1, 1] (nós e pesos por Newton nos polinômios de Legendre).
+const GL_N = 16;
+const [GL_X, GL_W] = (() => {
+  const x: number[] = [];
+  const w: number[] = [];
+  for (let i = 1; i <= GL_N; i++) {
+    let z = Math.cos((Math.PI * (i - 0.25)) / (GL_N + 0.5));
+    let dp = 1;
+    for (let it = 0; it < 100; it++) {
+      let p0 = 1;
+      let p1 = 0;
+      for (let j = 1; j <= GL_N; j++) {
+        const p2 = p1;
+        p1 = p0;
+        p0 = ((2 * j - 1) * z * p1 - (j - 1) * p2) / j;
+      }
+      dp = (GL_N * (z * p0 - p1)) / (z * z - 1);
+      const dz = p0 / dp;
+      z -= dz;
+      if (Math.abs(dz) < 1e-16) break;
+    }
+    x.push(z);
+    w.push(2 / ((1 - z * z) * dp * dp));
+  }
+  return [x, w];
+})();
+
+/** ∫₀ˢ f(u) du por Gauss–Legendre. */
+function integrate(f: (u: number) => number, s: number): number {
+  let sum = 0;
+  for (let i = 0; i < GL_N; i++) sum += GL_W[i]! * f(0.5 * s * (GL_X[i]! + 1));
+  return 0.5 * s * sum;
+}
+
+export interface SegmentState {
+  readonly eta: number;
+  readonly remainingM: number;
+  readonly earthTimeS: number;
+  /** Aceleração própria no instante (m/s², com sinal). */
+  readonly accel: number;
+}
+
+/** Estado `s` segundos de bordo depois do início do segmento. */
+export function segmentState(seg: FlightSegment, s: number): SegmentState {
+  const { eta0, remaining0, earth0 } = seg;
+  if (seg.kind === 'coast' || seg.accel === 0) {
+    return { eta: eta0, remainingM: remaining0 - C * Math.sinh(eta0) * s, earthTimeS: earth0 + Math.cosh(eta0) * s, accel: 0 };
+  }
+  if (seg.kind === 'thrust') {
+    const a = seg.accel;
+    const eta = eta0 + (a * s) / C;
+    // cosh η − cosh η₀ e sinh η − sinh η₀ como produtos, sem cancelamento.
+    const half = (eta - eta0) / 2;
+    const mid = (eta + eta0) / 2;
+    const dCosh = 2 * Math.sinh(mid) * Math.sinh(half);
+    const dSinh = 2 * Math.cosh(mid) * Math.sinh(half);
+    const remainingM = seg.toArrival ? (C2 / Math.abs(a)) * coshm1(eta) : remaining0 - (C2 / a) * dCosh;
+    return { eta, remainingM, earthTimeS: earth0 + (C / a) * dSinh, accel: a };
+  }
+  // Rampa: a(u) = a₀(1 − u/d), então η(u) = η₀ + (a₀/c)(u − u²/2d), integrado numericamente.
+  const { accel: a0, duration: d } = seg;
+  const etaAt = (u: number) => eta0 + (a0 / C) * (u - (u * u) / (2 * d));
+  return {
+    eta: etaAt(s),
+    remainingM: remaining0 - C * integrate((u) => Math.sinh(etaAt(u)), s),
+    earthTimeS: earth0 + integrate((u) => Math.cosh(etaAt(u)), s),
+    accel: a0 * (1 - s / d),
+  };
 }
 
 /**
@@ -157,8 +270,11 @@ export function rocketMassRatio(profile: MissionProfile, exhaustBeta = 1): numbe
   return Math.exp((2 * profile.etaMax) / exhaustBeta);
 }
 
-/** `coasting`: motor desligado na fase de inércia do perfil com cruzeiro. */
-export type FlightPhase = 'accelerating' | 'coasting' | 'decelerating' | 'arrived';
+/** `coasting`: motor desligado (inércia). `flyby`: o voo terminou passando pelo alvo sem frear. */
+export type FlightPhase = 'accelerating' | 'coasting' | 'decelerating' | 'arrived' | 'flyby';
+
+/** `ramp`: o piloto desligou o motor e a aceleração está caindo até zero. */
+export type EngineState = 'thrust' | 'ramp' | 'off';
 
 export interface FlightState {
   /** Tempo próprio de bordo τ (s), limitado a [0, τ_total]. */
@@ -177,9 +293,79 @@ export interface FlightState {
   readonly restDistanceRemainingM: number;
   /** L_contraída = L_repouso / γ, exibida no HUD (m). */
   readonly contractedDistanceRemainingM: number;
+  readonly engine: EngineState;
+  /** Aceleração própria do motor no instante (m/s²); 0 com o motor desligado. */
+  readonly thrustAccel: number;
+}
+
+function stateFrom(
+  t: number,
+  phase: FlightPhase,
+  eta: number,
+  positionM: number,
+  earthTimeS: number,
+  restDistanceRemainingM: number,
+  engine: EngineState,
+  thrustAccel: number,
+): FlightState {
+  const k = computeShaderKinematics(eta);
+  return {
+    tau: t,
+    phase,
+    eta,
+    beta: k.uBeta,
+    gamma: k.uGamma,
+    oneMinusBeta: k.uOneMinusBeta,
+    positionM,
+    earthTimeS,
+    restDistanceRemainingM,
+    contractedDistanceRemainingM: restDistanceRemainingM / k.uGamma,
+    engine,
+    thrustAccel,
+  };
+}
+
+/** Estado no voo em segmentos (depois do primeiro comando do piloto). */
+function maneuveredState(profile: MissionProfile, m: Maneuvers, t: number): FlightState {
+  const { segments } = m;
+  let i = segments.length - 1;
+  while (i > 0 && segments[i]!.startTau > t) i--;
+  const seg = segments[i]!;
+  const s = Math.min(Math.max(t - seg.startTau, 0), seg.duration);
+  const st = segmentState(seg, s);
+  const remainingM = Math.max(0, st.remainingM);
+  const ended = t >= profile.tauTotal;
+  const phase: FlightPhase = ended
+    ? m.end === 'arrival'
+      ? 'arrived'
+      : m.end === 'flyby'
+        ? 'flyby'
+        : 'coasting'
+    : seg.kind === 'coast'
+      ? 'coasting'
+      : seg.accel > 0
+        ? 'accelerating'
+        : 'decelerating';
+  const engine: EngineState = ended || seg.kind === 'coast' ? 'off' : seg.kind === 'ramp' ? 'ramp' : 'thrust';
+  const eta = ended && m.end === 'arrival' ? 0 : st.eta;
+  return stateFrom(
+    t,
+    phase,
+    eta,
+    profile.distanceM - remainingM,
+    st.earthTimeS,
+    ended && m.end === 'arrival' ? 0 : remainingM,
+    engine,
+    engine === 'off' ? 0 : Math.abs(st.accel),
+  );
 }
 
 export function computeFlightState(profile: MissionProfile, tau: number): FlightState {
+  const m = profile.maneuvers;
+  if (m) {
+    const t = Math.min(Math.max(tau, 0), profile.tauTotal);
+    return t >= m.firstTau ? maneuveredState(profile, m, t) : computeFlightState(m.plan, t);
+  }
   const { distanceM, properAccel, burnEndTau, brakeStartTau, tauTotal, tTotal } = profile;
   const t = Math.min(Math.max(tau, 0), tauTotal);
   const cOverA = C / properAccel;
@@ -214,20 +400,10 @@ export function computeFlightState(profile: MissionProfile, tau: number): Flight
     earthTimeS = tTotal - cOverA * Math.sinh(eta);
   }
 
-  const k = computeShaderKinematics(eta);
-
-  return {
-    tau: t,
-    phase: t <= burnEndTau ? 'accelerating' : t < brakeStartTau ? 'coasting' : t < tauTotal ? 'decelerating' : 'arrived',
-    eta,
-    beta: k.uBeta,
-    gamma: k.uGamma,
-    oneMinusBeta: k.uOneMinusBeta,
-    positionM,
-    earthTimeS,
-    restDistanceRemainingM,
-    contractedDistanceRemainingM: restDistanceRemainingM / k.uGamma,
-  };
+  const phase: FlightPhase =
+    t <= burnEndTau ? 'accelerating' : t < brakeStartTau ? 'coasting' : t < tauTotal ? 'decelerating' : 'arrived';
+  const thrusting = phase === 'accelerating' || phase === 'decelerating';
+  return stateFrom(t, phase, eta, positionM, earthTimeS, restDistanceRemainingM, thrusting ? 'thrust' : 'off', thrusting ? properAccel : 0);
 }
 
 /** η a partir de log₁₀γ, sem perder precisão perto de γ = 1 (slider logarítmico). */

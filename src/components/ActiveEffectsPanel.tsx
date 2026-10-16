@@ -12,6 +12,7 @@ const PHASE_LABEL: Readonly<Record<FlightPhase, string>> = {
   coasting: 'inércia',
   decelerating: 'frenagem',
   arrived: 'chegada',
+  flyby: 'passagem pelo alvo',
 };
 
 function EffectSection({ id, ctx, highlighted }: { id: EffectId; ctx: ExplainContext; highlighted: boolean }) {
