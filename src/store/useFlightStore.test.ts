@@ -273,14 +273,34 @@ describe('modos e missão', () => {
     expect(store().criticalWindows.map((w) => w.kind)).toEqual(['pre-flip']);
   });
 
-  it('viagem a 1 g: o multiplicador vai para o degrau que encaixa a viagem em ~10 min', () => {
+  it('toda missão nova começa em tempo real (1 s/s); mexer no multiplicador apaga o aviso', () => {
+    expect(store().timeScaleTouched).toBe(false);
     store().setTimeScale(20);
+    expect(store().timeScaleTouched).toBe(true);
     store().setAccelG(1);
-    expect(store().timeScale).toBe(86_400); // 1 dia/s: 3,5 anos em ~21 min
-    store().setDestination('andromeda');
-    expect(store().timeScale).toBe(86_400); // continua disponível para Andrômeda
-    store().setAccelG(DEFAULT_ACCEL_G);
     expect(store().timeScale).toBe(1);
+    store().setDestination('andromeda');
+    expect(store().timeScale).toBe(1);
+  });
+
+  it('o botão do motor desliga (rampa até 0 e inércia) e religa (piloto automático até o alvo)', () => {
+    store().setAccelG(1);
+    const plan = store().profile;
+    store().seek(0.2 * plan.tauTotal);
+    store().toggleEngine();
+    expect(store().profile.maneuvers).toBeDefined();
+    expect(store().flight.engine).toBe('ramp');
+    store().seek(0.25 * plan.tauTotal);
+    expect(store().flight.engine).toBe('off');
+    expect(store().flight.thrustAccel).toBe(0);
+    store().toggleEngine();
+    expect(store().profile.maneuvers!.end).toBe('arrival');
+    expect(store().flight.engine).toBe('thrust');
+    // Uma nova partida volta ao plano.
+    store().seek(store().profile.tauTotal);
+    store().togglePlay();
+    expect(store().profile).toBe(plan);
+    expect(store().plannedProfile).toBe(plan);
   });
 
   it('a 1 g, o Auto-Step Down desacelera para que a janela da CMB dure ≥ 20 s reais', () => {

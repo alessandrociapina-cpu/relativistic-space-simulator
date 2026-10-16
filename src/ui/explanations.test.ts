@@ -71,7 +71,6 @@ describe('cronologia dos cartões na missão para Proxima', () => {
       'cmb-xray',
       'flip',
       'braking',
-      'eye-adaptation',
       'target-blueshift',
       'arrival',
     ]);
@@ -112,13 +111,12 @@ describe('viagens longas e perfil com cruzeiro', () => {
     ]);
   });
 
-  it('1 g até Andrômeda: a CMB aparece, mas a frenagem não traz o "olhos adaptados"', () => {
+  it('1 g até Andrômeda: a CMB aparece e o alvo azulado na frenagem', () => {
     const andromeda = DESTINATIONS.andromeda;
     const at = contextFactory(andromeda, 1);
     const total = destinationMissionProfile(andromeda, 1).tauTotal;
     const ids = announcementTimeline(at, total, total / 6000).map((o) => o.id);
     expect(ids).toEqual(expect.arrayContaining(['cmb-visible', 'illuminance', 'hot-cone', 'cmb-xray', 'target-blueshift']));
-    expect(ids).not.toContain('eye-adaptation');
   });
 
   it('acelerar, cruzar e frear: a inércia é anunciada e o flip antecede o início da frenagem', () => {
@@ -155,9 +153,7 @@ describe('efeitos ativos', () => {
     expect(headlineEffect(effects)).toBe('flip');
   });
 
-  it('numa sonda robótica não há olhos para se adaptar', () => {
-    expect(activeEffects(proximaAt(449))).toContain('eye-adaptation');
-    expect(activeEffects(proximaAt(449, 'robotic'))).not.toContain('eye-adaptation');
+  it('numa sonda robótica o ofuscamento é o da câmera, sem olho', () => {
     const glare = explainEffect('illuminance', proximaAt(160, 'robotic'));
     expect(glare.summary).toContain('câmera');
     expect(glare.details.join(' ')).not.toContain('pupila');
@@ -175,12 +171,6 @@ describe('textos e fórmulas com os valores do instante', () => {
     const flip = explainEffect('flip', proximaAt(tauHalf - 5));
     expect(flip.details.join(' ')).toContain('18,99 s-luz');
     expect(flip.formulas.at(-1)!.tex).toContain('13{,}2');
-  });
-
-  it('frenagem: o fator "mais escuro" é o mesmo do holograma', () => {
-    const ctx = proximaAt(449);
-    const eye = explainEffect('eye-adaptation', ctx);
-    expect(eye.summary).toContain(`${formatProse(ctx.photometry.dimmerFactor)} vezes mais fraca`);
   });
 
   it('CMB à frente: T = T₀·e^η e o pico de Wien', () => {

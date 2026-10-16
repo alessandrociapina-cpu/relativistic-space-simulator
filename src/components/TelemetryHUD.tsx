@@ -1,10 +1,21 @@
 import type { ReactNode } from 'react';
-import type { FlightPhase } from '../physics/RelativityEngine';
+import { G0, flipTauOf, type FlightPhase } from '../physics/RelativityEngine';
 import { formatRelativisticSpeedPercent } from '../physics/EyeAndPhotometry';
 import { findPreset } from '../physics/accelerationPresets';
 import { CMB_VISIBLE_GAMMA, activeWindowsAt } from '../physics/criticalEvents';
 import { useFlightStore } from '../store/useFlightStore';
-import { formatAccelG, formatDistance, formatDuration, formatFixed, formatGamma, formatSpan, formatVelocity } from '../ui/format';
+import {
+  formatAccelG,
+  formatDistance,
+  formatDuration,
+  formatFixed,
+  formatGamma,
+  formatSpan,
+  formatSpeedKms,
+  formatVelocity,
+} from '../ui/format';
+import type { IndicatorId } from '../ui/indicatorHelp';
+import { InfoTip } from './InfoTip';
 
 // Verbos, para o selo da fase não se confundir com o visor da aceleração α.
 const PHASE_LABEL: Readonly<Record<FlightPhase, string>> = {
@@ -12,13 +23,18 @@ const PHASE_LABEL: Readonly<Record<FlightPhase, string>> = {
   coasting: 'Inércia',
   decelerating: 'Freando',
   arrived: 'Chegada',
+  flyby: 'Passou pelo alvo',
 };
 
 interface ReadoutProps {
   label: string;
   /** Símbolo grego fora do `uppercase` (que transformaria τ em Τ). */
   symbol?: string;
+  /** O ⚠ que abre a explicação do indicador. */
+  help: IndicatorId;
   value: string;
+  /** Segunda linha, visível também no celular (a velocidade em km/s). */
+  sub?: string;
   detail?: string;
   className?: string;
   /** Visor principal (velocidade): números maiores. */
@@ -28,11 +44,12 @@ interface ReadoutProps {
 }
 
 /** Um visor do console: rótulo gravado na chapa e o número luminoso no vidro. */
-function Readout({ label, symbol, value, detail, className = '', primary = false, accent = false }: ReadoutProps) {
+function Readout({ label, symbol, help, value, sub, detail, className = '', primary = false, accent = false }: ReadoutProps) {
   return (
-    <div className={`instrument-well min-w-0 rounded-md px-2 py-1 ${accent ? 'border-amber-400/40' : ''} ${className}`}>
+    <div className={`instrument-well relative min-w-0 rounded-md px-2 py-1 ${accent ? 'border-amber-400/40' : ''} ${className}`}>
+      <InfoTip id={help} className="absolute top-0.5 right-0.5" />
       <div
-        className={`font-display truncate text-[8px] tracking-[0.2em] sm:text-[9px] ${accent ? 'text-amber-300/80' : 'text-cyan-300/70'}`}
+        className={`font-display truncate pr-4 text-[8px] tracking-[0.1em] sm:text-[9px] sm:tracking-[0.2em] ${accent ? 'text-amber-300/80' : 'text-cyan-300/70'}`}
       >
         <span className="uppercase">{label}</span>
         {symbol && (
@@ -48,6 +65,7 @@ function Readout({ label, symbol, value, detail, className = '', primary = false
       >
         {value}
       </div>
+      {sub && <div className="font-readout truncate text-[11px] text-cyan-100/90 tabular-nums sm:text-xs">{sub}</div>}
       {detail && <div className="font-readout hidden truncate text-[10px] text-slate-400 tabular-nums sm:block">{detail}</div>}
     </div>
   );
@@ -71,19 +89,27 @@ export function TelemetryHUD({ className = '' }: { className?: string }) {
   const crew = useFlightStore((s) => s.crew);
   const destination = useFlightStore((s) => s.destination);
   const windows = useFlightStore((s) => s.criticalWindows);
-  const brakeStartTau = useFlightStore((s) => s.profile.brakeStartTau);
+  // O flip do plano ou o do piloto automático, depois de religar o motor.
+  const brakeStartTau = useFlightStore((s) => flipTauOf(s.profile) ?? s.profile.brakeStartTau);
   const ignitionCountdownS = useFlightStore((s) => s.ignitionCountdownS);
   const accelG = useFlightStore((s) => s.accelG);
+  const properAccel = useFlightStore((s) => s.plannedProfile.properAccel);
   const isEyeHazard = useFlightStore((s) => s.photometry.isEyeHazard);
   const whiteout = useFlightStore((s) => s.photometry.isWhiteoutHudActive && s.crew === 'crewed');
 
   const cmbVisible = flight.gamma >= CMB_VISIBLE_GAMMA.min && flight.gamma <= CMB_VISIBLE_GAMMA.max;
   const preFlip = activeWindowsAt(windows, flight.tau).some((w) => w.kind === 'pre-flip');
-  // A aceleração própria sentida a bordo: zero com o motor desligado (cruzeiro e chegada).
-  const engineOff = flight.phase === 'coasting' || flight.phase === 'arrived';
-  const accelDetail = engineOff
-    ? `motor ${flight.phase === 'coasting' ? 'desligado' : 'parado'} · ${formatAccelG(accelG)} nas queimas`
-    : (findPreset(crew, accelG)?.title ?? 'personalizada');
+  // A aceleração própria sentida a bordo: cai até zero quando o motor é desligado.
+  const accelDetail =
+    flight.engine === 'ramp'
+      ? 'desligando o motor'
+      : flight.engine === 'off'
+        ? flight.phase === 'arrived'
+          ? 'motor parado'
+          : `motor desligado · ${formatAccelG(accelG)} nas queimas`
+        : flight.thrustAccel > properAccel * 1.000001
+          ? 'frenagem de emergência'
+          : (findPreset(crew, accelG)?.title ?? 'personalizada');
 
   return (
     <section
@@ -132,23 +158,27 @@ export function TelemetryHUD({ className = '' }: { className?: string }) {
         <Readout
           label="Velocidade"
           symbol="v/c"
+          help="velocity"
           value={formatRelativisticSpeedPercent(flight.eta)}
+          sub={formatSpeedKms(flight.beta)}
           detail={formatVelocity(flight.beta, flight.oneMinusBeta)}
           className="col-span-2 xl:col-span-1"
           primary
         />
-        <Readout label="Aceleração" symbol="α" value={engineOff ? '0 g' : formatAccelG(accelG)} detail={accelDetail} accent />
-        <Readout label="Lorentz" symbol="γ" value={formatGamma(flight.gamma)} detail={`η = ${formatFixed(flight.eta, 3)}`} />
-        <Readout label="Relógio nave" symbol="τ" value={formatDuration(flight.tau)} />
-        <Readout label="Relógio Terra" symbol="t" value={formatDuration(flight.earthTimeS)} />
+        <Readout label="Aceleração" symbol="α" help="acceleration" value={formatAccelG(flight.thrustAccel / G0)} detail={accelDetail} accent />
+        <Readout label="Lorentz" symbol="γ" help="lorentz" value={formatGamma(flight.gamma)} detail={`η = ${formatFixed(flight.eta, 3)}`} />
+        <Readout label="Relógio nave" symbol="τ" help="shipClock" value={formatDuration(flight.tau)} />
+        <Readout label="Relógio Terra" symbol="t" help="earthClock" value={formatDuration(flight.earthTimeS)} />
         <Readout
           label="Distância"
+          help="distance"
           value={formatDistance(flight.restDistanceRemainingM)}
           detail="referencial da Terra"
           className="lg:col-span-2 xl:col-span-1"
         />
         <Readout
           label="Contraída"
+          help="contracted"
           value={formatDistance(flight.contractedDistanceRemainingM)}
           detail="medida pela nave"
           className="col-span-2 xl:col-span-1"

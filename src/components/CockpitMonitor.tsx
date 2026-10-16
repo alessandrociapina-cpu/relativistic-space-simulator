@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react';
+import type { IndicatorId } from '../ui/indicatorHelp';
+import { InfoTip } from './InfoTip';
 
 interface CockpitMonitorProps {
   title: ReactNode;
@@ -8,6 +10,8 @@ interface CockpitMonitorProps {
   tilt?: 'left' | 'right';
   /** Conteúdo abaixo da tela (teclas, legendas). */
   footer?: ReactNode;
+  /** O ⚠ que explica a tela. */
+  help?: IndicatorId;
   children: ReactNode;
 }
 
@@ -20,7 +24,7 @@ const TILT = {
  * Tela pendurada do cockpit: moldura metálica presa ao console de teto por
  * duas hastes, vidro com linhas de varredura e teclas embaixo.
  */
-export function CockpitMonitor({ title, subtitle, className = '', tilt, footer, children }: CockpitMonitorProps) {
+export function CockpitMonitor({ title, subtitle, className = '', tilt, footer, help, children }: CockpitMonitorProps) {
   return (
     <div className={`relative ${className}`}>
       {/* Hastes até o console de teto. */}
@@ -28,7 +32,10 @@ export function CockpitMonitor({ title, subtitle, className = '', tilt, footer, 
       <div aria-hidden className="absolute -top-3 right-[18%] h-3 w-1 rounded-t-sm bg-gradient-to-b from-slate-500 to-slate-700 sm:-top-4 sm:h-4" />
       <section className={`hull-panel overflow-hidden rounded-lg p-1 ${tilt ? TILT[tilt] : ''}`}>
         <header className="font-display flex items-baseline justify-between gap-2 px-1.5 pt-0.5 pb-1 text-[9px] tracking-[0.18em] text-cyan-300/90 uppercase sm:text-[10px]">
-          <span className="truncate whitespace-nowrap">{title}</span>
+          <span className="flex min-w-0 items-center gap-1">
+            <span className="truncate whitespace-nowrap">{title}</span>
+            {help && <InfoTip id={help} />}
+          </span>
           {subtitle && <span className="hidden truncate text-slate-500 normal-case sm:inline">{subtitle}</span>}
         </header>
         <div className="scanlines relative aspect-[16/10] overflow-hidden sm:aspect-[4/3] rounded-sm border border-cyan-400/25 bg-black shadow-[inset_0_0_18px_rgba(0,0,0,0.9)]">

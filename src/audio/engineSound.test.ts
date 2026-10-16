@@ -23,10 +23,9 @@ describe('timbre do motor', () => {
 
 describe('empuxo', () => {
   it('só com o voo rodando, na aceleração ou na frenagem', () => {
-    expect(isThrusting(true, 'accelerating')).toBe(true);
-    expect(isThrusting(true, 'decelerating')).toBe(true);
-    expect(isThrusting(false, 'accelerating')).toBe(false);
-    expect(isThrusting(true, 'arrived')).toBe(false);
-    expect(isThrusting(true, 'coasting')).toBe(false);
+    expect(isThrusting(true, 'thrust')).toBe(true);
+    expect(isThrusting(true, 'ramp')).toBe(true);
+    expect(isThrusting(false, 'thrust')).toBe(false);
+    expect(isThrusting(true, 'off')).toBe(false);
   });
 });

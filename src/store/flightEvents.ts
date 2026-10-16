@@ -2,7 +2,7 @@
  * Marcos do voo e contagens regressivas, emitidos pelo loop de tempo próprio
  * e consumidos pelos alertas sonoros.
  */
-import type { MissionProfile } from '../physics/RelativityEngine';
+import { flipTauOf, type MissionProfile } from '../physics/RelativityEngine';
 import type { CriticalWindow } from '../physics/criticalEvents';
 
 export type MilestoneKind = 'ignition' | 'cmb-entry' | 'flip' | 'arrival';
@@ -19,12 +19,18 @@ export type FlightEvent =
 /** A contagem regressiva começa 3 s (tempo real) antes de cada marco. */
 export const COUNTDOWN_FROM_S = 3;
 
-/** Marcos em voo, ordenados por τ: entradas da CMB no visível, flip (início da frenagem) e chegada. */
+/**
+ * Marcos em voo, ordenados por τ: entradas da CMB no visível, flip (início da
+ * frenagem) e chegada. Depois de o piloto mexer no motor, só há flip se o piloto
+ * automático fizer um, e só há chegada se a nave for parar no alvo.
+ */
 export function computeMilestones(profile: MissionProfile, windows: readonly CriticalWindow[]): Milestone[] {
   const milestones: Milestone[] = windows
     .filter((w) => w.kind === 'cmb-visible')
     .map((w) => ({ kind: 'cmb-entry', tau: w.startTau }));
-  milestones.push({ kind: 'flip', tau: profile.brakeStartTau }, { kind: 'arrival', tau: profile.tauTotal });
+  const flip = flipTauOf(profile);
+  if (flip !== null) milestones.push({ kind: 'flip', tau: flip });
+  if (!profile.maneuvers || profile.maneuvers.end === 'arrival') milestones.push({ kind: 'arrival', tau: profile.tauTotal });
   return milestones.sort((a, b) => a.tau - b.tau);
 }
 

@@ -66,6 +66,12 @@ Dado um destino a distância em repouso $D_{\text{total}}$ (metros) e aceleraç�
    $$L_{\text{cruzeiro}} = D_{\text{total}} - 2\frac{c^2}{\alpha}(\cosh\eta_c - 1), \quad \tau_{\text{total}} = 2\tau_1 + \frac{L_{\text{cruzeiro}}}{c\sinh\eta_c}, \quad t_{\text{total}} = 2\frac{c}{\alpha}\sinh\eta_c + \frac{L_{\text{cruzeiro}}}{c\tanh\eta_c}$$
    A frenagem começa em `brakeStartTau` $= \tau_{\text{total}} - \tau_1$ (o flip). Com $\eta_c$ acima da rapidez do ponto médio, o perfil é o Flip-and-Burn e `burnEndTau = brakeStartTau = tauHalf`.
 7. **Equação do foguete** (`rocketMassRatio`): $\frac{m_0}{m_1} = e^{2\eta_{\max} c / v_e}$. Foguete de fótons ($v_e = c$): 38,8 para Proxima a 1 g e $6,9 \times 10^{12}$ para Andrômeda; fusão ideal ($v_e = 0,1c$): a mesma razão elevada à 10ª potência.
+8. **Motor desligado e religado pelo piloto** (`src/physics/maneuvers.ts`). O botão do motor muda o voo a partir do instante τ do comando; antes dele, vale o plano analítico. O voo vira uma lista de segmentos (`FlightSegment`, no `MissionProfile.maneuvers`), cada um com o estado inicial (η, distância que falta $L$, tempo da Terra):
+   - **Empuxo** de aceleração própria $a$ constante (com sinal: < 0 freia): $\eta = \eta_0 + a s/c$; $\cosh\eta - \cosh\eta_0$ e $\sinh\eta - \sinh\eta_0$ como produtos, sem cancelamento; na frenagem que termina no alvo, $L = \frac{c^2}{|a|}(\cosh\eta - 1)$ exata.
+   - **Rampa** ao desligar: $a(u) = a_0(1 - u/d)$, então $\eta(u) = \eta_0 + \frac{a_0}{c}\left(u - \frac{u^2}{2d}\right)$; $L$ e $t$ por Gauss–Legendre de 16 pontos. A rampa dura 3 s reais no multiplicador do momento (no máximo 1/20 da viagem planejada). Se a nave para durante a rampa (freando), ela termina em η = 0; se passa pelo alvo, o voo termina ali.
+   - **Inércia**: $\frac{dx}{d\tau} = c\sinh\eta$, $\frac{dt}{d\tau} = \cosh\eta$, até passar pelo alvo (fim `flyby`, fase "Passou pelo alvo") ou, se isso levaria mais de 100 viagens planejadas (no relógio mais longo), à deriva (`drift`).
+   - **Religar** (na inércia): o piloto automático refaz a rota para parar no alvo. Com distância de sobra ($L \ge \frac{c^2}{\alpha}(\cosh\eta - 1)$), acelera com α até $\cosh\eta_p - 1 = \frac{1}{2}\left[\frac{\alpha L}{c^2} + (\cosh\eta - 1)\right]$ e faz o flip; sem ela, freia na hora com a aceleração que para a nave no alvo, $a_e = \frac{c^2}{L}(\cosh\eta - 1)$ ("frenagem de emergência" no HUD).
+   - Janelas críticas, marcos e hologramas seguem o voo efetivo: o flip só existe se o piloto automático fizer um (`flipTauOf`), a chegada só se a nave for parar no alvo, e a faixa da CMB é procurada segmento a segmento. Uma nova partida (ou repetição) volta ao plano; a placa da missão mostra "rota alterada pelo piloto".
 ### 4.3 Catálogo de Destinos Pré-Configurados (`src/physics/destinations.ts`)
 
 | ID | Nome | Distância ($D_{\text{total}}$) | Temp. ($K$) | Raio | Direção (α, δ J2000) | V da Terra | Aceleração Padrão Sugerida |
@@ -562,6 +568,7 @@ relativistic-space-simulator/
 │   │   ├── destinations.ts        # Catálogo de estrelas e galáxias (com direção no céu e magnitude)
 │   │   ├── accelerationPresets.ts # Acelerações por tipo de nave e limites de tolerância (§7) + teste
 │   │   ├── criticalEvents.ts      # Janelas críticas do Auto-Step Down (§7.2) + teste
+│   │   ├── maneuvers.ts           # Motor desligado (rampa e inércia) e religado (piloto automático) (§4.2.8) + teste
 │   │   ├── EyeAndPhotometry.ts    # Lux da CMB, olho do piloto, auto-zoom, v/c em % (§9) + teste
 │   │   ├── blackbody.ts           # Luminância e cor de corpo negro na CPU + teste
 │   │   ├── sensorResponse.ts      # Sensor do shader (cor e tabela), autoexposição e ganho do alvo grande + teste
@@ -614,7 +621,8 @@ relativistic-space-simulator/
 │   │   ├── TeX.tsx                # Fórmula TeX renderizada pelo KaTeX
 │   │   ├── useLiveExplainContext.ts # Estado do voo para as explicações, a 4 Hz
 │   │   ├── InstrumentPanel.tsx    # Painel: missão, partida, linha do tempo, M_τ, mostrador de γ, motor, teclas
-│   │   ├── TelemetryHUD.tsx       # Console de teto: velocidade, aceleração α, γ, relógios, distâncias e avisos
+│   │   ├── TelemetryHUD.tsx       # Console de teto: velocidade (% e km/s), aceleração α, γ, relógios, distâncias e avisos
+│   │   ├── InfoTip.tsx            # ⚠ com a explicação flutuante de cada indicador
 │   │   └── SpectrumAnalyzer.tsx   # Gráfico Canvas 2D do pico de Planck da CMB vs. faixa visível
 │   ├── store/
 │   │   ├── useFlightStore.ts      # Estado global e loop de tempo próprio com Auto-Step Down + teste
@@ -629,6 +637,7 @@ relativistic-space-simulator/
 │   │   ├── appMode.ts             # Tela pela âncora da URL: abertura (#inicio), #viagem ou #sondas
 │   │   ├── cockpitUi.ts           # Estado da interface do cockpit: planejamento, telescópio, painel; tela larga ou celular
 │   │   ├── hologramMode.ts        # Seleção automática do holograma + teste
+│   │   ├── indicatorHelp.ts       # Textos das explicações flutuantes dos indicadores
 │   │   └── routeScale.ts          # Escala logarítmica do mapa de rota
 │   ├── App.tsx
 │   └── main.tsx
@@ -641,7 +650,7 @@ relativistic-space-simulator/
 1. **Telas:** a abertura (`#inicio`, ou sem âncora) escolhe entre a viagem relativística (`#viagem`) e as sondas (`#sondas`, §11). O cockpit carrega sob demanda; ao entrar, abre o **planejamento da missão** por cima dele.
 2. **Planejamento** (`MissionPlanner.tsx`), em três colunas (empilhadas no celular, com o embarque fixo no rodapé):
    - **Destino:** os cinco da §4.3, com distância, tipo e uma linha de descrição.
-   - **Nave:** "Piloto humano" (o para-brisa passa pelo olho do piloto, §9) ou "Sonda robótica" (câmeras de bordo, sem olho nem véu, sem o holograma dos olhos).
+   - **Nave:** "Piloto humano" (o para-brisa passa pelo olho do piloto, §9) ou "Sonda robótica" (câmeras de bordo, sem olho nem véu).
    - **Aceleração** (`src/physics/accelerationPresets.ts`), por tipo de nave, cada uma com a proteção, a tolerância e o tempo de viagem para o destino escolhido:
      - Tripulada: 1 g (gravidade da Terra, anos), 1,5 g (dias a semanas), 3 g deitado (horas), 6 g com traje anti-G (~10 min), 10 g com imersão em líquido (até ~3 dias, no limite), 30 g com imersão e ventilação líquida (minutos a horas) e 1,61 × 10⁶ g (hipotética: ninguém sobreviveria; mostra o que um piloto veria).
      - Robótica: 0,3 g (sonda convencional), 100 g (sonda reforçada), 10 000 g (eletrônica encapsulada), 30 000 g (nanossonda tipo Starshot) e 1,61 × 10⁶ g (hipotética: nenhum material aguenta).
@@ -650,13 +659,13 @@ relativistic-space-simulator/
    - **Perfil:** "Acelerar e frear" (Flip-and-Burn) ou "Acelerar, cruzar e frear", com a velocidade de cruzeiro num slider de rapidez (sugestão: 0,9c). O resumo mostra tempos de bordo e na Terra, γ e velocidade máximos e a razão de massa do foguete de fótons.
    - O padrão é a demonstração clássica: Proxima, 1,61 × 10⁶ g, piloto humano (hipotético). "Embarcar" aplica a missão parada em τ = 0; "⚙ Planejar" no painel reabre o planejamento.
 3. **Multiplicador de Tempo Próprio ($M_\tau$) com *Auto-Step Down*:**
-   - Escada (`src/store/timeScales.ts`): `0,01x`, `0,03x`, `0,1x`, `0,3x`, `1x`, `5x`, `20x`, `100x`, `10 min/s`, `1 h/s`, `6 h/s`, `1 dia/s`, `1 sem/s`, `1 mês/s`, `3 meses/s`, `1 ano/s`, `5 anos/s`, `25 anos/s`: da câmera lenta a $10^7$ g aos séculos de Andrômeda a 0,1 g. O painel percorre a escada com ◀ ▶, mostra quanto falta na tela ("≈ 21 min até a chegada") e tem ⟲ para o degrau "natural", o que encaixa a viagem em ~10 min (demonstração: 1x; 1 g até Proxima: 1 dia/s; 1 g até Andrômeda: 1 mês/s). Trocar de missão mantém o multiplicador se a nova viagem durar de 20 s a 3 h na tela; senão, vai para o natural.
+   - Escada (`src/store/timeScales.ts`), em tempo de bordo por segundo real: `0,01 s/s`, `0,03 s/s`, `0,1 s/s`, `0,3 s/s`, `1 s/s`, `5 s/s`, `20 s/s`, `100 s/s`, `10 min/s`, `1 h/s`, `6 h/s`, `1 dia/s`, `1 sem/s`, `1 mês/s`, `3 meses/s`, `1 ano/s`, `5 anos/s`, `25 anos/s`: da câmera lenta a $10^7$ g aos séculos de Andrômeda a 0,1 g. O painel percorre a escada com ◀ ▶, mostra quanto falta na tela ("≈ 21 min até a chegada") e tem ⟲ para o degrau "natural", o que encaixa a viagem em ~10 min (demonstração: 1 s/s; 1 g até Proxima: 1 dia/s; 1 g até Andrômeda: 1 mês/s). **Toda missão começa em 1 s/s** (tempo real); enquanto o usuário não mexe no multiplicador e a viagem duraria mais de 2 min na tela, ▶ pulsa e um aviso "◂ toque para acelerar o tempo" aponta para ele. O visor do multiplicador é estreito (5,5 rem).
    - Opção "Desacelerar nos eventos" (quando a CMB atravessa o espectro visível em $\gamma \in [400, 15000]$ e na reta final antes do *Flip*): ao entrar na janela, M_τ cai para o maior degrau com que ela dura ≥ 20 s reais, nunca abaixo de 1x. Não há degrau entre 1x e 5x: na demonstração, isso é sempre 1x.
    - **Durações na escala da missão** (`missionScaledS`): as janelas da demonstração (10 s antes do flip, contagens holográficas de 10 s) valem $\max(d, \tau_{\text{total}}\,d/600\text{ s})$: iguais na demonstração, 1/60 da viagem nas longas (~21,6 dias antes do flip a 1 g até Proxima). Se o pico de $\gamma$ fica dentro da faixa da CMB, a janela da CMB é uma só, da entrada na ida à saída na volta.
    - O Auto-Step Down age na **entrada** de cada janela crítica (a da CMB acontece na aceleração e na frenagem). Se um frame longo pularia o início da janela, $\tau$ é posicionado exatamente nele. Dentro da janela, o usuário pode voltar a acelerar.
    - Trocar o destino, $\alpha$, o perfil ou a nave reinicia a missão parada em $\tau = 0$.
 4. **Áudio procedural:**
-   - **Motor:** ruído marrom filtrado, zumbido dente-de-serra e sub-harmônico. O empuxo (voo rodando, na aceleração ou na frenagem) liga o ronco; $\log_{10}\gamma$ sobe o tom e abre o filtro, saturando em $\gamma = 10^7$. No flip, o motor corta por 0,7 s.
+   - **Motor:** ruído marrom filtrado, zumbido dente-de-serra e sub-harmônico. O empuxo (voo rodando com o motor ligado, também durante a rampa de desligamento) liga o ronco; $\log_{10}\gamma$ sobe o tom e abre o filtro, saturando em $\gamma = 10^7$. No flip, o motor corta por 0,7 s.
    - **Contagem regressiva:** a partida tem 3 s reais de contagem (o botão aborta). Antes de cada marco em voo (entrada da CMB no visível, na aceleração e na frenagem; flip; chegada), soam bipes quando o tempo **real** restante, $(\tau_{\text{marco}} - \tau)/M_\tau$, cruza 3, 2 e 1 s. Cada marco tem um som próprio.
    - O loop (`tick`) emite os eventos e o áudio só os toca, então o scrub não dispara alertas. O áudio é liberado no primeiro gesto do usuário, como os navegadores exigem.
 ---
@@ -673,26 +682,26 @@ O arquivo `src/physics/RelativityEngine.test.ts` deve passar nos seguintes teste
 1. **Iluminância visível à frente** (`visibleLuxAhead`), calculada pela física: a luminância de Planck da CMB aberrada e desviada pelo Doppler, integrada sobre o hemisfério frontal,
    $$E = 2\pi \int_0^1 L_v\!\left(T_0\,D(u)\right)(1 - u)\,du, \quad u = 1 - \cos\theta, \quad D(u) = \frac{1}{\gamma(\delta + \beta u)}$$
    com $L_v = 683 \int B_\lambda\,\bar{y}(\lambda)\,d\lambda$. O cone quente encolhe com $1/\gamma^2$, então $E$ tem um pico universal de **11 069 lux** em $\gamma \approx 6\,955$ e vale **10 799 lux** em $\gamma = 9\,356$ (vídeo: 11 065 e 10 796).
-2. **Olho do piloto** (só com piloto humano), integrado em tempo próprio ao longo da missão inteira (`computeEyeTimeline`). Por isso é determinístico: o scrub vê o mesmo estado do voo contínuo.
+2. **Olho do piloto** (só com piloto humano), integrado em tempo próprio ao longo da missão inteira (`computeEyeTimeline`). Por isso é determinístico: o scrub vê o mesmo estado do voo contínuo. Ele só afeta o para-brisa (adaptação e véu, §5); o holograma e a explicação da pupila e da retina foram retirados, porque mais confundiam do que explicavam.
    - Pupila: Moon & Spencer (1944), $d = 4{,}9 - 3\tanh(0{,}4\log_{10}E)$; contrai em 0,5 s e dilata em 300 s.
    - Retina: alvo $\log_2(1 + E/0{,}7\text{ lux})$ stops; adapta-se à luz em 60 s e recupera-se no escuro em 1 200 s.
-   - "N× mais fraca": a mesma luz do instante espelho da ida ($E(\tau) = E(\tau_{\text{total}} - \tau)$), vista com o olho de agora: $2^{R_{\text{agora}} - R_{\text{espelho}}}\,(d_{\text{espelho}}/d_{\text{agora}})^2$.
+   - "N× mais fraca" (calculado, sem exibição): a mesma luz do instante espelho da ida ($E(\tau) = E(\tau_{\text{total}} - \tau)$), vista com o olho de agora: $2^{R_{\text{agora}} - R_{\text{espelho}}}\,(d_{\text{espelho}}/d_{\text{agora}})^2$.
    - Marcos para Proxima em τ = 449 s (espelho do white-out em 150 s): pupila 2,13 mm, retina −12,8 stops, ≈ 1 290× mais escuro (vídeo: 2,14 mm, −12,9 stops, 1 260×).
 3. **Cockpit** (estilo nave de ficção científica, tudo em português; fontes Orbitron e Share Tech Mono):
-   - **Console de teto** (`TelemetryHUD`): visores de velocidade (`formatRelativisticSpeedPercent`, "99.999 999 999 994 9 %", e c − v), **aceleração α** (em âmbar, com a proteção do preset, como "Gravidade da Terra"; 0 g com o motor desligado, no cruzeiro e na chegada), γ e η, relógios da nave e da Terra, distância no referencial da Terra e contraída. Três colunas no celular, cinco na tela média e uma fileira só na larga (colunas proporcionais ao texto). Selos: fase (verbos, para não se confundir com α: Acelerando / Inércia / Freando / Chegada), "🧑‍🚀 Piloto humano" ou "🤖 Sonda robótica · sem tripulação", contagem da ignição, "⚠ Ofuscamento · luz forte à frente" (só com piloto; luz > 1 500 lux ou aceleração com $\gamma \in [200, 12\,000]$), "CMB no visível", "Flip em" (contagem com largura mínima e algarismos tabulares) e, por último, o destino. A fileira dos selos tem **altura fixa** (duas linhas no celular, uma na tela larga) e corta o que não cabe: um selo que muda de largura nunca muda a altura do console, o que fazia a tela inteira pular. Com o véu percebido > 0,25 (`isWhiteoutHudActive`), o console e os hologramas ganham fundo fosco.
+   - **Console de teto** (`TelemetryHUD`): visores de velocidade (`formatRelativisticSpeedPercent`, "99.999 999 999 994 9 %", com três casas abaixo de 1 %; a velocidade em km/s, ou m/s abaixo de 1 km/s, numa linha sempre visível, `formatSpeedKms`; e c − v), **aceleração α** (em âmbar: a aceleração própria do motor no instante, `thrustAccel`, que cai até 0 na rampa de desligamento; com a proteção do preset, "desligando o motor", "motor desligado" ou "frenagem de emergência"), γ e η, relógios da nave e da Terra, distância no referencial da Terra e contraída. Três colunas no celular, cinco na tela média e uma fileira só na larga (colunas proporcionais ao texto). Selos: fase (verbos, para não se confundir com α: Acelerando / Inércia / Freando / Chegada / Passou pelo alvo), "🧑‍🚀 Piloto humano" ou "🤖 Sonda robótica · sem tripulação", contagem da ignição, "⚠ Ofuscamento · luz forte à frente" (só com piloto; luz > 1 500 lux ou aceleração com $\gamma \in [200, 12\,000]$), "CMB no visível", "Flip em" (contagem com largura mínima e algarismos tabulares) e, por último, o destino. A fileira dos selos tem **altura fixa** (duas linhas no celular, uma na tela larga) e corta o que não cabe: um selo que muda de largura nunca muda a altura do console, o que fazia a tela inteira pular. Com o véu percebido > 0,25 (`isWhiteoutHudActive`), o console e os hologramas ganham fundo fosco.
+   - **Explicação de cada indicador** (`InfoTip`, textos em `src/ui/indicatorHelp.ts`): um triângulo com exclamação no canto de cada visor do console e ao lado do título de cada instrumento (linha do tempo, tempo de bordo por segundo, mostrador de γ, motor, rota). Passando o mouse, abre uma janela flutuante; no celular, o toque a abre e fixa (tocar fora, rolar ou Esc fecham). A janela fica num portal, abaixo do ícone na metade de cima da tela e acima na de baixo.
    - **Telas penduradas** no console por duas hastes e inclinadas para o centro na tela larga (≥ 1 024 px, `useIsWideCockpit`): o telescópio à esquerda, a rota à direita. Na tela larga, colunas laterais (`CockpitFrame`) ligam o teto ao painel. No celular não há telas penduradas: a rota vai para o painel e o telescópio abre por uma tecla; fechados, nem são montados (um contexto WebGL a menos).
-   - **Painel de instrumentos** (`InstrumentPanel`, recolhível): placa da missão (destino, α, nave, veredito, "⚙ Planejar", 🛰 sondas, ⌂ abertura), botão redondo de partida (Partida / Pausar / Retomar / Repetir / Abortar), linha do tempo, M_τ com ◀ ▶ ⟲, "Desacelerar nos eventos", mostrador analógico de γ em escala log (1 a 10¹³, com a faixa da CMB visível em âmbar), lâmpada do motor (Empuxo / Flip / Inércia / Desligado) e as teclas Explicar, Efeitos e Som. No celular: a faixa da rota no topo, partida, linha do tempo e M_τ, as teclas (com 🔭 Telescópio) e o planejamento embaixo.
+   - **Painel de instrumentos** (`InstrumentPanel`, recolhível): placa da missão (destino, α, nave, veredito, "⚙ Planejar", 🛰 sondas, ⌂ abertura), botão redondo de partida (Partida / Pausar / Retomar / Repetir / Abortar), linha do tempo, M_τ com ◀ ▶ ⟲, "Desacelerar nos eventos", mostrador analógico de γ em escala log ("Lorentz γ", 1 a 10¹³, valor "γ = …" e a legenda "▬ CMB no visível" para a faixa âmbar), o **botão do motor** (lâmpada Pronto / Empuxo / Flip / Desligando / Inércia / Desligado, α do instante e "toque para desligar" ou "toque para religar", §4.2.8; pausar congela o tempo, não desliga o motor) e as teclas Explicar, Efeitos e Som. No celular: a faixa da rota no topo, partida, linha do tempo e M_τ, as teclas (⏻ Motor / Religar, 🔭 Telescópio, Explicar, Efeitos, Som) e o planejamento embaixo.
 4. **Telescópio** (TRÁS, padrão, ou FRENTE; sensores VIS / IV / UV / RX). No celular começa desligado e abre pela tecla 🔭 do painel; aberto, esconde o holograma central, que ocupa o mesmo espaço.
    - À frente: zoom $\max(1,\ \min(\max(13,\ 0{,}253\,\gamma),\ \text{zoom que põe o alvo em 35\% da altura}))$, relativo ao FOV de 70° do para-brisa: acompanha o cone comprimido e abre abaixo de x 13 na reta final, quando o alvo cresce. Autoexposição.
    - Atrás: zoom que põe o Sol em 35% da altura, de x 13 a x 400 (atrás, a aberração amplia por $e^{\eta}$: $\tan(\theta'/2) = e^{\eta}\tan(\theta/2)$). Exposição fixa: o Sol avermelha e some do visível (no IV, continua).
 5. **Monitor direito:** "Rota · escala log" (log a partir do Sol até METADE, espelhado até o alvo), com os marcos (distância de Saturno, Nuvem de Oort), o estado do motor, as distâncias "DO SOL" e "ATÉ" o alvo e o progresso em percurso, tempo de bordo e tempo da Terra. No celular, a mesma escala numa faixa no topo do painel (`RouteStrip`): Sol, marcos, METADE, a nave, o alvo, o estado do motor e as duas distâncias.
 6. **Hologramas** (`selectHologramMode`, por critérios físicos), em ordem de prioridade:
-   1. "FRENAGEM EM" antes do início da frenagem; "CHEGADA EM" antes da chegada (10 s na demonstração, 1/60 da viagem nas longas, quando a contagem mostra o tempo de bordo restante, como "6,47 dias").
+   1. "FRENAGEM EM" antes do flip (o do plano ou o do piloto automático); "CHEGADA EM" antes da chegada, ou "PASSAGEM PELO ALVO EM" com o motor desligado (10 s na demonstração, 1/60 da viagem nas longas, quando a contagem mostra o tempo de bordo restante, como "6,47 dias"). À deriva, sem contagem.
    2. Anéis do Sistema Solar ("DISTÂNCIA DO SOL"): aceleração, 5–32 UA do Sol.
-   3. "Seus olhos depois do clarão" (só com piloto humano): frenagem, $T_{\text{CMB}} \in (5\,000, 60\,000)$ K e fator "mais fraca" ≥ 2 (em viagens de anos o olho acompanha a luz e o fator fica em ~1). Mostra a mesma luz em dois momentos: na ida (τ espelho, olho ofuscado: pupila e sensibilidade da retina) e agora (pupila, retina "N× menos sensível", a luz "N× mais fraca").
-   4. Espectro da CMB ("CMB À FRENTE · T", "PICO EM nm"): pico de Wien entre 260 e 980 nm.
-   5. Curva de lux ("LUZ VISÍVEL À FRENTE"): aceleração, $T_{\text{CMB}} \in (15\,000, 180\,000)$ K.
-   6. Desvio para o azul do alvo ("COR REAL" × "VISTA AGORA"): frenagem, $\gamma \in [8, 220]$.
+   3. Espectro da CMB ("CMB À FRENTE · T", "PICO EM nm"): pico de Wien entre 260 e 980 nm.
+   4. Curva de lux ("LUZ VISÍVEL À FRENTE"): aceleração, $T_{\text{CMB}} \in (15\,000, 180\,000)$ K.
+   5. Desvio para o azul do alvo ("COR REAL" × "VISTA AGORA"): frenagem, $\gamma \in [8, 220]$.
 
 ---
 ## 10. Explicações dos Efeitos (Modo Explicar)
@@ -711,9 +720,8 @@ O arquivo `src/physics/RelativityEngine.test.ts` deve passar nos seguintes teste
    | Cone quente | $\gamma$ acima do pico de lux ($\approx 6\,955$) | 181 s |
    | CMB em raios X | pico de Wien $\le 10$ nm | 220 s |
    | Flip | janela antes do início da frenagem (10 s na demonstração) | 289 s |
-   | Inércia (motor desligado) | fase `coasting` do perfil com cruzeiro | — |
+   | Inércia (motor desligado) | fase `coasting`: o cruzeiro do plano ou o motor desligado pelo piloto | — |
    | Frenagem | fase de frenagem | 299 s |
-   | Olhos adaptados (só com piloto) | frenagem, $T_{\text{CMB}} \in (5\,000, 60\,000)$ K e fator ≥ 2 | 409 s |
    | Alvo azulado | frenagem, $\gamma \in [8, 220]$ | 483 s |
    | Chegada | fase de chegada | 599 s |
    | Missão | sempre (só no painel) | — |

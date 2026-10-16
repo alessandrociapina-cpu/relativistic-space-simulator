@@ -179,6 +179,16 @@ export function formatRouteDistance(meters: number): string {
   return ly < 1000 ? `${fixed(ly, ly < 10 ? 2 : 1)} a.l.` : `${formatSpaceNumber(ly)} a.l.`;
 }
 
+/** Velocidade em km/s (m/s abaixo de 1 km/s): "850 m/s", "15,0 km/s", "319 km/s", "299 792 km/s". */
+export function formatSpeedKms(beta: number): string {
+  const v = beta * C;
+  if (v === 0) return '0 km/s';
+  if (v < 1000) return `${formatReadout(v)} m/s`;
+  const kms = v / 1000;
+  // Trunca: perto de c continua "299 792 km/s" (c = 299 792,458 km/s), nunca o valor de c arredondado para cima.
+  return kms < 1000 ? `${formatReadout(kms)} km/s` : `${formatSpaceNumber(Math.floor(kms))} km/s`;
+}
+
 /** v em frações de c até 0,99c; acima, quanto falta para c (c − v). */
 export function formatVelocity(beta: number, oneMinusBeta: number): string {
   return beta < 0.99 ? `${fixed(beta, 4)} c` : `c − ${formatSpeed(C * oneMinusBeta)}`;

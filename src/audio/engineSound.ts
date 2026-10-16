@@ -1,4 +1,4 @@
-import type { FlightPhase } from '../physics/RelativityEngine';
+import type { EngineState } from '../physics/RelativityEngine';
 
 export interface EngineSound {
   /** Fundamental do zumbido (Hz); o sub-harmônico fica uma oitava abaixo. */
@@ -27,7 +27,7 @@ export function engineSound(gamma: number, thrusting: boolean): EngineSound {
   };
 }
 
-/** Há empuxo só com o voo rodando, na aceleração ou na frenagem. */
-export function isThrusting(playing: boolean, phase: FlightPhase): boolean {
-  return playing && (phase === 'accelerating' || phase === 'decelerating');
+/** Há empuxo só com o voo rodando e o motor ligado (também durante a rampa de desligamento). */
+export function isThrusting(playing: boolean, engine: EngineState): boolean {
+  return playing && engine !== 'off';
 }

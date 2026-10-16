@@ -14,9 +14,10 @@ import {
   type EyeTimeline,
   type PhotometryAndEyeState,
 } from '../physics/EyeAndPhotometry';
+import { cutEngine, engineCommandAt, engineRampTau, relightEngine } from '../physics/maneuvers';
 import { computeBodyAngularRadii } from '../physics/sky';
 import { activeEffects, newAnnouncements, type EffectId } from '../ui/explanations';
-import { stepDownTimeScale, timeScaleForMission } from './timeScales';
+import { stepDownTimeScale } from './timeScales';
 import {
   COUNTDOWN_FROM_S,
   computeMilestones,
@@ -43,7 +44,10 @@ export interface MissionChoice {
 }
 
 export interface FlightStore extends MissionChoice {
+  /** O voo efetivo: o plano, ou o plano com os comandos do piloto no motor. */
   readonly profile: MissionProfile;
+  /** O plano da missão, como saiu do planejamento. */
+  readonly plannedProfile: MissionProfile;
   readonly criticalWindows: readonly CriticalWindow[];
   readonly milestones: readonly Milestone[];
   /** Adaptação do olho pré-calculada para a missão inteira. */
@@ -57,6 +61,8 @@ export interface FlightStore extends MissionChoice {
   readonly timeScale: number;
   /** Desacelera M_τ ao entrar em um evento crítico (1x na demonstração). */
   readonly autoStepDown: boolean;
+  /** O usuário já mexeu no multiplicador (some o aviso "acelere o tempo"). */
+  readonly timeScaleTouched: boolean;
   /** Snapshot cinemático lido pelos monitores e pelo HUD. */
   readonly flight: FlightState;
   /** Luz da CMB à frente, olho do piloto e auto-zoom, no mesmo instante de `flight`. */
@@ -77,6 +83,8 @@ export interface FlightStore extends MissionChoice {
   seek: (tau: number) => void;
   setTimeScale: (timeScale: number) => void;
   setAutoStepDown: (on: boolean) => void;
+  /** Desliga o motor (a aceleração cai aos poucos até zero) ou o religa (piloto automático até o alvo). */
+  toggleEngine: () => void;
   showInsight: (id: EffectId | null) => void;
   /** Avança o relógio de bordo por `dtRealS` segundos reais (chamado a cada frame). */
   tick: (dtRealS: number) => void;
@@ -97,19 +105,27 @@ function newFlightLog(): Pick<FlightStore, 'insight' | 'announcedEffects'> {
   return { insight: null, announcedEffects: [] };
 }
 
+/** O voo efetivo e o que depende dele: janelas críticas, marcos e a curva de luz. */
+function flightPlan(profile: MissionProfile) {
+  const criticalWindows = computeCriticalWindows(profile);
+  return {
+    profile,
+    criticalWindows,
+    milestones: computeMilestones(profile, criticalWindows),
+    eyeTimeline: computeEyeTimeline(profile),
+  };
+}
+
 /** Nova missão parada no instante da partida. */
 function newMission({ destination, accelG, coastEta, crew }: MissionChoice) {
   const profile = destinationMissionProfile(destination, accelG, coastEta);
-  const criticalWindows = computeCriticalWindows(profile);
   return {
     destination,
     accelG,
     coastEta,
     crew,
-    profile,
-    criticalWindows,
-    milestones: computeMilestones(profile, criticalWindows),
-    eyeTimeline: computeEyeTimeline(profile),
+    plannedProfile: profile,
+    ...flightPlan(profile),
     tau: 0,
     playing: false,
     ignitionCountdownS: null,
@@ -138,11 +154,10 @@ export const useFlightStore = create<FlightStore>()((set, get) => {
     coastEta: null,
     crew: 'crewed',
   });
-  /** Troca de missão: mantém o multiplicador se ele ainda faz sentido para a nova viagem. */
+  /** Troca de missão: começa sempre em tempo real (1 s/s); o painel sugere acelerar. */
   const remission = (patch: Partial<MissionChoice>) => {
     const { destination, accelG, coastEta, crew } = get();
-    const mission = newMission({ destination, accelG, coastEta, crew, ...patch });
-    update({ ...mission, timeScale: timeScaleForMission(get().timeScale, mission.profile) });
+    update({ ...newMission({ destination, accelG, coastEta, crew, ...patch }), timeScale: 1 });
   };
   const initialFlight = computeFlightState(initial.profile, 0);
 
@@ -150,6 +165,7 @@ export const useFlightStore = create<FlightStore>()((set, get) => {
     ...initial,
     timeScale: 1,
     autoStepDown: true,
+    timeScaleTouched: false,
     flight: initialFlight,
     photometry: derivePhotometry(initialFlight, initial),
 
@@ -159,18 +175,27 @@ export const useFlightStore = create<FlightStore>()((set, get) => {
     setCoastEta: (coastEta) => remission({ coastEta }),
     setCrew: (crew) => remission({ crew }),
     togglePlay: () => {
-      const { playing, ignitionCountdownS, tau, profile } = get();
+      const { playing, ignitionCountdownS, tau, profile, plannedProfile } = get();
       if (ignitionCountdownS !== null) return update({ ignitionCountdownS: null });
       if (playing) return update({ playing: false });
       if (tau > 0 && tau < profile.tauTotal) return update({ playing: true });
-      // Partida (ou repetição): contagem regressiva antes da ignição.
-      update({ tau: 0, ignitionCountdownS: COUNTDOWN_FROM_S, ...newFlightLog() });
+      // Partida (ou repetição): contagem regressiva antes da ignição, de volta ao plano.
+      const replan = profile === plannedProfile ? {} : flightPlan(plannedProfile);
+      update({ tau: 0, ignitionCountdownS: COUNTDOWN_FROM_S, ...replan, ...newFlightLog() });
       emitFlightEvents([countdown('ignition', COUNTDOWN_FROM_S)]);
     },
     // O scrub não anuncia efeitos e dispensa o cartão, que falaria de outro instante.
     seek: (tau) => update({ tau: clamp(tau, 0, get().profile.tauTotal), insight: null }),
-    setTimeScale: (timeScale) => set({ timeScale }),
+    setTimeScale: (timeScale) => set({ timeScale, timeScaleTouched: true }),
     setAutoStepDown: (autoStepDown) => set({ autoStepDown }),
+    toggleEngine: () => {
+      const { profile, tau, timeScale } = get();
+      const command = engineCommandAt(profile, tau);
+      if (!command) return;
+      const next = command === 'cut' ? cutEngine(profile, tau, engineRampTau(timeScale)) : relightEngine(profile, tau);
+      // O cartão em tela falava do voo antigo (o flip planejado, por exemplo): sai.
+      update({ ...flightPlan(next), insight: null });
+    },
     showInsight: (insight) => set({ insight }),
 
     tick: (dtRealS) => {

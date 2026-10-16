@@ -150,7 +150,8 @@ describe('formatRelativisticSpeedPercent', () => {
   });
 
   it('velocidades baixas em formato simples', () => {
-    expect(formatRelativisticSpeedPercent(0)).toBe('0.0 %');
+    expect(formatRelativisticSpeedPercent(0)).toBe('0.000 %');
+    expect(formatRelativisticSpeedPercent(Math.atanh(0.00106))).toBe('0.106 %');
     expect(formatRelativisticSpeedPercent(Math.atanh(0.5))).toBe('50.0 %');
     expect(formatRelativisticSpeedPercent(Math.atanh(0.995))).toBe('99.500 %');
   });

@@ -14,16 +14,17 @@ export interface TimeScaleStep {
   readonly title: string;
 }
 
-// Nenhum degrau entre 1x e 5x: na demonstração a janela da CMB (68 s) cai sempre para 1x.
+// Nenhum degrau entre 1 e 5 s/s: na demonstração a janela da CMB (68 s) cai sempre para 1 s/s.
+// Rótulos em "tempo de bordo por segundo real", como o título do controle.
 export const TIME_SCALE_LADDER: readonly TimeScaleStep[] = [
-  { value: 0.01, label: '0,01x', title: '0,01 s de bordo por segundo (câmera lenta)' },
-  { value: 0.03, label: '0,03x', title: '0,03 s de bordo por segundo (câmera lenta)' },
-  { value: 0.1, label: '0,1x', title: '0,1 s de bordo por segundo' },
-  { value: 0.3, label: '0,3x', title: '0,3 s de bordo por segundo' },
-  { value: 1, label: '1x', title: 'Tempo real' },
-  { value: 5, label: '5x', title: '5 s de bordo por segundo' },
-  { value: 20, label: '20x', title: '20 s de bordo por segundo' },
-  { value: 100, label: '100x', title: '100 s de bordo por segundo' },
+  { value: 0.01, label: '0,01 s/s', title: '0,01 s de bordo por segundo (câmera lenta)' },
+  { value: 0.03, label: '0,03 s/s', title: '0,03 s de bordo por segundo (câmera lenta)' },
+  { value: 0.1, label: '0,1 s/s', title: '0,1 s de bordo por segundo' },
+  { value: 0.3, label: '0,3 s/s', title: '0,3 s de bordo por segundo' },
+  { value: 1, label: '1 s/s', title: 'Tempo real: 1 segundo de bordo por segundo' },
+  { value: 5, label: '5 s/s', title: '5 s de bordo por segundo' },
+  { value: 20, label: '20 s/s', title: '20 s de bordo por segundo' },
+  { value: 100, label: '100 s/s', title: '100 s de bordo por segundo' },
   { value: 600, label: '10 min/s', title: '10 minutos de bordo por segundo' },
   { value: 3600, label: '1 h/s', title: '1 hora de bordo por segundo' },
   { value: 21_600, label: '6 h/s', title: '6 horas de bordo por segundo' },
@@ -87,5 +88,5 @@ export function stepDownTimeScale(window: CriticalWindow): number {
 }
 
 export function timeScaleStep(value: number): TimeScaleStep {
-  return TIME_SCALE_LADDER[ladderIndex(value)] ?? { value, label: `${value}x`, title: `${value} s de bordo por segundo` };
+  return TIME_SCALE_LADDER[ladderIndex(value)] ?? { value, label: `${value} s/s`, title: `${value} s de bordo por segundo` };
 }

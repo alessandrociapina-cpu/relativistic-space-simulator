@@ -2,7 +2,7 @@
  * Eventos críticos do voo (CLAUDE.md §7.2), em intervalos de tempo próprio τ.
  * O Auto-Step Down desacelera o multiplicador ao entrar em um deles.
  */
-import { C, type MissionProfile } from './RelativityEngine';
+import { C, computeFlightState, flipTauOf, segmentState, type MissionProfile } from './RelativityEngine';
 
 /** Faixa de γ em que a CMB atravessa o espectro visível. */
 export const CMB_VISIBLE_GAMMA = { min: 400, max: 15_000 } as const;
@@ -36,8 +36,64 @@ export interface CriticalWindow {
 const ETA_CMB_MIN = Math.acosh(CMB_VISIBLE_GAMMA.min);
 const ETA_CMB_MAX = Math.acosh(CMB_VISIBLE_GAMMA.max);
 
+/** Amostras por segmento ao procurar a faixa da CMB num voo com manobras. */
+const SAMPLES_PER_SEGMENT = 240;
+
+/**
+ * Janelas de um voo em que o piloto desligou ou religou o motor: as do plano
+ * até o primeiro comando e, depois, a faixa da CMB procurada segmento a
+ * segmento (amostras e bissecção) e o flip do piloto automático, se houver.
+ */
+function maneuveredWindows(profile: MissionProfile): CriticalWindow[] {
+  const m = profile.maneuvers!;
+  const windows: CriticalWindow[] = computeCriticalWindows(m.plan)
+    .filter((w) => w.kind === 'cmb-visible' && w.startTau < m.firstTau)
+    .map((w) => ({ ...w, endTau: Math.min(w.endTau, m.firstTau) }));
+  const flip = flipTauOf(profile);
+  if (flip !== null) windows.push({ kind: 'pre-flip', startTau: Math.max(0, flip - preFlipWindowS(profile)), endTau: flip });
+
+  const inBand = (eta: number) => eta >= ETA_CMB_MIN && eta <= ETA_CMB_MAX;
+  const etaAt = (tau: number) => computeFlightState(profile, tau).eta;
+  const edge = (lo: number, hi: number, loInside: boolean) => {
+    for (let i = 0; i < 50; i++) {
+      const mid = (lo + hi) / 2;
+      if (inBand(etaAt(mid)) === loInside) lo = mid;
+      else hi = mid;
+    }
+    return (lo + hi) / 2;
+  };
+  let open: number | null = null;
+  let prevTau = m.firstTau;
+  let prevInside = inBand(etaAt(m.firstTau));
+  if (prevInside) {
+    // A janela do plano que estava aberta no comando continua.
+    const carried = windows.findIndex((w) => w.kind === 'cmb-visible' && w.endTau === m.firstTau);
+    open = carried >= 0 ? windows.splice(carried, 1)[0]!.startTau : m.firstTau;
+  }
+  for (const seg of m.segments.filter((s) => s.startTau + s.duration > m.firstTau)) {
+    for (let i = 1; i <= SAMPLES_PER_SEGMENT; i++) {
+      const tau = seg.startTau + (seg.duration * i) / SAMPLES_PER_SEGMENT;
+      if (tau <= prevTau) continue;
+      const inside = inBand(segmentState(seg, tau - seg.startTau).eta);
+      if (inside !== prevInside) {
+        const at = edge(prevTau, tau, prevInside);
+        if (inside) open = at;
+        else if (open !== null) {
+          windows.push({ kind: 'cmb-visible', startTau: open, endTau: at });
+          open = null;
+        }
+        prevInside = inside;
+      }
+      prevTau = tau;
+    }
+  }
+  if (open !== null) windows.push({ kind: 'cmb-visible', startTau: open, endTau: profile.tauTotal });
+  return windows.sort((a, b) => a.startTau - b.startTau);
+}
+
 /** Janelas críticas da missão, ordenadas pelo início. */
 export function computeCriticalWindows(profile: MissionProfile): CriticalWindow[] {
+  if (profile.maneuvers) return maneuveredWindows(profile);
   const { brakeStartTau, tauTotal, etaMax, properAccel } = profile;
   const cOverA = C / properAccel;
   const windows: CriticalWindow[] = [

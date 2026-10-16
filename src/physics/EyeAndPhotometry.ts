@@ -312,7 +312,8 @@ export function formatRelativisticSpeedPercent(eta: number): string {
   const oneMinusBeta = Math.exp(-a) / Math.cosh(a);
   if (oneMinusBeta > 1e-3) {
     const pct = Math.tanh(a) * 100;
-    return `${pct.toFixed(pct < 99 ? 1 : 3)} %`;
+    // Abaixo de 1 %, três casas: a 0,825 g, depois de 11 h, "0.106 %" em vez de "0.1 %".
+    return `${pct.toFixed(pct < 1 || pct >= 99 ? 3 : 1)} %`;
   }
   // 100 − P = m·10^e, m ∈ [1, 10): depois da vírgula vêm (−e − 1) noves e os
   // dois algarismos de (10 − m).

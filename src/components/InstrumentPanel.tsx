@@ -1,21 +1,25 @@
 import type { ReactNode } from 'react';
 import { useAudioSettings } from '../audio/audioSettings';
-import { log10GammaFromRapidity } from '../physics/RelativityEngine';
+import { G0, log10GammaFromRapidity } from '../physics/RelativityEngine';
 import { assessMission } from '../physics/accelerationPresets';
 import { CMB_VISIBLE_GAMMA, activeWindowsAt } from '../physics/criticalEvents';
+import { engineCommandAt } from '../physics/maneuvers';
 import { adjacentTimeScale, naturalTimeScale, timeScaleStep } from '../store/timeScales';
 import { useFlightStore } from '../store/useFlightStore';
 import { APP_HASH } from '../ui/appMode';
 import { useCockpitUi } from '../ui/cockpitUi';
 import { useExplainSettings } from '../ui/explainSettings';
 import { formatAccelG, formatDuration, formatGamma, formatSpan } from '../ui/format';
+import type { IndicatorId } from '../ui/indicatorHelp';
+import { InfoTip } from './InfoTip';
 import { RouteStrip } from './RouteMonitor';
 
-/** Rótulo gravado na chapa do painel. */
-function Plate({ children, className = '' }: { children: ReactNode; className?: string }) {
+/** Rótulo gravado na chapa do painel, com o ⚠ que explica o instrumento. */
+function Plate({ children, className = '', help }: { children: ReactNode; className?: string; help?: IndicatorId }) {
   return (
-    <div className={`font-display text-[8px] tracking-[0.22em] text-slate-400 uppercase sm:text-[9px] ${className}`}>
-      {children}
+    <div className={`font-display flex items-center gap-1 text-[8px] tracking-[0.22em] text-slate-400 uppercase sm:text-[9px] ${className}`}>
+      <span className="min-w-0 truncate">{children}</span>
+      {help && <InfoTip id={help} />}
     </div>
   );
 }
@@ -27,12 +31,14 @@ function KeySwitch({
   icon,
   title,
   onClick,
+  disabled = false,
 }: {
   on: boolean;
   label: string;
   icon: string;
   title: string;
   onClick: () => void;
+  disabled?: boolean;
 }) {
   return (
     <button
@@ -41,7 +47,8 @@ function KeySwitch({
       aria-label={label}
       title={title}
       onClick={onClick}
-      className="flex min-w-0 flex-col items-center gap-0.5 rounded-md border border-slate-600/70 bg-gradient-to-b from-slate-700/80 to-slate-900 px-2 py-1 text-slate-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] hover:from-slate-600"
+      disabled={disabled}
+      className="flex min-w-0 flex-col items-center gap-0.5 rounded-md border border-slate-600/70 bg-gradient-to-b from-slate-700/80 to-slate-900 px-2 py-1 text-slate-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] hover:from-slate-600 disabled:opacity-45"
     >
       <span
         aria-hidden
@@ -58,7 +65,8 @@ function MissionPlate() {
   const destination = useFlightStore((s) => s.destination);
   const accelG = useFlightStore((s) => s.accelG);
   const crew = useFlightStore((s) => s.crew);
-  const profile = useFlightStore((s) => s.profile);
+  const profile = useFlightStore((s) => s.plannedProfile);
+  const manual = useFlightStore((s) => s.profile.maneuvers !== undefined);
   const openPlanner = useCockpitUi((s) => s.openPlanner);
   const viability = assessMission(crew, accelG, profile).viability;
   return (
@@ -75,7 +83,11 @@ function MissionPlate() {
           {viability === 'over-limit' && <span className="text-amber-300"> · além do limite humano</span>}
         </div>
         <div className="font-readout truncate text-[10px] text-slate-500">
-          {formatSpan(profile.tauTotal)} a bordo · {formatSpan(profile.tTotal)} na Terra
+          {manual ? (
+            <span className="text-sky-300">rota alterada pelo piloto</span>
+          ) : (
+            `${formatSpan(profile.tauTotal)} a bordo · ${formatSpan(profile.tTotal)} na Terra`
+          )}
         </div>
       </div>
       <div className="flex gap-1">
@@ -144,7 +156,7 @@ function Timeline() {
   return (
     <div className="flex min-w-0 flex-col gap-0.5">
       <div className="flex items-baseline justify-between gap-2">
-        <Plate>
+        <Plate help="timeline">
           Linha do tempo <span className="font-readout tracking-normal normal-case">τ</span>
         </Plate>
         <span className="font-readout truncate text-[11px] text-cyan-100 tabular-nums">
@@ -165,27 +177,39 @@ function Timeline() {
   );
 }
 
+const END_TEXT = { arrival: 'até a chegada', flyby: 'até passar pelo alvo', drift: 'até o fim da linha do tempo' } as const;
+
 function TimeWarp() {
   const timeScale = useFlightStore((s) => s.timeScale);
   const remaining = useFlightStore((s) => s.profile.tauTotal - s.tau);
   const natural = useFlightStore((s) => naturalTimeScale(s.profile));
   const autoStepDown = useFlightStore((s) => s.autoStepDown);
+  const touched = useFlightStore((s) => s.timeScaleTouched);
+  const end = useFlightStore((s) => s.profile.maneuvers?.end ?? 'arrival');
   const setTimeScale = useFlightStore((s) => s.setTimeScale);
   const setAutoStepDown = useFlightStore((s) => s.setAutoStepDown);
   const step = timeScaleStep(timeScale);
+  // Toda missão começa em tempo real: até o usuário mexer, um aviso aponta para ▶.
+  const hint = !touched && timeScale === 1 && remaining / timeScale > 120;
   const stepClass =
     'h-7 w-8 shrink-0 rounded-md border border-slate-600/70 bg-gradient-to-b from-slate-700/80 to-slate-900 text-xs text-slate-200 hover:from-slate-600 disabled:opacity-40';
   return (
     <div className="flex min-w-0 flex-col gap-1">
-      <Plate>Tempo de bordo por segundo</Plate>
+      <Plate help="timeScale">Tempo de bordo por segundo</Plate>
       <div className="flex items-center gap-1" role="group" aria-label="Multiplicador de tempo próprio">
         <button type="button" aria-label="Mais devagar" className={stepClass} onClick={() => setTimeScale(adjacentTimeScale(timeScale, -1))}>
           ◀
         </button>
-        <div className="instrument-well min-w-0 flex-1 rounded-md px-2 py-0.5 text-center" title={step.title}>
-          <span className="font-readout glow-text text-sm text-cyan-50">{step.label}</span>
+        <div className="instrument-well w-[5.5rem] shrink-0 rounded-md px-1 py-0.5 text-center" title={step.title}>
+          <span className="font-readout glow-text text-sm whitespace-nowrap text-cyan-50">{step.label}</span>
         </div>
-        <button type="button" aria-label="Mais depressa" className={stepClass} onClick={() => setTimeScale(adjacentTimeScale(timeScale, 1))}>
+        <button
+          type="button"
+          aria-label="Mais depressa"
+          title="Acelerar o tempo da simulação"
+          className={`${stepClass} ${hint ? 'animate-pulse border-amber-300 text-amber-200 shadow-[0_0_10px_rgba(252,211,77,0.6)]' : ''}`}
+          onClick={() => setTimeScale(adjacentTimeScale(timeScale, 1))}
+        >
           ▶
         </button>
         <button
@@ -198,9 +222,16 @@ function TimeWarp() {
         >
           ⟲
         </button>
+        {hint && (
+          <span className="font-readout min-w-0 animate-pulse text-[10px] leading-tight text-amber-300">◂ toque para acelerar o tempo</span>
+        )}
       </div>
       <div className="flex flex-wrap items-center justify-between gap-x-2 text-[10px] text-slate-400">
-        <span className="font-readout">{remaining > 0 ? `≈ ${formatSpan(remaining / timeScale)} até a chegada` : 'chegou'}</span>
+        <span className="font-readout">{remaining > 0
+            ? `≈ ${formatSpan(remaining / timeScale)} ${END_TEXT[end]}`
+            : end === 'arrival'
+              ? 'chegou'
+              : 'fim do voo'}</span>
         <label className="flex items-center gap-1 text-slate-300" title="Ao entrar num evento crítico, o tempo desacelera para dar tempo de ver">
           <input type="checkbox" className="accent-cyan-400" checked={autoStepDown} onChange={(e) => setAutoStepDown(e.target.checked)} />
           Desacelerar nos eventos
@@ -238,6 +269,9 @@ function GammaDial() {
   const cmbTo = dialAngle(Math.log10(CMB_VISIBLE_GAMMA.max));
   return (
     <div className="flex flex-col items-center">
+      <Plate help="gammaDial">
+        Lorentz <span className="font-readout tracking-normal normal-case">γ</span>
+      </Plate>
       <svg viewBox="0 0 100 78" className="h-[4.5rem] w-24" role="img" aria-label={`Fator de Lorentz γ = ${formatGamma(gamma)}`}>
         <circle cx="50" cy="50" r="46" fill="#04080d" stroke="#334155" />
         <path d={arcPath(-120, 120, 38)} fill="none" stroke="#1e293b" strokeWidth="6" />
@@ -267,37 +301,65 @@ function GammaDial() {
           γ
         </text>
       </svg>
-      <span className="font-readout -mt-1 text-[11px] text-cyan-50 tabular-nums">{formatGamma(gamma)}</span>
+      <span className="font-readout -mt-1 text-[11px] text-cyan-50 tabular-nums">γ = {formatGamma(gamma)}</span>
+      <span className="font-readout text-[9px] text-amber-400/90">▬ CMB no visível</span>
     </div>
   );
 }
 
-type EngineState = 'thrust' | 'flip' | 'coast' | 'off';
+type LampState = 'ready' | 'thrust' | 'flip' | 'ramp' | 'coast' | 'off';
 
-const ENGINE: Readonly<Record<EngineState, { label: string; lamp: string }>> = {
+const ENGINE: Readonly<Record<LampState, { label: string; lamp: string }>> = {
+  ready: { label: 'Pronto', lamp: 'bg-slate-500' },
   thrust: { label: 'Empuxo', lamp: 'bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.9)]' },
   flip: { label: 'Flip', lamp: 'bg-rose-400 shadow-[0_0_12px_rgba(251,113,133,0.9)] animate-beacon' },
+  ramp: { label: 'Desligando', lamp: 'bg-amber-300 shadow-[0_0_12px_rgba(252,211,77,0.9)] animate-beacon' },
   coast: { label: 'Inércia', lamp: 'bg-sky-400 shadow-[0_0_10px_rgba(56,189,248,0.8)]' },
   off: { label: 'Desligado', lamp: 'bg-slate-600' },
 };
 
-/** Lâmpada do motor e a aceleração própria. */
-function EngineLamp() {
-  const state = useFlightStore((s): EngineState => {
-    const { phase, tau } = s.flight;
-    if (phase === 'coasting') return 'coast';
-    if (phase === 'arrived' || !s.playing) return 'off';
+/**
+ * Estado do motor no instante do voo, independente da pausa (pausar congela o
+ * tempo, não desliga o motor). `command`: o que um toque no botão faz agora.
+ */
+function useEngine() {
+  const state = useFlightStore((s): LampState => {
+    const { phase, tau, engine } = s.flight;
+    if (tau === 0 && !s.playing) return 'ready';
+    if (phase === 'arrived' || phase === 'flyby') return 'off';
+    if (engine === 'ramp') return 'ramp';
+    if (engine === 'off') return 'coast';
     if (phase === 'accelerating' && activeWindowsAt(s.criticalWindows, tau).some((w) => w.kind === 'pre-flip')) return 'flip';
     return 'thrust';
   });
-  const accelG = useFlightStore((s) => s.accelG);
+  const command = useFlightStore((s) => (s.ignitionCountdownS === null ? engineCommandAt(s.profile, s.tau) : null));
+  const toggleEngine = useFlightStore((s) => s.toggleEngine);
+  return { state, command, toggleEngine };
+}
+
+const COMMAND_HINT = { cut: 'toque para desligar', relight: 'toque para religar' } as const;
+
+/** Lâmpada do motor, que também é o botão para desligá-lo (rampa até 0) e religá-lo (piloto automático). */
+function EngineControl() {
+  const { state, command, toggleEngine } = useEngine();
+  const thrustG = useFlightStore((s) => s.flight.thrustAccel / G0);
   const { label, lamp } = ENGINE[state];
   return (
-    <div className="instrument-well flex min-w-0 flex-col items-center gap-1 rounded-md px-2 py-1.5">
-      <Plate>Motor</Plate>
-      <span aria-hidden className={`h-3 w-3 rounded-full ${lamp}`} />
-      <span className="font-display text-[9px] tracking-[0.15em] text-slate-100 uppercase">{label}</span>
-      <span className="font-readout truncate text-[10px] text-cyan-200">α {formatAccelG(accelG)}</span>
+    <div className="flex flex-col items-center gap-1">
+      <Plate help="engine">Motor</Plate>
+      <button
+        type="button"
+        disabled={!command}
+        onClick={toggleEngine}
+        aria-label={command === 'cut' ? 'Desligar o motor' : command === 'relight' ? 'Religar o motor' : `Motor: ${label}`}
+        title={command ? COMMAND_HINT[command] : undefined}
+        className="instrument-well flex w-[6.5rem] min-w-0 flex-col items-center gap-1 rounded-md px-2 py-1.5 enabled:cursor-pointer enabled:hover:border-cyan-300/60"
+      >
+        <span aria-hidden className={`h-3 w-3 rounded-full ${lamp}`} />
+        <span className="font-display text-[9px] tracking-[0.15em] text-slate-100 uppercase">{label}</span>
+        <span className="font-readout truncate text-[10px] text-cyan-200 tabular-nums">α {formatAccelG(thrustG)}</span>
+        <span className="text-[9px] leading-none text-slate-400">{command ? COMMAND_HINT[command] : '\u00a0'}</span>
+      </button>
     </div>
   );
 }
@@ -312,10 +374,19 @@ function Switches() {
   const toggleSound = useAudioSettings((s) => s.toggle);
   const telescope = useCockpitUi((s) => s.telescopeOpen);
   const toggleTelescope = useCockpitUi((s) => s.toggleTelescope);
+  const engine = useEngine();
   return (
-    <div className="grid grid-cols-4 gap-1 lg:grid-cols-3">
-      {/* Na tela larga o telescópio fica sempre pendurado; no celular, abre por esta tecla. */}
+    <div className="grid grid-cols-5 gap-1 lg:grid-cols-3">
+      {/* Na tela larga o telescópio fica sempre pendurado e o motor tem o seu botão; no celular, teclas. */}
       <div className="contents lg:hidden">
+        <KeySwitch
+          on={engine.state === 'thrust' || engine.state === 'flip' || engine.state === 'ramp'}
+          label={engine.command === 'relight' ? 'Religar' : 'Motor'}
+          icon="⏻"
+          title={engine.command ? `Motor: ${ENGINE[engine.state].label} · ${COMMAND_HINT[engine.command]}` : `Motor: ${ENGINE[engine.state].label}`}
+          onClick={engine.toggleEngine}
+          disabled={!engine.command}
+        />
         <KeySwitch
           on={telescope}
           label="Telescópio"
@@ -397,7 +468,7 @@ export function InstrumentPanel({ className = '' }: { className?: string }) {
             <GammaDial />
           </div>
           <div className="max-lg:hidden">
-            <EngineLamp />
+            <EngineControl />
           </div>
           <div className="col-span-2 max-lg:order-3 lg:col-span-1">
             <Switches />
