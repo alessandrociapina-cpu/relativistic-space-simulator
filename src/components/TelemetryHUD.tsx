@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { FlightPhase } from '../physics/RelativityEngine';
 import { formatRelativisticSpeedPercent } from '../physics/EyeAndPhotometry';
 import { CMB_VISIBLE_GAMMA, activeWindowsAt } from '../physics/criticalEvents';
@@ -9,7 +10,6 @@ const PHASE_LABEL: Readonly<Record<FlightPhase, string>> = {
   coasting: 'Inércia',
   decelerating: 'Frenagem',
   arrived: 'Chegada',
-  cruise: 'Cruzeiro livre',
 };
 
 interface ReadoutProps {
@@ -19,83 +19,107 @@ interface ReadoutProps {
   value: string;
   detail?: string;
   className?: string;
+  /** Visor principal (velocidade): números maiores. */
+  primary?: boolean;
 }
 
-function Readout({ label, symbol, value, detail, className = '' }: ReadoutProps) {
+/** Um visor do console: rótulo gravado na chapa e o número luminoso no vidro. */
+function Readout({ label, symbol, value, detail, className = '', primary = false }: ReadoutProps) {
   return (
-    <div className={`min-w-0 ${className}`}>
-      <div className="truncate text-[9px] tracking-widest text-cyan-300/70">
+    <div className={`instrument-well min-w-0 rounded-md px-2 py-1 ${className}`}>
+      <div className="font-display truncate text-[8px] tracking-[0.2em] text-cyan-300/70 sm:text-[9px]">
         <span className="uppercase">{label}</span>
-        {symbol && <span className="ml-1 text-[10px] tracking-normal">{symbol}</span>}
+        {symbol && <span className="font-readout ml-1 text-[10px] tracking-normal text-cyan-200">{symbol}</span>}
       </div>
-      <div className="truncate text-xs whitespace-nowrap text-slate-100 tabular-nums sm:text-sm">{value}</div>
-      {detail && <div className="truncate text-[10px] text-slate-500 tabular-nums">{detail}</div>}
+      <div
+        className={`font-readout glow-text truncate whitespace-nowrap text-cyan-50 tabular-nums ${
+          primary ? 'text-sm sm:text-lg' : 'text-xs sm:text-[15px]'
+        }`}
+      >
+        {value}
+      </div>
+      {detail && <div className="font-readout hidden truncate text-[10px] text-slate-400 tabular-nums sm:block">{detail}</div>}
     </div>
   );
 }
 
+function Chip({ className, children }: { className: string; children: ReactNode }) {
+  return <span className={`font-display rounded-sm px-1.5 py-px text-[9px] tracking-[0.15em] uppercase ${className}`}>{children}</span>;
+}
+
 /**
- * HUD superior: relógios da nave e da Terra, γ, velocidade e distâncias.
- * Fica transparente sobre o céu e ganha fundo fosco quando o white-out da CMB
+ * Console de teto: velocidade, γ, relógios da nave e da Terra e distâncias,
+ * com os avisos da fase do voo. Ganha fundo fosco quando o white-out da CMB
  * clareia o para-brisa.
  */
 export function TelemetryHUD({ className = '' }: { className?: string }) {
   const flight = useFlightStore((s) => s.flight);
-  const mode = useFlightStore((s) => s.mode);
+  const crew = useFlightStore((s) => s.crew);
+  const destination = useFlightStore((s) => s.destination);
   const windows = useFlightStore((s) => s.criticalWindows);
   const brakeStartTau = useFlightStore((s) => s.profile.brakeStartTau);
   const ignitionCountdownS = useFlightStore((s) => s.ignitionCountdownS);
   const isEyeHazard = useFlightStore((s) => s.photometry.isEyeHazard);
-  const whiteout = useFlightStore((s) => s.photometry.isWhiteoutHudActive);
+  const whiteout = useFlightStore((s) => s.photometry.isWhiteoutHudActive && s.crew === 'crewed');
 
   const cmbVisible = flight.gamma >= CMB_VISIBLE_GAMMA.min && flight.gamma <= CMB_VISIBLE_GAMMA.max;
-  const preFlip =
-    mode === 'autopilot' && activeWindowsAt(windows, flight.tau).some((w) => w.kind === 'pre-flip');
+  const preFlip = activeWindowsAt(windows, flight.tau).some((w) => w.kind === 'pre-flip');
 
   return (
     <section
       aria-label="Telemetria"
-      className={`rounded-lg border px-3 py-2 font-mono transition-all duration-500 ${
-        whiteout
-          ? 'border-white/10 bg-neutral-900/65 shadow-2xl backdrop-blur-md'
-          : 'border-transparent bg-black/20'
+      className={`hull-panel rounded-b-2xl px-2 pt-[max(0.375rem,env(safe-area-inset-top))] pb-2 transition-[filter] duration-500 sm:px-4 ${
+        whiteout ? 'brightness-110 backdrop-blur-md' : ''
       } ${className}`}
     >
-      <div className="mb-1 flex flex-wrap items-center gap-2 text-[10px] tracking-widest uppercase">
-        <span className="text-cyan-300">{PHASE_LABEL[flight.phase]}</span>
+      <div className="mx-auto max-w-6xl">
+      <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+        <Chip className="border border-cyan-300/50 text-cyan-200">{PHASE_LABEL[flight.phase]}</Chip>
+        <Chip
+          className={
+            crew === 'crewed'
+              ? 'border border-sky-300/40 bg-sky-500/10 text-sky-100'
+              : 'border border-violet-300/40 bg-violet-500/10 text-violet-100'
+          }
+        >
+          {crew === 'crewed' ? '🧑‍🚀 Piloto humano' : '🤖 Sonda robótica · sem tripulação'}
+        </Chip>
+        <span className="font-display truncate text-[9px] tracking-[0.15em] text-slate-400 uppercase max-sm:hidden">
+          Rumo a {destination.name}
+        </span>
         {ignitionCountdownS !== null && (
-          <span className="rounded-sm bg-cyan-300 px-1.5 text-black">Ignição em {Math.ceil(ignitionCountdownS)}</span>
+          <Chip className="animate-beacon bg-cyan-300 text-black">Ignição em {Math.ceil(ignitionCountdownS)}</Chip>
         )}
-        {isEyeHazard && (
-          <span className="rounded-sm border border-amber-600 bg-amber-950/70 px-1.5 text-amber-200">
-            EYE HAZARD · BRIGHT LIGHT AHEAD
-          </span>
+        {isEyeHazard && crew === 'crewed' && (
+          <Chip className="border border-amber-500 bg-amber-950/80 text-amber-200">⚠ Ofuscamento · luz forte à frente</Chip>
         )}
-        {cmbVisible && <span className="rounded-sm bg-amber-400/90 px-1.5 text-black">CMB no visível</span>}
+        {cmbVisible && <Chip className="bg-amber-400/90 text-black">CMB no visível</Chip>}
         {preFlip && (
-          <span className="rounded-sm bg-rose-500/90 px-1.5 text-black">
+          <Chip className="bg-rose-500/90 text-black">
             Flip em <span className="normal-case">{formatDuration(Math.max(0, brakeStartTau - flight.tau))}</span>
-          </span>
+          </Chip>
         )}
       </div>
-      <div className="grid grid-cols-3 gap-x-3 gap-y-1.5 lg:grid-cols-7">
-        <Readout label="Relógio nave" symbol="τ" value={formatDuration(flight.tau)} />
-        <Readout label="Relógio Terra" symbol="t" value={formatDuration(flight.earthTimeS)} />
-        <Readout
-          label="Lorentz"
-          symbol="γ"
-          value={formatGamma(flight.gamma)}
-          detail={`η = ${formatFixed(flight.eta, 3)}`}
-        />
+      <div className="grid grid-cols-3 gap-1.5 lg:grid-cols-8">
         <Readout
           label="Velocidade"
           symbol="v/c"
           value={formatRelativisticSpeedPercent(flight.eta)}
           detail={formatVelocity(flight.beta, flight.oneMinusBeta)}
           className="col-span-3 lg:col-span-2"
+          primary
         />
-        <Readout label="Dist. repouso" value={formatDistance(flight.restDistanceRemainingM)} />
-        <Readout label="Dist. contraída" value={formatDistance(flight.contractedDistanceRemainingM)} />
+        <Readout label="Lorentz" symbol="γ" value={formatGamma(flight.gamma)} detail={`η = ${formatFixed(flight.eta, 3)}`} />
+        <Readout label="Relógio nave" symbol="τ" value={formatDuration(flight.tau)} className="lg:col-span-1" />
+        <Readout label="Relógio Terra" symbol="t" value={formatDuration(flight.earthTimeS)} />
+        <Readout label="Distância" value={formatDistance(flight.restDistanceRemainingM)} detail="referencial da Terra" className="lg:col-span-1" />
+        <Readout
+          label="Contraída"
+          value={formatDistance(flight.contractedDistanceRemainingM)}
+          detail="medida pela nave"
+          className="col-span-2 lg:col-span-2"
+        />
+      </div>
       </div>
     </section>
   );

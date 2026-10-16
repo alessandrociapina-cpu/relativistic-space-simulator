@@ -12,7 +12,6 @@ const PHASE_LABEL: Readonly<Record<FlightPhase, string>> = {
   coasting: 'inércia',
   decelerating: 'frenagem',
   arrived: 'chegada',
-  cruise: 'cruzeiro livre',
 };
 
 function EffectSection({ id, ctx, highlighted }: { id: EffectId; ctx: ExplainContext; highlighted: boolean }) {
@@ -55,7 +54,7 @@ function EffectSection({ id, ctx, highlighted }: { id: EffectId; ctx: ExplainCon
 /**
  * Painel de efeitos ativos: o que a física está fazendo neste instante, com
  * explicação e fórmulas com os valores atuais. Abre ao pausar no modo Explicar
- * (ou pelo botão "Efeitos") e acompanha o scrub e o slider do Cruzeiro Livre.
+ * (ou pelo botão "Efeitos") e acompanha o scrub da linha do tempo.
  */
 export function ActiveEffectsPanel({ className = '' }: { className?: string }) {
   const open = useExplainSettings((s) => s.panelOpen);
@@ -67,7 +66,6 @@ function EffectsPanel({ className }: { className: string }) {
   const closePanel = useExplainSettings((s) => s.closePanel);
   const canResume = useFlightStore(
     (s) =>
-      s.mode === 'autopilot' &&
       !s.playing &&
       s.ignitionCountdownS === null &&
       s.tau > 0 &&
@@ -123,14 +121,14 @@ function EffectsPanel({ className }: { className: string }) {
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         {ids.length === 0 ? (
           <p className="px-4 py-6 text-[13px] text-slate-400">
-            Nave em repouso: nenhum efeito relativístico relevante. Aumente γ para ver aberração, Doppler e a CMB.
+            Nave em repouso: nenhum efeito relativístico relevante. Dê a partida ou arraste a linha do tempo para ver
+            aberração, Doppler e a CMB.
           </p>
         ) : (
           ids.map((id) => <EffectSection key={id} id={id} ctx={ctx} highlighted={id === focus} />)
         )}
         <p className="px-4 pt-1 pb-4 text-[11px] text-slate-500">
-          Os valores são os deste instante: arraste a linha do tempo (ou o slider do Cruzeiro Livre) e as fórmulas se
-          atualizam.
+          Os valores são os deste instante: arraste a linha do tempo e as fórmulas se atualizam.
         </p>
       </div>
     </section>

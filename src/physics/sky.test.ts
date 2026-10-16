@@ -14,12 +14,21 @@ describe('raios angulares do Sol e do alvo', () => {
     expect(r.targetRadiusRad).toBeLessThan(1e-8);
   });
 
-  it(`na chegada, todo alvo ocupa asin(1/${ARRIVAL_STANDOFF_RADII})`, () => {
+  it('na chegada, todo alvo fica à distância de parada, e uma estrela ocupa mais da metade do para-brisa', () => {
     for (const d of DESTINATION_LIST) {
       const p = destinationMissionProfile(d);
       const r = computeBodyAngularRadii(computeFlightState(p, p.tauTotal), d);
-      expect(r.targetRadiusRad).toBeCloseTo(Math.asin(1 / ARRIVAL_STANDOFF_RADII), 12);
+      expect(r.targetRadiusRad).toBeCloseTo(Math.asin(1 / ARRIVAL_STANDOFF_RADII[d.kind]), 12);
     }
+    const arrival = computeBodyAngularRadii(computeFlightState(profile, profile.tauTotal), proxima);
+    expect((2 * arrival.targetRadiusRad * 180) / Math.PI / 70).toBeGreaterThan(0.5);
+  });
+
+  it('na partida, Andrômeda tem o tamanho de céu da galáxia real (alguns graus)', () => {
+    const andromeda = DESTINATIONS.andromeda;
+    const r = computeBodyAngularRadii(computeFlightState(destinationMissionProfile(andromeda), 0), andromeda);
+    expect((3 * r.targetRadiusRad * 180) / Math.PI).toBeGreaterThan(1.5);
+    expect((3 * r.targetRadiusRad * 180) / Math.PI).toBeLessThan(3);
   });
 
   it('o Sol encolhe e o alvo cresce ao longo da viagem', () => {

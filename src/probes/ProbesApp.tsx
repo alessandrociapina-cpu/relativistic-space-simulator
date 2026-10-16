@@ -33,6 +33,9 @@ export function ProbesApp() {
             <a href="#viagem" aria-label="Viagem relativística" className="rounded-sm bg-slate-800/80 px-2 py-1 text-slate-300 hover:bg-slate-700">
               🚀<span className="ml-1 hidden sm:inline">Viagem relativística</span>
             </a>
+            <a href="#inicio" aria-label="Início" title="Tela de abertura" className="rounded-sm bg-slate-800/80 px-2 py-1 text-slate-300 hover:bg-slate-700">
+              ⌂<span className="ml-1 hidden sm:inline">Início</span>
+            </a>
           </div>
         </header>
         <div className="relative flex min-h-0 flex-1 items-start justify-end gap-3">

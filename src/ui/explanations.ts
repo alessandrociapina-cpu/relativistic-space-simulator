@@ -17,6 +17,7 @@ import {
   type FlightState,
   type MissionProfile,
 } from '../physics/RelativityEngine';
+import type { CrewKind } from '../physics/accelerationPresets';
 import type { Destination } from '../physics/destinations';
 import { CMB_VISIBLE_GAMMA, preFlipWindowS } from '../physics/criticalEvents';
 import {
@@ -29,7 +30,6 @@ import {
   type PhotometryAndEyeState,
 } from '../physics/EyeAndPhotometry';
 import { AU_M } from '../physics/sky';
-import type { FlightMode } from '../store/useFlightStore';
 import {
   formatAngle,
   formatDistance,
@@ -54,7 +54,7 @@ import {
 
 /** O que as explicações leem do estado do voo (o store satisfaz esta forma). */
 export interface ExplainContext {
-  readonly mode: FlightMode;
+  readonly crew: CrewKind;
   readonly destination: Destination;
   readonly accelG: number;
   readonly profile: MissionProfile;
@@ -142,7 +142,7 @@ export const EFFECT_THRESHOLDS = {
   eyeDimmer: 2,
   /** Da órbita de Júpiter à heliopausa. */
   solarSystemAu: { min: 5.2, max: 120 },
-  /** Mesmo limiar de luz do aviso EYE HAZARD. */
+  /** Mesmo limiar de luz do aviso de ofuscamento. */
   illuminanceLux: 1500,
   /** Pico de Wien da CMB à frente na faixa dos raios X. */
   xRayPeakNm: 10,
@@ -163,7 +163,7 @@ const tex = String.raw;
 
 /** Grandezas derivadas usadas por vários efeitos. */
 interface Scene extends ExplainContext {
-  readonly autopilot: boolean;
+  readonly crewed: boolean;
   readonly alpha: number;
   readonly sunDistanceAu: number;
   readonly dFront: number;
@@ -173,7 +173,7 @@ interface Scene extends ExplainContext {
 function scene(ctx: ExplainContext): Scene {
   return {
     ...ctx,
-    autopilot: ctx.mode === 'autopilot',
+    crewed: ctx.crew === 'crewed',
     alpha: ctx.profile.properAccel,
     sunDistanceAu: (AU_M + ctx.flight.positionM) / AU_M,
     dFront: Math.exp(ctx.flight.eta),
@@ -185,7 +185,7 @@ type Body = Omit<Explanation, 'id' | 'title'>;
 
 interface EffectDefinition {
   readonly title: string;
-  /** Anunciado no cartão do modo Explicar quando começa (só no Autopilot). */
+  /** Anunciado no cartão do modo Explicar quando começa. */
   readonly announce: boolean;
   isActive(s: Scene): boolean;
   explain(s: Scene): Body;
@@ -233,8 +233,8 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
   mission: {
     title: 'A missão',
     announce: false,
-    isActive: (s) => s.autopilot,
-    explain: ({ destination, accelG, alpha, profile }) => ({
+    isActive: () => true,
+    explain: ({ destination, accelG, alpha, profile, crewed }) => ({
       summary:
         (profile.coastEta === null
           ? 'Acelerar com α constante até o meio do caminho, girar a nave e frear com a mesma α até parar em '
@@ -244,13 +244,21 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
       details: [
         'A aceleração própria α é a que um acelerômetro a bordo mede, e ela é constante. A aceleração medida da ' +
           'Terra não é: cai como α/γ³ à medida que a nave se aproxima de c.',
-        accelG > 20
-          ? `Nenhum corpo humano resistiria a ${num(accelG)} G: o limite fica em algumas dezenas de G, ` +
-            'por segundos. O valor alto encurta a viagem para minutos e deixa cada efeito óptico visível em tempo real.'
-          : accelG <= 1.5
-            ? `A ${formatFixed(accelG, accelG < 1 ? 2 : 1)} g, a tripulação sente um peso parecido com o da Terra ` +
-              'durante todo o empuxo: é o perfil clássico de uma viagem tripulada.'
-            : `A ${num(accelG)} g, a tripulação pesa ${num(accelG)} vezes mais que na Terra durante o empuxo.`,
+        !crewed
+          ? accelG > 60_000
+            ? `A bordo vai uma sonda robótica, mas nem ela aguentaria ${num(accelG)} g: o limite conhecido, de ` +
+              'nanossondas de silício, fica em dezenas de milhares de g. O valor alto encurta a viagem para minutos e ' +
+              'deixa cada efeito óptico visível em tempo real.'
+            : `A bordo vai uma sonda robótica. Máquinas não desmaiam: a ${num(accelG)} g, o limite é a resistência ` +
+              'dos materiais, que quase não depende do tempo de exposição.'
+          : accelG > 50
+            ? `Nenhum corpo humano resistiria a ${num(accelG)} g: o limite fica em algumas dezenas de g, ` +
+              'por segundos. O valor alto encurta a viagem para minutos e deixa cada efeito óptico visível em tempo real.'
+            : accelG <= 1.5
+              ? `A ${formatFixed(accelG, accelG < 1 ? 2 : 1)} g, a tripulação sente um peso parecido com o da Terra ` +
+                'durante todo o empuxo: é o perfil clássico de uma viagem tripulada.'
+              : `A ${num(accelG)} g, a tripulação pesa ${num(accelG)} vezes mais que na Terra durante o empuxo, e o ` +
+                'corpo só aguenta isso por tempo limitado.',
       ],
       formulas: [
         { tex: tex`\alpha = N_G\,g_0 = ${n(accelG)} \times ${n(G0, 6)}\ \mathrm{m/s^2} = ${n(alpha)}\ \mathrm{m/s^2}` },
@@ -263,21 +271,18 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
     title: 'Rapidez η: o movimento hiperbólico',
     announce: true,
     isActive: (s) => s.flight.eta > 0,
-    explain: ({ autopilot, flight, alpha }) => {
+    explain: ({ flight, alpha }) => {
       const { eta, beta, gamma, oneMinusBeta, tau, phase } = flight;
       const etaText = formatFixed(eta, 3);
       const summary =
-        phase === 'cruise'
-          ? `No Cruzeiro Livre a rapidez é a do slider, η = ${etaText}, e a nave não acelera. A velocidade é β = tanh η: v = ${velocityOf(flight)}.`
-          : phase === 'coasting'
-            ? `Com o motor desligado a rapidez fica constante, η = ${etaText}, e a nave segue a v = ${velocityOf(flight)}.`
-            : phase === 'decelerating'
+        phase === 'coasting'
+          ? `Com o motor desligado a rapidez fica constante, η = ${etaText}, e a nave segue a v = ${velocityOf(flight)}.`
+          : phase === 'decelerating'
             ? `Na frenagem a rapidez cai no mesmo ritmo em que subiu: η = α(τ_total − τ)/c = ${etaText}. Agora v = ${velocityOf(flight)}.`
             : `Com aceleração própria constante, cada segundo de bordo soma a mesma rapidez: η = ατ/c = ${etaText}. ` +
               `A velocidade β = tanh η se aproxima de c sem nunca chegar a ela; agora v = ${velocityOf(flight)}.`;
-      const etaTex = !autopilot
-        ? tex`\eta = ${n(eta, 4)}\quad(\text{slider})`
-        : phase === 'coasting'
+      const etaTex =
+        phase === 'coasting'
           ? tex`\eta = \eta_c = \frac{\alpha\,\tau_1}{c} = ${n(eta, 4)}`
           : phase === 'decelerating'
           ? tex`\eta = \frac{\alpha\,(\tau_{\text{total}} - \tau)}{c} = ${n(eta, 4)}`
@@ -342,7 +347,7 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
       return {
         summary:
           `À frente, a luz chega com a frequência multiplicada por D = e^η = ${num(dFront)}: as estrelas ` +
-          'ficam mais azuis e mais brilhantes. Atrás, ela é dividida pelo mesmo fator, e o Sol, na câmera traseira, ' +
+          'ficam mais azuis e mais brilhantes. Atrás, ela é dividida pelo mesmo fator, e o Sol, no telescópio traseiro, ' +
           (sunK >= SUN_VISIBLE_K
             ? `parece uma estrela de ${num(sunK)} K.`
             : `parece um corpo negro de ${num(sunK)} K, frio demais para ser visto.`),
@@ -367,38 +372,32 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
     title: 'Dilatação do tempo',
     announce: true,
     isActive: (s) => s.flight.gamma >= EFFECT_THRESHOLDS.timeDilationGamma,
-    explain: ({ autopilot, flight, profile }) => {
+    explain: ({ flight, profile }) => {
       const { gamma, tau, earthTimeS, phase } = flight;
-      const formulas: Formula[] = [{ tex: tex`\frac{dt}{d\tau} = \gamma = ${n(gamma, 4)}` }];
-      if (autopilot) {
-        formulas.push({
+      const formulas: Formula[] = [
+        { tex: tex`\frac{dt}{d\tau} = \gamma = ${n(gamma, 4)}` },
+        {
           tex:
             phase === 'decelerating'
               ? tex`t = t_{\text{total}} - \frac{c}{\alpha}\sinh\eta = ${texDuration(earthTimeS)}`
               : phase === 'coasting'
                 ? tex`t = \frac{c}{\alpha}\sinh\eta_c + \gamma_c\,(\tau - \tau_1) = ${texDuration(earthTimeS)}`
                 : tex`t = \frac{c}{\alpha}\sinh\eta = ${texDuration(earthTimeS)}`,
-        });
-        if (tau > 0) {
-          formulas.push({ tex: tex`\frac{t}{\tau} = \frac{${texDuration(earthTimeS)}}{${texDuration(tau)}} = ${n(earthTimeS / tau)}` });
-        }
+        },
+      ];
+      if (tau > 0) {
+        formulas.push({ tex: tex`\frac{t}{\tau} = \frac{${texDuration(earthTimeS)}}{${texDuration(tau)}} = ${n(earthTimeS / tau)}` });
       }
       return {
         summary:
           `Cada segundo a bordo corresponde agora a ${formatSpan(gamma)} na Terra.` +
-          (autopilot
-            ? ` Desde a partida, passaram ${formatSpan(tau)} na nave e ${formatSpan(earthTimeS)} na Terra.`
-            : ''),
+          ` Desde a partida, passaram ${formatSpan(tau)} na nave e ${formatSpan(earthTimeS)} na Terra.`,
         details: [
           'Medido da Terra, um relógio em movimento anda mais devagar: dt = γ·dτ. Não é defeito dos relógios: tudo ' +
             'a bordo, de corações a átomos, segue o tempo próprio τ.',
-          ...(autopilot
-            ? [
-                'Com aceleração constante, o tempo da Terra cresce como t = (c/α)·sinh η, exponencialmente com o tempo ' +
-                  `de bordo. Por isso a viagem leva ${formatSpan(profile.tTotal)} na Terra e só ` +
-                  `${formatSpan(profile.tauTotal)} a bordo.`,
-              ]
-            : []),
+          'Com aceleração constante, o tempo da Terra cresce como t = (c/α)·sinh η, exponencialmente com o tempo ' +
+            `de bordo. Por isso a viagem leva ${formatSpan(profile.tTotal)} na Terra e só ` +
+            `${formatSpan(profile.tauTotal)} a bordo.`,
           'Para a nave, é a Terra que se move. A assimetria vem de quem acelera: só a nave sente o empuxo, e é ela ' +
             'que envelhece menos (o paradoxo dos gêmeos).',
         ],
@@ -433,7 +432,7 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
     title: 'Atravessando o Sistema Solar',
     announce: true,
     isActive: (s) =>
-      s.autopilot && s.flight.phase === 'accelerating' && inRange(s.sunDistanceAu, EFFECT_THRESHOLDS.solarSystemAu),
+      s.flight.phase === 'accelerating' && inRange(s.sunDistanceAu, EFFECT_THRESHOLDS.solarSystemAu),
     explain: ({ flight, sunDistanceAu, alpha }) => {
       const horizon = C2 / alpha;
       // Distância da frente de luz emitida na ignição: ct − x = (c²/α)(1 − e^(−η)).
@@ -449,7 +448,7 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
             `a nave anda a ${velocityOf(flight)}.`,
           'Mesmo assim, ela nunca alcança a luz da partida. A frente de luz emitida na ignição se afasta cada vez ' +
             `mais devagar, e a distância até ela tende a c²/α = ${formatDistance(horizon)}, sem nunca passar disso.`,
-          'O mapa "ROUTE · LOG SCALE" usa escala logarítmica a partir do Sol, para que as órbitas dos planetas, a ' +
+          'O mapa da rota usa escala logarítmica a partir do Sol, para que as órbitas dos planetas, a ' +
             'poucas UA, e o alvo, a anos-luz, caibam na mesma linha.',
         ],
         formulas: [
@@ -477,7 +476,7 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
           `Entre γ ≈ ${num(CMB_VISIBLE_GAMMA.min)} e γ ≈ ${num(CMB_VISIBLE_GAMMA.max)} ` +
             'o pico atravessa o visível: primeiro um brilho vermelho-escuro à frente, depois branco e azulado. É uma ' +
             'janela crítica, e o Auto-Step Down desacelera o tempo ao entrar nela.',
-          'O holograma "CMB AHEAD" mostra o espectro de Planck e onde fica a faixa visível.',
+          'O holograma "CMB À FRENTE" mostra o espectro de Planck e onde fica a faixa visível.',
         ],
         formulas: [
           { tex: tex`T_{\text{frente}} = T_0\,e^{\eta} = ${n(T_CMB_0, 4)}\ \mathrm{K} \times ${n(dFront)} = ${n(temp)}\ \mathrm{K}` },
@@ -497,22 +496,44 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
     title: 'Ofuscamento: a luz à frente',
     announce: true,
     isActive: (s) => s.photometry.visibleLuxAhead >= EFFECT_THRESHOLDS.illuminanceLux,
-    explain: ({ photometry, profile }) => {
+    explain: ({ photometry, profile, crewed }) => {
       const lux = photometry.visibleLuxAhead;
       const pupilNow = formatFixed(photometry.pupilDiameterMm, 2);
       // Viagens que duram muitas vezes os 20 min da adaptação ao escuro: o olho acompanha a luz.
       const eyeKeepsUp = profile.tauTotal > 100 * EYE.darkAdaptationS;
       const stopsNow = formatFixed(-photometry.retinaStops, 1);
+      const physics =
+        'A iluminância sai da física: a luminância de Planck da CMB, já com o Doppler, integrada sobre o hemisfério ' +
+        'à frente e pesada pela sensibilidade do olho V(λ). O máximo possível é ' +
+        `${num(peakCmbLux())} lux, em γ ≈ ${num(Math.cosh(peakCmbLuxRapidity()))}.`;
+      if (!crewed) {
+        return {
+          summary:
+            `A CMB concentrada à frente chega com ${num(lux)} lux, a luz de um dia nublado, toda vinda de um cone ` +
+            'minúsculo em torno do alvo. Para a câmera da sonda, é um ponto de luz ofuscante.',
+          details: [
+            physics,
+            'Um olho humano espalharia essa luz por toda a visão (o véu do white-out). A câmera não: o cone quente é ' +
+              'menor que um pixel e aparece como um ponto, diluído pela resposta óptica (PSF).',
+          ],
+          formulas: [
+            {
+              tex: tex`E = 2\pi\int_0^1 L_v\big(T_0\,D(u)\big)\,(1 - u)\,du = ${n(lux)}\ \mathrm{lx}`,
+              note: 'u = 1 − cos θ′: a integral percorre o hemisfério à frente.',
+            },
+            { tex: tex`L_v = 683\ \tfrac{\mathrm{lm}}{\mathrm{W}} \int B_\lambda(T)\,\bar y(\lambda)\,d\lambda` },
+          ],
+        };
+      }
       return {
         summary:
           `A CMB concentrada à frente ilumina a cabine com ${num(lux)} lux. Um escritório tem cerca de ` +
-          '500 lux e um dia nublado, 10 000. Daí o aviso EYE HAZARD.',
+          '500 lux e um dia nublado, 10 000. Daí o aviso de ofuscamento.',
         details: [
-          'A iluminância sai da física: a luminância de Planck da CMB, já com o Doppler, integrada sobre o hemisfério ' +
-            'à frente e pesada pela sensibilidade do olho V(λ). O máximo possível é ' +
-            `${num(peakCmbLux())} lux, em γ ≈ ${num(Math.cosh(peakCmbLuxRapidity()))}.`,
+          physics,
           `O olho reage. A pupila se fecha em meio segundo (${pupilNow} mm agora) e a retina perde sensibilidade em ` +
-            `cerca de um minuto (já perdeu ${stopsNow} stops). Recuperar a sensibilidade no escuro leva uns 20 minutos.` +
+            `cerca de um minuto (já perdeu ${stopsNow} stops, ou seja, está ${num(2 ** -photometry.retinaStops)} vezes ` +
+            'menos sensível). Recuperar a sensibilidade no escuro leva uns 20 minutos.' +
             (eyeKeepsUp
               ? ' Nesta viagem a luz muda ao longo de meses, então o olho fica sempre em equilíbrio com ela.'
               : ''),
@@ -571,7 +592,7 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
     title: 'A CMB em raios X',
     announce: true,
     isActive: (s) => s.photometry.cmbWienPeakNm <= EFFECT_THRESHOLDS.xRayPeakNm,
-    explain: ({ flight, photometry, profile, autopilot }) => {
+    explain: ({ flight, photometry, profile }) => {
       const temp = photometry.cmbTempAheadK;
       const photonEv = 2.821 * K_B_EV * temp;
       // (γ − 1)·m_p c² sem cancelamento: γ − 1 = 2 sinh²(η/2).
@@ -584,10 +605,8 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
           `${formatEnergyEv(photonEv)}. O sensor RX do telescópio mostra o cone nessa faixa.`,
         details: [
           'A temperatura aparente cresce com e^η, sem limite.' +
-            (autopilot
-              ? ` No ponto médio desta missão ela chega a ${formatScientific(midpointK)} K` +
-                (midpointK > SUN_CORE_K ? ', mais que o núcleo do Sol (cerca de 15 milhões de K).' : '.')
-              : ''),
+            ` No ponto médio desta missão ela chega a ${formatScientific(midpointK)} K` +
+            (midpointK > SUN_CORE_K ? ', mais que o núcleo do Sol (cerca de 15 milhões de K).' : '.'),
           'Numa nave real, esse feixe de raios X e o próprio gás interestelar seriam letais: cada próton atingido a ' +
             `γ = ${gammaText(flight.gamma)} chega com ${formatEnergyEv(protonEv)} de energia cinética. O ` +
             'simulador mostra só a óptica.',
@@ -606,7 +625,6 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
     title: 'Flip-and-burn: o ponto médio',
     announce: true,
     isActive: (s) =>
-      s.autopilot &&
       (s.flight.phase === 'accelerating' || s.flight.phase === 'coasting') &&
       s.flight.tau >= s.profile.brakeStartTau - preFlipWindowS(s.profile),
     explain: ({ flight, profile }) => {
@@ -632,7 +650,7 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
             : 'A frenagem leva o mesmo tempo de bordo que a aceleração, e começa a (c²/α)(γ_c − 1) do alvo para parar ' +
               'exatamente nele.',
           'É um marco crítico: o Auto-Step Down desacelera o tempo na reta final antes do flip, e o holograma ' +
-            '"DECELERATION IN" faz a contagem.',
+            '"FRENAGEM EM" faz a contagem.',
         ],
         formulas: flipAndBurn
           ? [
@@ -653,8 +671,8 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
   braking: {
     title: 'Frenagem',
     announce: true,
-    isActive: (s) => s.autopilot && s.flight.phase === 'decelerating',
-    explain: ({ flight, profile, photometry }) => {
+    isActive: (s) => s.flight.phase === 'decelerating',
+    explain: ({ flight, profile, photometry, crewed }) => {
       const mirror = profile.tauTotal - flight.tau;
       return {
         summary:
@@ -663,9 +681,11 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
         details: [
           'Aberração, Doppler e a cor da CMB dependem só da velocidade, não da aceleração. O instante τ da frenagem ' +
             `mostra o mesmo céu do instante espelho τ_total − τ da ida: agora, τ = ${formatSpan(mirror)}.`,
-          photometryDimmer(photometry)
-            ? 'O que muda é o seu olho, que chega da ida adaptado à luz forte: a mesma luz parece bem mais fraca na volta.'
-            : 'Nesta viagem o olho tem tempo de sobra para se readaptar, e a mesma luz parece igual nos dois sentidos.',
+          !crewed
+            ? 'As câmeras da sonda não se adaptam como um olho: a mesma luz aparece igual nos dois sentidos.'
+            : photometryDimmer(photometry)
+              ? 'O que muda é o seu olho, que chega da ida adaptado à luz forte: a mesma luz parece bem mais fraca na volta.'
+              : 'Nesta viagem o olho tem tempo de sobra para se readaptar, e a mesma luz parece igual nos dois sentidos.',
         ],
         formulas: [
           { tex: tex`\eta = \frac{\alpha\,(\tau_{\text{total}} - \tau)}{c} = ${n(flight.eta, 4)}` },
@@ -680,7 +700,7 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
     title: 'Seus olhos se adaptaram',
     announce: true,
     isActive: (s) =>
-      s.autopilot &&
+      s.crewed &&
       s.flight.phase === 'decelerating' &&
       s.photometry.cmbTempAheadK > EYE_HOLOGRAM_CMB_K.min &&
       s.photometry.cmbTempAheadK < EYE_HOLOGRAM_CMB_K.max &&
@@ -692,8 +712,9 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
       const pupilMirror = p.whiteoutPupilMm ?? p.pupilDiameterMm;
       return {
         summary:
-          `A luz à frente é a mesma do instante τ = ${formatSpan(mirrorTau)} da ida, mas agora parece ` +
-          `${num(p.dimmerFactor)} vezes mais fraca: pupila e retina ainda estão adaptadas ao white-out.`,
+          `A luz à frente agora é a mesma que ofuscou a ida em τ = ${formatSpan(mirrorTau)}, mas parece ` +
+          `${num(p.dimmerFactor)} vezes mais fraca: depois do clarão, a pupila continua fechada e a retina, menos ` +
+          'sensível. No escuro, o olho leva uns 20 minutos para se recuperar.',
         details: [
           'A pupila fecha em meio segundo, mas leva minutos para reabrir: tem ' +
             `${formatFixed(p.pupilDiameterMm, 2)} mm agora e tinha ${formatFixed(pupilMirror, 2)} mm no instante ` +
@@ -719,7 +740,7 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
     title: 'O alvo à frente, azulado',
     announce: true,
     isActive: (s) =>
-      s.autopilot && s.flight.phase === 'decelerating' && inRange(s.flight.gamma, BLUESHIFT_HOLOGRAM_GAMMA),
+      s.flight.phase === 'decelerating' && inRange(s.flight.gamma, BLUESHIFT_HOLOGRAM_GAMMA),
     explain: ({ destination, flight, dFront }) => {
       const seenK = destination.temperatureK * dFront;
       return {
@@ -746,7 +767,7 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
   coasting: {
     title: 'Motor desligado: inércia',
     announce: true,
-    isActive: (s) => s.autopilot && s.flight.phase === 'coasting',
+    isActive: (s) => s.flight.phase === 'coasting',
     explain: ({ flight, profile }) => {
       const coastTau = profile.brakeStartTau - profile.burnEndTau;
       const toBrake = profile.brakeStartTau - flight.tau;
@@ -782,7 +803,7 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
   rocket: {
     title: 'Combustível: a equação do foguete',
     announce: false,
-    isActive: (s) => s.autopilot,
+    isActive: () => true,
     explain: ({ profile }) => {
       const photon = rocketMassRatio(profile);
       const fusion = rocketMassRatio(profile, FUSION_EXHAUST_BETA);
@@ -812,7 +833,7 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
   arrival: {
     title: 'Chegada: o paradoxo dos gêmeos',
     announce: true,
-    isActive: (s) => s.autopilot && s.flight.phase === 'arrived',
+    isActive: (s) => s.flight.phase === 'arrived',
     explain: ({ profile }) => {
       const ratio = profile.tTotal / profile.tauTotal;
       const lightTimeS = profile.distanceM / C;

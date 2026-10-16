@@ -4,8 +4,10 @@ import * as THREE from 'three';
 import vertexShader from '../shaders/RelativisticSky.vert?raw';
 import fragmentShader from '../shaders/RelativisticSky.frag?raw';
 import type { TargetKind } from '../physics/destinations';
-import { instrumentAutoExposure } from '../physics/sensorResponse';
+import { instrumentAutoExposure, resolvedTargetGain } from '../physics/sensorResponse';
 import { computeBodyAngularRadii } from '../physics/sky';
+import { sensorLutTexture, skyUniforms } from '../sky/skyResources';
+import { STAR_CELLS_N } from '../sky/starCells';
 import { useFlightStore } from '../store/useFlightStore';
 
 /** Valores de `uSensorMode` no shader. */
@@ -21,6 +23,13 @@ export type SensorMode = (typeof SensorMode)[keyof typeof SensorMode];
 export const DEFAULT_EXPOSURE = 200;
 
 const TARGET_TYPE: Readonly<Record<TargetKind, number>> = { star: 0, blackHole: 1, galaxy: 2 };
+/**
+ * Brilho superficial da galáxia-alvo: o de um disco visto de fora, na escala do
+ * brilho difuso da Via Láctea (não o de uma superfície estelar).
+ */
+const GALAXY_SURFACE_GAIN = 0.6;
+/** Quanto o fundo escurece quando a exposição sobe por causa do alvo (expoente do ganho). */
+const BACKGROUND_DIMMING = 0.75;
 
 // Eixo de voo exatamente em −Z: ver o cabeçalho de RelativisticSky.frag.
 const FORWARD = new THREE.Vector3(0, 0, -1);
@@ -54,6 +63,21 @@ function createSkyMaterial() {
     uTargetRadiusRad: { value: 0 },
     uTargetTemp: { value: 0 },
     uTargetType: { value: 0 },
+    uTargetPointAmp: { value: 0 },
+    uSunPointAmp: { value: 0 },
+    uGalaxyGain: { value: GALAXY_SURFACE_GAIN },
+    uTargetGain: { value: 1 },
+    uBackgroundGain: { value: 1 },
+    uSensorLut: { value: sensorLutTexture as THREE.Texture },
+    uStarCells: { value: null as THREE.Texture | null },
+    uStarCellsN: { value: STAR_CELLS_N },
+    uStarGain: { value: 0 },
+    uShipOffset: { value: new THREE.Vector3() },
+    uMilkyWayA: { value: null as THREE.Texture | null },
+    uMilkyWayB: { value: null as THREE.Texture | null },
+    uMilkyWayMix: { value: 0 },
+    uShipToGalactic: { value: new THREE.Matrix3() },
+    uStarDensity: { value: 1 },
     uSensorMode: { value: SensorMode.Visible as SensorMode },
     uPsfAngleRad: { value: 1e-3 },
     uExposure: { value: DEFAULT_EXPOSURE },
@@ -93,6 +117,7 @@ export function RelativisticSky({
   useFrame(({ camera, gl, clock }) => {
     const { flight, destination, photometry } = useFlightStore.getState();
     const bodies = computeBodyAngularRadii(flight, destination);
+    const sky = skyUniforms(flight, destination);
     const cam = camera as THREE.PerspectiveCamera;
 
     // Base da câmera em 64 bits (colunas da matriz de mundo).
@@ -117,18 +142,44 @@ export function RelativisticSky({
     u.uTargetRadiusRad.value = bodies.targetRadiusRad;
     u.uTargetTemp.value = destination.temperatureK;
     u.uTargetType.value = TARGET_TYPE[destination.kind];
+    u.uTargetPointAmp.value = sky.targetPointAmp;
+    u.uSunPointAmp.value = sky.sunPointAmp;
+    u.uStarCells.value = sky.starCells;
+    u.uStarGain.value = sky.starGain;
+    u.uShipOffset.value.set(...sky.shipOffset);
+    u.uMilkyWayA.value = sky.milkyWayA;
+    u.uMilkyWayB.value = sky.milkyWayB;
+    u.uMilkyWayMix.value = sky.milkyWayMix;
+    u.uShipToGalactic.value.copy(sky.shipToGalactic);
+    u.uStarDensity.value = sky.starDensity;
     u.uSensorMode.value = sensorMode;
-    u.uExposure.value = autoExposure
-      ? instrumentAutoExposure({
-          eta: flight.eta,
-          gamma: flight.gamma,
-          sensorMode,
-          psfAngleRad: u.uPsfAngleRad.value,
-          targetTempK: destination.temperatureK,
-          targetRadiusRestRad: bodies.targetRadiusRad,
-          defaultExposure: exposure,
-        })
-      : exposure;
+    if (autoExposure) {
+      u.uExposure.value = instrumentAutoExposure({
+        eta: flight.eta,
+        gamma: flight.gamma,
+        sensorMode,
+        psfAngleRad: u.uPsfAngleRad.value,
+        targetTempK: destination.temperatureK,
+        targetRadiusRestRad: bodies.targetRadiusRad,
+        defaultExposure: exposure,
+      });
+      u.uTargetGain.value = 1;
+      // Exposição alta por causa do alvo resolvido: o fundo não estoura junto.
+      u.uBackgroundGain.value = Math.min(1, (exposure / u.uExposure.value) ** BACKGROUND_DIMMING);
+    } else {
+      u.uExposure.value = exposure;
+      u.uTargetGain.value =
+        destination.kind === 'star'
+          ? resolvedTargetGain({
+              eta: flight.eta,
+              sensorMode,
+              targetTempK: destination.temperatureK,
+              targetRadiusRestRad: bodies.targetRadiusRad,
+              exposure,
+            })
+          : 1;
+      u.uBackgroundGain.value = u.uTargetGain.value ** -0.3;
+    }
     u.uEyeSensitivity.value = pilotEye ? photometry.eyeSensitivity : 1;
     u.uGlareIntensity.value = pilotEye ? photometry.glareIntensity : 0;
     u.uGlareColor.value.set(...photometry.glareColor);

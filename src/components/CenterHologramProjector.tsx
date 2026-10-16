@@ -4,7 +4,7 @@ import { WIEN_NM_K, type EyeTimeline } from '../physics/EyeAndPhotometry';
 import { AU_M } from '../physics/sky';
 import { useFlightStore } from '../store/useFlightStore';
 import { useExplainSettings } from '../ui/explainSettings';
-import { formatSpaceNumber, formatSpan } from '../ui/format';
+import { formatFixed, formatSpaceNumber, formatSpan } from '../ui/format';
 import { hologramCountdownS, selectHologramMode, type HologramMode } from '../ui/hologramMode';
 
 const CYAN = '#38bdf8';
@@ -22,20 +22,20 @@ function SolarSystemHologram({ au }: { au: number }) {
   const rx = ringRx(au);
   return (
     <>
-      <Caption label="DISTANCE FROM THE SUN" value={`${au.toFixed(1)} AU`} valueClass="text-amber-400 text-2xl" />
+      <Caption label="DISTÂNCIA DO SOL" value={`${formatFixed(au, 1)} UA`} valueClass="text-amber-400 text-2xl" />
       <svg viewBox="0 0 380 100" className="w-[min(380px,88vw)] overflow-visible">
         <line x1="190" y1="105" x2="40" y2="50" stroke={CYAN} strokeOpacity="0.25" />
         <line x1="190" y1="105" x2="340" y2="50" stroke={CYAN} strokeOpacity="0.25" />
         <ellipse cx="190" cy="52" rx={SATURN.rx} ry={SATURN.rx * 0.19} fill="none" stroke={SLATE} strokeOpacity="0.45" />
         <circle cx="122" cy="43" r="3" fill={CYAN} />
         <text x="85" y="36" fill={SLATE} fontSize="9">
-          SATURN 9.5 AU
+          SATURNO 9,5 UA
         </text>
         <ellipse cx="190" cy="52" rx={rx} ry={rx * 0.19} fill="none" stroke={AMBER} strokeWidth="2" />
         <ellipse cx="190" cy="52" rx={URANUS.rx} ry={URANUS.rx * 0.19} fill="none" stroke={CYAN} strokeOpacity="0.4" />
         <circle cx="245" cy="24" r="3" fill={CYAN} />
         <text x="210" y="16" fill={SLATE} fontSize="9">
-          URANUS 19.2 AU
+          URANO 19,2 UA
         </text>
         <circle cx="190" cy="52" r="5" fill="#fde047" />
       </svg>
@@ -63,7 +63,7 @@ function CmbSpectrumHologram({ temperatureK }: { temperatureK: number }) {
 
   return (
     <>
-      <Caption label={`CMB AHEAD · ${formatSpaceNumber(temperatureK)} K`} value={`PEAK ${Math.round(peakNm)} nm`} />
+      <Caption label={`CMB À FRENTE · ${formatSpaceNumber(temperatureK)} K`} value={`PICO EM ${Math.round(peakNm)} nm`} />
       <svg viewBox="0 0 460 120" className="w-[min(460px,92vw)] overflow-visible">
         <defs>
           <linearGradient id="hologram-visible" x1="0%" x2="100%">
@@ -80,13 +80,13 @@ function CmbSpectrumHologram({ temperatureK }: { temperatureK: number }) {
         <line x1="10" y1="88" x2="450" y2="88" stroke="#64748b" strokeWidth="1.5" />
         <rect x={visLeft} y="86" width={visRight - visLeft} height="5" rx="2" fill="url(#hologram-visible)" />
         <text x={(10 + visLeft) / 2} y="106" fill={SLATE} fontSize="10" textAnchor="middle">
-          ULTRAVIOLET
+          ULTRAVIOLETA
         </text>
         <text x={(visLeft + visRight) / 2} y="106" fill="#e2e8f0" fontSize="10" textAnchor="middle">
-          VISIBLE
+          VISÍVEL
         </text>
         <text x={(visRight + 450) / 2} y="106" fill={SLATE} fontSize="10" textAnchor="middle">
-          INFRARED
+          INFRAVERMELHO
         </text>
       </svg>
     </>
@@ -128,13 +128,13 @@ function LuxCurveHologram({ timeline, tau, tauHalf, lux }: { timeline: EyeTimeli
   return (
     <>
       <div className="flex w-[min(460px,92vw)] items-end justify-between px-4">
-        <span className="text-xs text-slate-300">PEAK {formatSpaceNumber(timeline.peakLux)} lux</span>
-        <Caption label="VISIBLE LIGHT AHEAD" value={`${formatSpaceNumber(lux)} lux`} valueClass="text-amber-300 text-xl" />
+        <span className="text-xs text-slate-300">PICO {formatSpaceNumber(timeline.peakLux)} lux</span>
+        <Caption label="LUZ VISÍVEL À FRENTE" value={`${formatSpaceNumber(lux)} lux`} valueClass="text-amber-300 text-xl" />
       </div>
       <svg viewBox="0 0 460 105" className="w-[min(460px,92vw)] overflow-visible">
         <line x1="20" y1={y(10_000)} x2="440" y2={y(10_000)} stroke={SLATE} strokeOpacity="0.35" strokeDasharray="3 3" />
         <text x="25" y={y(10_000) - 4} fill="#cbd5e1" fontSize="9">
-          10 000 lux · OVERCAST DAYLIGHT
+          10 000 lux · DIA NUBLADO
         </text>
         <polyline points={all.join(' ')} fill="none" stroke="#cbd5e1" strokeOpacity="0.45" strokeWidth="1.5" strokeDasharray="4 4" />
         {done.length > 1 && <polyline points={done.join(' ')} fill="none" stroke="#ffffff" strokeWidth="2.2" />}
@@ -143,11 +143,11 @@ function LuxCurveHologram({ timeline, tau, tauHalf, lux }: { timeline: EyeTimeli
         {ticks.map((t, i) => (
           <text key={t} x={x(t)} y="99" fill="#cbd5e1" fontSize="9">
             {tickLabel(t)}
-            {i === 0 ? ' · SHIP TIME' : ''}
+            {i === 0 ? ' · TEMPO DE BORDO' : ''}
           </text>
         ))}
         <text x="440" y="99" fill="#cbd5e1" fontSize="9" textAnchor="end">
-          MIDPOINT
+          PONTO MÉDIO
         </text>
       </svg>
     </>
@@ -187,52 +187,67 @@ function CountdownHologram({ label, remaining, window }: { label: string; remain
 }
 
 // ── Modo: adaptação do olho ──────────────────────────────────────────────────
-const STOPS_SCALE = 15;
+/** Um olho de perfil frontal, com a pupila no diâmetro dado (mm). */
+function EyeIcon({ pupilMm, dazzled }: { pupilMm: number; dazzled: boolean }) {
+  return (
+    <svg viewBox="0 0 115 65" className="h-9 w-16 sm:h-[54px] sm:w-24" aria-hidden>
+      {dazzled && <circle cx="57.5" cy="32" r="30" fill="#fde68a" fillOpacity="0.18" />}
+      <path d="M 5 32 Q 57 -5 110 32 Q 57 69 5 32 Z" fill="none" stroke={CYAN} strokeOpacity="0.75" strokeWidth="1.5" />
+      <circle cx="57.5" cy="32" r="20" fill="none" stroke={CYAN} strokeOpacity="0.5" />
+      <circle cx="57.5" cy="32" r={Math.max(3, pupilMm * 2.4)} fill="#020617" stroke="#7dd3fc" strokeWidth="1.5" />
+    </svg>
+  );
+}
 
+/** Sensibilidade da retina em vezes: −12,8 stops → "7 100× menos sensível". */
+const sensitivityText = (stops: number) =>
+  stops > -0.5 ? 'sensível' : `${formatSpaceNumber(2 ** -stops)}× menos sensível`;
+
+/**
+ * A mesma luz da ida, vista agora: o olho que passou pelo clarão ainda está
+ * com a pupila fechada e a retina dessensibilizada, e por isso a vê mais fraca.
+ */
 function EyeAdaptationHologram(props: {
   pupilMm: number;
   retinaStops: number;
+  whiteoutPupilMm: number;
   whiteoutStops: number;
   whiteoutTau: number;
+  tau: number;
+  lux: number;
   dimmer: number;
 }) {
-  const fill = Math.min(1, -props.retinaStops / STOPS_SCALE);
-  const marker = Math.min(1, -props.whiteoutStops / STOPS_SCALE);
   return (
-    <div className="flex items-center gap-6 px-2 py-1 sm:gap-8">
-      <div className="flex flex-col items-center">
-        <svg width="115" height="65" viewBox="0 0 115 65">
-          <path d="M 5 32 Q 57 -5 110 32 Q 57 69 5 32 Z" fill="none" stroke={CYAN} strokeOpacity="0.7" strokeWidth="1.5" />
-          <circle cx="57.5" cy="32" r="20" fill="none" stroke={CYAN} strokeOpacity="0.5" />
-          <circle cx="57.5" cy="32" r={Math.max(3, props.pupilMm * 2.4)} fill="#020617" stroke="#7dd3fc" strokeWidth="1.5" />
-        </svg>
-        <span className="mt-1 text-[10px] tracking-widest text-slate-400">NOW</span>
+    <div className="flex flex-col items-center px-2 py-1">
+      <div className="text-xs tracking-widest text-slate-200 uppercase">Seus olhos depois do clarão</div>
+      <div className="mb-1 text-[11px] text-slate-400">
+        A mesma luz à frente, {formatSpaceNumber(props.lux)} lux<span className="hidden sm:inline">, em dois momentos</span>
       </div>
-      <div className="flex flex-col">
-        <div className="mb-1 text-center text-xs tracking-widest text-slate-300 uppercase">YOUR EYES</div>
-        <div className="mb-2 flex gap-6 text-sm">
-          <span className="text-sky-200">PUPIL {props.pupilMm.toFixed(2)} mm</span>
-          <span className="text-amber-400">RETINA {props.retinaStops.toFixed(1)} stops</span>
+      <div className="flex items-center gap-3 sm:gap-5">
+        <div className="flex flex-col items-center">
+          <span className="text-[10px] tracking-widest text-amber-200">
+            <span className="uppercase">Na ida</span> · τ {formatSpan(props.whiteoutTau)}
+          </span>
+          <EyeIcon pupilMm={props.whiteoutPupilMm} dazzled />
+          <span className="text-[11px] text-slate-300">pupila {formatFixed(props.whiteoutPupilMm, 1)} mm</span>
+          <span className="text-[11px] text-slate-300">retina {sensitivityText(props.whiteoutStops)}</span>
+          <span className="text-[11px] font-medium text-amber-300">ofuscante</span>
         </div>
-        <svg viewBox="0 0 256 40" className="mb-2 w-56 overflow-visible sm:w-64">
-          {/* Marcador do nível da retina no white-out da ida, rotulado acima da barra. */}
-          <text x={256 * marker} y="8" fill="#e2e8f0" fontSize="8" textAnchor={marker > 0.6 ? 'end' : 'start'}>
-            WHITE-OUT · {Math.round(props.whiteoutTau)} s
-          </text>
-          <rect x="0" y="14" width="256" height="6" rx="3" fill="#334155" />
-          <rect x="0" y="14" width={256 * fill} height="6" rx="3" fill={AMBER} />
-          <line x1={256 * marker} y1="10" x2={256 * marker} y2="24" stroke="#e2e8f0" strokeWidth="1.5" />
-          {[0, 5, 10].map((s) => (
-            <text key={s} x={(256 * s) / STOPS_SCALE + 2} y="34" fill={SLATE} fontSize="8">
-              {s === 0 ? '0' : `−${s}`}
-              {s === 10 ? ' stops' : ''}
-            </text>
-          ))}
+        <svg width="34" height="16" viewBox="0 0 34 16" aria-hidden>
+          <path d="M 2 8 H 28 M 22 3 L 30 8 L 22 13" fill="none" stroke={CYAN} strokeWidth="1.5" />
         </svg>
-        <div className="text-center text-[10px] tracking-widest text-slate-300 uppercase">SAME LIGHT AS THE WHITE-OUT</div>
-        <div className="text-center text-sm font-medium text-amber-400">
-          {formatSpaceNumber(props.dimmer)}x DIMMER TO YOUR EYES
+        <div className="flex flex-col items-center">
+          <span className="text-[10px] tracking-widest text-sky-200">
+            <span className="uppercase">Agora</span> · τ {formatSpan(props.tau)}
+          </span>
+          <EyeIcon pupilMm={props.pupilMm} dazzled={false} />
+          <span className="text-[11px] text-slate-300">pupila {formatFixed(props.pupilMm, 1)} mm</span>
+          <span className="text-[11px] text-slate-300">retina {sensitivityText(props.retinaStops)}</span>
+          <span className="text-[11px] font-medium text-sky-300">{formatSpaceNumber(props.dimmer)}× mais fraca</span>
         </div>
+      </div>
+      <div className="mt-1 hidden max-w-sm text-center text-[10px] leading-snug text-slate-400 sm:block">
+        A retina perde sensibilidade em ~1 min de luz forte e leva ~20 min para recuperá-la no escuro.
       </div>
     </div>
   );
@@ -252,18 +267,18 @@ function TargetBlueshiftHologram({ name, restK, doppler }: { name: string; restK
   return (
     <div className="flex w-[min(430px,92vw)] items-center justify-between px-4">
       <div className="flex flex-col items-center">
-        <span className="text-[10px] tracking-widest text-slate-300 uppercase">{name} · TRUE COLOUR</span>
+        <span className="text-[10px] tracking-widest text-slate-300 uppercase">{name} · COR REAL</span>
         <span className="mb-2 text-sm text-amber-200">{formatSpaceNumber(restK)} K</span>
         <Swatch temperatureK={restK} />
       </div>
       <div className="flex flex-1 flex-col items-center px-3">
-        <span className="mb-1 text-xs tracking-wider text-amber-400">BLUESHIFT x {formatSpaceNumber(doppler)}</span>
+        <span className="mb-1 text-xs tracking-wider text-amber-400">DESVIO PARA O AZUL × {formatFixed(doppler, doppler < 10 ? 2 : 1)}</span>
         <div className="relative h-0.5 w-full bg-sky-400/70">
           <div className="absolute -top-1 right-0 h-2 w-2 rotate-45 border-t-2 border-r-2 border-sky-400" />
         </div>
       </div>
       <div className="flex flex-col items-center">
-        <span className="text-[10px] tracking-widest text-slate-300 uppercase">AS SEEN NOW</span>
+        <span className="text-[10px] tracking-widest text-slate-300 uppercase">VISTA AGORA</span>
         <span className="mb-2 text-sm text-sky-200">{formatSpaceNumber(restK * doppler)} K</span>
         <Swatch temperatureK={restK * doppler} />
       </div>
@@ -302,7 +317,7 @@ function Emitter() {
  * holograma da fase do voo (ver `selectHologramMode`).
  */
 export function CenterHologramProjector() {
-  const mode = useFlightStore((s) => s.mode);
+  const crew = useFlightStore((s) => s.crew);
   const flight = useFlightStore((s) => s.flight);
   const profile = useFlightStore((s) => s.profile);
   const destination = useFlightStore((s) => s.destination);
@@ -313,7 +328,7 @@ export function CenterHologramProjector() {
 
   const sunDistanceAu = (AU_M + flight.positionM) / AU_M;
   const hologram: HologramMode = selectHologramMode({
-    mode,
+    crew,
     flight,
     profile,
     sunDistanceAu,
@@ -337,7 +352,7 @@ export function CenterHologramProjector() {
     case 'countdown-flip':
       content = (
         <CountdownHologram
-          label="DECELERATION IN"
+          label="FRENAGEM EM"
           remaining={profile.brakeStartTau - flight.tau}
           window={hologramCountdownS(profile)}
         />
@@ -346,7 +361,7 @@ export function CenterHologramProjector() {
     case 'countdown-arrival':
       content = (
         <CountdownHologram
-          label="DECELERATION COMPLETE IN"
+          label="CHEGADA EM"
           remaining={profile.tauTotal - flight.tau}
           window={hologramCountdownS(profile)}
         />
@@ -357,8 +372,11 @@ export function CenterHologramProjector() {
         <EyeAdaptationHologram
           pupilMm={p.pupilDiameterMm}
           retinaStops={p.retinaStops}
+          whiteoutPupilMm={p.whiteoutPupilMm ?? p.pupilDiameterMm}
           whiteoutStops={p.whiteoutRetinaStops ?? 0}
           whiteoutTau={p.whiteoutTau ?? 0}
+          tau={flight.tau}
+          lux={p.visibleLuxAhead}
           dimmer={p.dimmerFactor}
         />
       );
@@ -372,7 +390,7 @@ export function CenterHologramProjector() {
     <div className="pointer-events-none flex flex-col items-center select-none" aria-live="polite">
       <div
         className={`flex flex-col items-center font-mono transition-all duration-500 ${
-          p.isWhiteoutHudActive
+          p.isWhiteoutHudActive && crew === 'crewed'
             ? 'rounded-2xl border border-white/15 bg-neutral-900/65 px-6 py-3 shadow-2xl backdrop-blur-md'
             : 'px-2 py-1'
         }`}

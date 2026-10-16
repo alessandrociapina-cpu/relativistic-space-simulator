@@ -1,11 +1,14 @@
-import { Suspense, lazy } from 'react';
+import { Suspense, lazy, useEffect } from 'react';
 import { useFlightAudio } from '../audio/useFlightAudio';
 import { useFlightLoop } from '../store/useFlightLoop';
+import { useCockpitUi } from '../ui/cockpitUi';
 import { useEffectsPanelOnPause } from '../ui/explainSettings';
 import { CenterHologramProjector } from './CenterHologramProjector';
-import { FlightControls } from './FlightControls';
+import { CockpitFrame } from './CockpitFrame';
+import { InstrumentPanel } from './InstrumentPanel';
 import { MainViewport } from './MainViewport';
-import { RouteMapAndRearMonitor } from './RouteMapAndRearMonitor';
+import { MissionPlanner } from './MissionPlanner';
+import { RouteMonitor } from './RouteMonitor';
 import { TelemetryHUD } from './TelemetryHUD';
 import { TelescopePIP } from './TelescopePIP';
 
@@ -14,36 +17,44 @@ import { TelescopePIP } from './TelescopePIP';
 const ExplanationCard = lazy(() => import('./ExplanationCard').then((m) => ({ default: m.ExplanationCard })));
 const ActiveEffectsPanel = lazy(() => import('./ActiveEffectsPanel').then((m) => ({ default: m.ActiveEffectsPanel })));
 
-/** Cockpit da viagem relativística: para-brisa, monitores, hologramas e controles de voo. */
+/**
+ * Cockpit da viagem relativística: o para-brisa ao fundo, o console de teto
+ * com a telemetria, o telescópio e a rota pendurados, os hologramas e o painel
+ * de instrumentos. O planejamento da missão abre por cima.
+ */
 export function RelativisticCockpit() {
   useFlightLoop();
   useFlightAudio();
   useEffectsPanelOnPause();
+  // Cada entrada na viagem começa pelo planejamento da missão.
+  const openPlanner = useCockpitUi((s) => s.openPlanner);
+  useEffect(openPlanner, [openPlanner]);
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-black select-none">
       <MainViewport className="absolute inset-0" />
-      {/* Áreas vazias deixam o arrasto passar para o para-brisa. O padding respeita
-          entalhe e barra de gestos quando o PWA roda em tela cheia. */}
-      <div className="pointer-events-none absolute inset-0 flex flex-col gap-2 pt-[max(0.75rem,env(safe-area-inset-top))] pr-[max(0.75rem,env(safe-area-inset-right))] pb-[max(0.75rem,env(safe-area-inset-bottom))] pl-[max(0.75rem,env(safe-area-inset-left))]">
-        <TelemetryHUD className="pointer-events-auto mx-auto w-full max-w-4xl" />
-        {/* Monitores nos cantos; o cartão de explicação fica entre eles na tela larga
-            e abaixo deles no celular. O painel de efeitos cobre esta faixa à direita. */}
-        <div className="relative flex min-h-0 flex-1 flex-col gap-2 lg:flex-row lg:items-start lg:justify-between lg:gap-3">
-          <div className="flex items-start justify-between gap-3 lg:contents">
-            <TelescopePIP className="pointer-events-auto w-[44%] max-w-xs" />
-            <RouteMapAndRearMonitor className="pointer-events-auto w-[44%] max-w-xs lg:order-last" />
+      <CockpitFrame />
+      {/* Áreas vazias deixam o arrasto passar para o para-brisa. */}
+      <div className="pointer-events-none absolute inset-0 flex flex-col pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)]">
+        <TelemetryHUD className="pointer-events-auto w-full" />
+        {/* Telas penduradas nos cantos; o cartão de explicação fica entre elas na tela larga
+            e abaixo delas no celular. O painel de efeitos cobre esta faixa à direita. */}
+        <div className="relative flex min-h-0 flex-1 flex-col gap-2 px-2 pt-3 sm:pt-4 lg:flex-row lg:items-start lg:justify-between lg:gap-4 lg:px-[max(1.5rem,6vw)]">
+          <div className="flex items-start justify-between gap-2 lg:contents">
+            <TelescopePIP className="pointer-events-auto w-[49%] max-w-[22rem] lg:w-[min(25vw,21rem)]" />
+            <RouteMonitor className="pointer-events-auto w-[49%] max-w-[22rem] lg:order-last lg:w-[min(25vw,21rem)]" />
           </div>
           <Suspense fallback={null}>
-            <ExplanationCard className="pointer-events-auto mx-auto w-full max-w-md select-text lg:mx-0 lg:min-w-0 lg:flex-1" />
+            <ExplanationCard className="pointer-events-auto mx-auto w-full max-w-md select-text lg:mx-0 lg:mt-8 lg:min-w-0 lg:flex-1" />
             <ActiveEffectsPanel className="pointer-events-auto fixed inset-0 z-30 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] select-text lg:absolute lg:inset-y-0 lg:right-0 lg:left-auto lg:w-[30rem] lg:rounded-md lg:border lg:border-cyan-400/30 lg:p-0" />
           </Suspense>
         </div>
-        <div className="mx-auto flex w-full max-w-4xl flex-col items-center gap-1">
+        <div className="flex w-full flex-col items-center gap-1">
           <CenterHologramProjector />
-          <FlightControls className="pointer-events-auto w-full" />
+          <InstrumentPanel className="pointer-events-auto w-full" />
         </div>
       </div>
+      <MissionPlanner />
     </div>
   );
 }

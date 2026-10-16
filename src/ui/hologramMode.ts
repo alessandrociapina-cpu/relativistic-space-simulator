@@ -4,8 +4,8 @@
  * CMB), então vale para qualquer destino e aceleração.
  */
 import type { FlightState, MissionProfile } from '../physics/RelativityEngine';
+import type { CrewKind } from '../physics/accelerationPresets';
 import { missionScaledS } from '../physics/criticalEvents';
-import type { FlightMode } from '../store/useFlightStore';
 
 export type HologramMode =
   | 'solar-system'
@@ -26,14 +26,15 @@ export const hologramCountdownS = (profile: MissionProfile) => missionScaledS(pr
 /** Fator "mais escuro" a partir do qual o holograma do olho tem o que mostrar. */
 const EYE_HOLOGRAM_MIN_DIMMER = 2;
 
-/** "YOUR EYES": temperatura da CMB à frente, na frenagem, em que a luz é a do white-out. */
+/** "Seus olhos depois do clarão": temperatura da CMB à frente, na frenagem, em que a luz é a do white-out. */
 export const EYE_HOLOGRAM_CMB_K = { min: 5000, max: 60_000 } as const;
 
 /** Blueshift do alvo: faixa de γ na frenagem. */
 export const BLUESHIFT_HOLOGRAM_GAMMA = { min: 8, max: 220 } as const;
 
 export interface HologramContext {
-  readonly mode: FlightMode;
+  /** O holograma dos olhos só existe com um piloto humano a bordo. */
+  readonly crew: CrewKind;
   readonly flight: FlightState;
   readonly profile: MissionProfile;
   readonly sunDistanceAu: number;
@@ -46,7 +47,7 @@ export interface HologramContext {
 const inRange = (x: number, min: number, max: number) => x >= min && x <= max;
 
 export function selectHologramMode({
-  mode,
+  crew,
   flight,
   profile,
   sunDistanceAu,
@@ -56,7 +57,6 @@ export function selectHologramMode({
 }: HologramContext): HologramMode {
   // Pico de Wien da CMB atravessando a vizinhança do visível.
   const cmbNearVisible = inRange(cmbPeakNm, 260, 980);
-  if (mode === 'manual') return cmbNearVisible ? 'cmb-spectrum' : 'none';
 
   const countdown = hologramCountdownS(profile);
   const toFlip = profile.brakeStartTau - flight.tau;
@@ -71,6 +71,7 @@ export function selectHologramMode({
   // Na frenagem, o olho tem prioridade enquanto a luz é a mesma do white-out da ida
   // (o instante espelho de τ ≈ 150 s, quando ela parece ~1 260× mais fraca).
   if (
+    crew === 'crewed' &&
     decelerating &&
     cmbTempK > EYE_HOLOGRAM_CMB_K.min &&
     cmbTempK < EYE_HOLOGRAM_CMB_K.max &&

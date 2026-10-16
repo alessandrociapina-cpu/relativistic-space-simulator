@@ -51,10 +51,10 @@ describe('formatação pt-BR', () => {
     expect(formatSpaceNumber(3_123_953)).toBe('3 123 953');
     expect(formatSpaceNumber(11_065.4)).toBe('11 065');
     expect(formatSpaceNumber(42)).toBe('42');
-    expect(formatRouteDistance(15 * 1.495978707e11)).toBe('15.0 AU');
-    expect(formatRouteDistance(1.495978707e11)).toBe('1.00 AU');
-    expect(formatRouteDistance(4.25 * LIGHT_YEAR_M)).toBe('4.25 ly');
-    expect(formatRouteDistance(2.537e6 * LIGHT_YEAR_M)).toBe('2 537 000 ly');
+    expect(formatRouteDistance(15 * 1.495978707e11)).toBe('15,0 UA');
+    expect(formatRouteDistance(1.495978707e11)).toBe('1,00 UA');
+    expect(formatRouteDistance(4.25 * LIGHT_YEAR_M)).toBe('4,25 a.l.');
+    expect(formatRouteDistance(2.537e6 * LIGHT_YEAR_M)).toBe('2 537 000 a.l.');
   });
 
   it('velocidade: fração de c até 0,99c, depois c − v', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeFlightState, withRapidity } from './RelativityEngine';
+import { computeFlightState } from './RelativityEngine';
 import { DESTINATIONS, destinationMissionProfile } from './destinations';
 import { computeBodyAngularRadii } from './sky';
 import {
@@ -9,6 +9,7 @@ import {
   computePhotometryAndEyeState,
   formatRelativisticSpeedPercent,
   peakCmbLux,
+  recommendedRearZoom,
   recommendedTelescopeZoom,
   steadyPupilMm,
   visibleLuxAhead,
@@ -85,16 +86,10 @@ describe('olho do piloto na missão para Proxima', () => {
     expect(timeline.peakLux).toBeCloseTo(peakCmbLux(), -1);
   });
 
-  it('no Cruzeiro Livre o olho fica em equilíbrio com a luz atual', () => {
-    const flight = withRapidity(computeFlightState(profile, 0), etaOf(7000));
-    const s = computePhotometryAndEyeState(flight, profile, timeline, 1e-9);
-    expect(s.pupilDiameterMm).toBeCloseTo(steadyPupilMm(s.visibleLuxAhead), 9);
-    expect(s.retinaStops).toBeLessThan(-12);
-  });
 });
 
 describe('alertas e véu', () => {
-  it('EYE HAZARD na aceleração com γ ∈ [200, 12 000] ou com luz > 1 500 lux', () => {
+  it('aviso de ofuscamento na aceleração com γ ∈ [200, 12 000] ou com luz > 1 500 lux', () => {
     expect(stateAt(118).isEyeHazard).toBe(true); // γ ≈ 250, ainda escuro: aviso antecipado
     expect(stateAt(118).visibleLuxAhead).toBeLessThan(1);
     expect(stateAt(50).isEyeHazard).toBe(false);
@@ -118,14 +113,28 @@ describe('alertas e véu', () => {
 });
 
 describe('auto-zoom do telescópio', () => {
-  it('x 13 na partida e na chegada (Proxima ocupa ~35% da altura)', () => {
+  it('x 13 na partida; na reta final abre até o alvo caber em 35% da altura (no mínimo x 1)', () => {
     expect(stateAt(0).recommendedTelescopeZoom).toBe(13);
-    const arrival = stateAt(profile.tauTotal);
-    expect(arrival.recommendedTelescopeZoom).toBeCloseTo(13, 6);
-    const flight = computeFlightState(profile, profile.tauTotal);
+    expect(stateAt(profile.tauTotal).recommendedTelescopeZoom).toBe(1);
+    // Alguns segundos antes da chegada o zoom já está abaixo de x 13, com o alvo em 35%.
+    const tau = profile.tauTotal - 12;
+    const zoom = stateAt(tau).recommendedTelescopeZoom;
+    expect(zoom).toBeLessThan(13);
+    expect(zoom).toBeGreaterThan(1);
+    const flight = computeFlightState(profile, tau);
     const radius = computeBodyAngularRadii(flight, proxima).targetRadiusRad;
-    const fill = (2 * radius) / ((WINDSHIELD_FOV_DEG / 13) * (Math.PI / 180));
-    expect(Math.abs(fill - 0.35)).toBeLessThan(0.02);
+    const apparent = 2 * Math.atan(Math.exp(-flight.eta) * Math.tan(radius / 2));
+    const fill = (2 * apparent) / ((WINDSHIELD_FOV_DEG / zoom) * (Math.PI / 180));
+    expect(fill).toBeCloseTo(0.35, 6);
+  });
+
+  it('visão traseira: o Sol em 35% da altura na partida, até x 400', () => {
+    const sun = computeBodyAngularRadii(computeFlightState(profile, 0), proxima).sunRadiusRad;
+    const zoom = recommendedRearZoom(0, sun);
+    expect((2 * sun) / ((WINDSHIELD_FOV_DEG / zoom) * (Math.PI / 180))).toBeCloseTo(0.35, 4);
+    expect(recommendedRearZoom(0, 1e-9)).toBe(400);
+    // A aberração amplia o que fica atrás: o zoom cai à medida que η cresce.
+    expect(recommendedRearZoom(2, sun)).toBeLessThan(zoom);
   });
 
   it('acompanha 0,253·γ no regime relativístico (≈ 8,9×10⁵ no ponto médio)', () => {

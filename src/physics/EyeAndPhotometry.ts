@@ -182,16 +182,34 @@ function sample(values: Float64Array, timeline: EyeTimeline, tau: number): numbe
 const TELESCOPE_MIN_ZOOM = 13;
 /** Zoom ≈ 0,253·γ: FOV ≈ 4,8/γ rad, que enquadra o cone frontal comprimido. */
 const CONE_ZOOM_PER_GAMMA = 0.253;
-/** Fração da altura do monitor ocupada pelo alvo na chegada. */
+/** Fração da altura do monitor ocupada pelo alvo (ou pelo Sol, na visão traseira). */
 const TARGET_FILL = 0.35;
+/** Visão traseira: o Sol deixa de ser acompanhado quando vira um ponto. */
+const REAR_MAX_ZOOM = 400;
 
-/** Auto-zoom do telescópio ("TELESCOPE · x N"), relativo ao para-brisa. */
+/** Zoom que põe um disco de raio angular aparente `apparentRadius` em 35% da altura. */
+const frameZoom = (apparentRadius: number) =>
+  (((WINDSHIELD_FOV_DEG * Math.PI) / 180) * TARGET_FILL) / (2 * apparentRadius);
+
+/**
+ * Auto-zoom do telescópio voltado para a frente, relativo ao para-brisa: acompanha
+ * o cone comprimido (0,253·γ, no mínimo x 13) sem deixar o alvo passar de 35% da
+ * altura; perto da chegada, abre abaixo de x 13 para o alvo caber.
+ */
 export function recommendedTelescopeZoom(eta: number, targetRadiusRestRad: number): number {
   const cone = CONE_ZOOM_PER_GAMMA * Math.cosh(eta);
   // Aberração à frente: tan(θ'/2) = e^(−η)·tan(θ/2)
   const apparentRadius = 2 * Math.atan(Math.exp(-eta) * Math.tan(targetRadiusRestRad / 2));
-  const frame = ((WINDSHIELD_FOV_DEG * Math.PI) / 180) * TARGET_FILL / (2 * apparentRadius);
-  return Math.max(TELESCOPE_MIN_ZOOM, Math.min(cone, frame));
+  return Math.max(1, Math.min(Math.max(TELESCOPE_MIN_ZOOM, cone), frameZoom(apparentRadius)));
+}
+
+/**
+ * Auto-zoom do telescópio voltado para trás: põe o Sol em 35% da altura até x 400.
+ * Atrás, a aberração amplia: tan(θ'/2) = e^(+η)·tan(θ/2).
+ */
+export function recommendedRearZoom(eta: number, sunRadiusRestRad: number): number {
+  const apparentRadius = 2 * Math.atan(Math.min(Math.exp(eta) * Math.tan(sunRadiusRestRad / 2), 1e3));
+  return Math.min(Math.max(TELESCOPE_MIN_ZOOM, frameZoom(apparentRadius)), REAR_MAX_ZOOM);
 }
 
 // ── Estado consolidado para HUD, hologramas e shader ─────────────────────────
@@ -242,11 +260,8 @@ export function computePhotometryAndEyeState(
 ): PhotometryAndEyeState {
   const lux = visibleLuxAhead(flight.eta);
   const cmbTempAheadK = cmbTemperatureAhead(flight.eta);
-  const cruise = flight.phase === 'cruise';
-
-  // No Cruzeiro Livre o olho está em equilíbrio com a luz atual.
-  const pupil = cruise ? steadyPupilMm(lux) : sample(timeline.pupilMm, timeline, flight.tau);
-  const stops = cruise ? retinaTargetStops(lux) : sample(timeline.stops, timeline, flight.tau);
+  const pupil = sample(timeline.pupilMm, timeline, flight.tau);
+  const stops = sample(timeline.stops, timeline, flight.tau);
 
   let dimmerFactor = 1;
   let whiteoutTau: number | null = null;

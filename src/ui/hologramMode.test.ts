@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { computeFlightState, withRapidity } from '../physics/RelativityEngine';
+import { computeFlightState } from '../physics/RelativityEngine';
+import type { CrewKind } from '../physics/accelerationPresets';
 import { DESTINATIONS, destinationMissionProfile } from '../physics/destinations';
 import { cmbTemperatureAhead, wienPeakNm } from '../physics/EyeAndPhotometry';
 import { AU_M, arrivalDistanceM } from '../physics/sky';
@@ -9,12 +10,11 @@ import { OORT_CLOUD_AU, SATURN_AU, routeGeometry, routePosition, sunMarkerPositi
 const proxima = DESTINATIONS.proxima;
 const profile = destinationMissionProfile(proxima);
 
-function modeAt(tau: number, mode: 'autopilot' | 'manual' = 'autopilot'): HologramMode {
-  const base = computeFlightState(profile, tau);
-  const flight = mode === 'manual' ? withRapidity(base, base.eta) : base;
+function modeAt(tau: number, crew: CrewKind = 'crewed'): HologramMode {
+  const flight = computeFlightState(profile, tau);
   const cmbTempK = cmbTemperatureAhead(flight.eta);
   return selectHologramMode({
-    mode,
+    crew,
     flight,
     profile,
     sunDistanceAu: (AU_M + flight.positionM) / AU_M,
@@ -43,9 +43,9 @@ describe('cronologia dos hologramas na missão para Proxima', () => {
     expect(modeAt(tau)).toBe(expected);
   });
 
-  it('no Cruzeiro Livre só aparece o espectro da CMB', () => {
-    expect(modeAt(150, 'manual')).toBe('cmb-spectrum');
-    expect(modeAt(295, 'manual')).toBe('none');
+  it('numa sonda robótica não há olhos: no lugar deles, o espectro da CMB', () => {
+    expect(modeAt(449, 'robotic')).toBe('cmb-spectrum');
+    expect(modeAt(150, 'robotic')).toBe('cmb-spectrum');
   });
 });
 
@@ -55,7 +55,7 @@ describe('hologramas em viagens longas', () => {
     const flight = computeFlightState(oneG, tau);
     const cmbTempK = cmbTemperatureAhead(flight.eta);
     return selectHologramMode({
-      mode: 'autopilot',
+      crew: 'crewed',
       flight,
       profile: oneG,
       sunDistanceAu: (AU_M + flight.positionM) / AU_M,
@@ -74,7 +74,7 @@ describe('hologramas em viagens longas', () => {
 
   it('o holograma do olho só aparece quando a luz parece mesmo mais fraca', () => {
     const tau = 449;
-    const base = { mode: 'autopilot' as const, profile, flight: computeFlightState(profile, tau) };
+    const base = { crew: 'crewed' as const, profile, flight: computeFlightState(profile, tau) };
     const cmbTempK = cmbTemperatureAhead(base.flight.eta);
     const ctx = { ...base, sunDistanceAu: 1e5, cmbTempK, cmbPeakNm: wienPeakNm(cmbTempK) };
     expect(selectHologramMode({ ...ctx, eyeDimmer: 1286 })).toBe('eye-adaptation');
