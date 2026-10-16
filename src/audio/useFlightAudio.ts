@@ -22,12 +22,15 @@ export function useFlightAudio(): void {
     document.addEventListener('visibilitychange', onVisibility);
     const offEvents = onFlightEvent((event) => flightAudio.play(event));
     const offStore = useFlightStore.subscribe(syncEngine);
+    // De volta ao cockpit (vindo do simulador de sondas): o motor volta a soar.
+    flightAudio.resume();
 
     return () => {
       for (const type of UNLOCK_EVENTS) window.removeEventListener(type, unlock, true);
       document.removeEventListener('visibilitychange', onVisibility);
       offEvents();
       offStore();
+      flightAudio.suspend();
     };
   }, []);
 }
