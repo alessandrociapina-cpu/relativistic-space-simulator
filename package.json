@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "typecheck": "tsc -b",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "fetch:horizons": "node scripts/fetch-horizons.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^9.122.0",

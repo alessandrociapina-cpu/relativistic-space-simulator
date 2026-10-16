@@ -65,9 +65,14 @@ export class FlightAudio {
     if (this.ctx?.state === 'suspended') void this.ctx.resume();
   }
 
-  /** Pausa o processamento (aba oculta). */
+  /** Pausa o processamento (aba oculta ou cockpit fora da tela). */
   suspend(): void {
     if (this.ctx?.state === 'running') void this.ctx.suspend();
+  }
+
+  /** Retoma um contexto já liberado por um gesto anterior (sem criar um novo). */
+  resume(): void {
+    if (this.enabled && this.ctx?.state === 'suspended') void this.ctx.resume();
   }
 
   updateEngine(sound: EngineSound): void {

@@ -430,6 +430,14 @@ export function FlightControls({ className = '' }: { className?: string }) {
       <div className="flex items-center justify-between gap-2">
         <ModeToggle />
         <div className="flex items-center gap-2">
+          <a
+            href="#sondas"
+            aria-label="Sondas"
+            title="Simulador de sondas: Voyager e companhia num Sistema Solar com as trajetórias reais do JPL"
+            className="px-1 text-slate-400 hover:text-slate-200"
+          >
+            🛰<span className="ml-1 hidden sm:inline">Sondas</span>
+          </a>
           <EffectsButton />
           <SoundToggle />
           <button

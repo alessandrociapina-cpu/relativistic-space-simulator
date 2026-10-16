@@ -14,6 +14,7 @@ Simulador interativo de viagem espacial relativística em primeira pessoa (3D/We
 - **Testes:** Vitest para validação matemática do motor relativístico (`RelativityEngine.test.ts`).
 - **Áudio:** Web Audio API pura (sem arquivos de som): motor procedural e alertas de contagem regressiva.
 - **Fórmulas:** KaTeX nas explicações (§10), num chunk carregado à parte (`React.lazy`) para não atrasar o cockpit; as fontes `woff2` entram no pré-cache do PWA.
+- **Dados das sondas (§11):** JPL Horizons, baixados uma vez por `npm run fetch:horizons` (`scripts/fetch-horizons.mjs`) para `src/probes/data/*.json` e versionados. O app publicado não acessa o JPL. Atrás do proxy do ambiente cloud, rode com `NODE_USE_ENV_PROXY=1` (o `fetch` do Node não lê `HTTPS_PROXY` sozinho).
 - **PWA:** `vite-plugin-pwa` (manifest + service worker Workbox que pré-carrega o app para uso offline). Ícones em `public/icons/`.
 - **Deploy:** GitHub Pages via GitHub Actions (`vite.config.ts` configurado com `base: './'`). O workflow `.github/workflows/deploy.yml` roda testes e build em todo PR e publica a cada push na `main`. Pré-requisito: Settings → Pages → Source: "GitHub Actions".
 ---
@@ -450,6 +451,7 @@ void main() {
 relativistic-space-simulator/
 ├── .github/workflows/deploy.yml   # CI/CD automático para GitHub Pages
 ├── public/icons/                  # Ícones do PWA (SVG + PNG 192/512/maskable/apple-touch)
+├── scripts/fetch-horizons.mjs     # Baixa e comprime as efemérides do JPL Horizons (§11)
 ├── src/
 │   ├── audio/
 │   │   ├── FlightAudio.ts         # Sintetizador Web Audio: motor e alertas
@@ -468,7 +470,21 @@ relativistic-space-simulator/
 │   ├── shaders/
 │   │   ├── RelativisticSky.vert
 │   │   └── RelativisticSky.frag
+│   ├── probes/                    # Simulador de sondas (§11), carregado sob demanda em #sondas
+│   │   ├── data/                  # voyager1/2.json, planets.json (Júpiter–Plutão), planet-fixtures.json
+│   │   ├── ephemeris.ts           # Tabelas de estado do Horizons e interpolação de Hermite
+│   │   ├── planets.ts             # Planetas: Kepler (Mercúrio–Marte) e tabelas (Júpiter–Plutão) + teste
+│   │   ├── probes.ts              # Trajetória das sondas, janelas de encontro, análise de sobrevoo + teste
+│   │   ├── missions.ts            # Catálogo das sondas e eventos + missions.test.ts
+│   │   ├── eventExplanations.ts   # Explicações e fórmulas de cada evento
+│   │   ├── sceneMath.ts           # Escala log/real, foco e distância da câmera
+│   │   ├── useProbeStore.ts       # Data, ritmo, foco, escala e loop com desaceleração nos sobrevoos
+│   │   ├── SolarSystemScene.tsx   # Cena R3F com origem flutuante: Sol, planetas, órbitas, trilhas
+│   │   ├── ProbesApp.tsx          # Layout do modo Sondas
+│   │   ├── ProbeHUD.tsx, ProbeControls.tsx, ProbeEvents.tsx
+│   │   ├── time.ts, vec3.ts       # Dias desde J2000 e vetores em 64 bits
 │   ├── components/
+│   │   ├── RelativisticCockpit.tsx # Layout do cockpit (modo padrão; App alterna com #sondas)
 │   │   ├── RelativisticSky.tsx    # Esfera celeste + uniforms, compartilhada pelos monitores
 │   │   ├── CockpitMonitor.tsx     # Moldura dos monitores PIP
 │   │   ├── MainViewport.tsx       # Cena 3D principal (para-brisa do cockpit)
@@ -493,6 +509,7 @@ relativistic-space-simulator/
 │   │   ├── tex.ts                 # Números e unidades em TeX (vírgula decimal) + tex.test.ts
 │   │   ├── explanations.ts        # Catálogo de efeitos: critérios físicos, textos e fórmulas (§10) + teste
 │   │   ├── explainSettings.ts     # Modo Explicar (persistido) e painel aberto ao pausar
+│   │   ├── appMode.ts             # Modo pela âncora da URL: #sondas ou o cockpit
 │   │   ├── hologramMode.ts        # Seleção automática do holograma + teste
 │   │   └── routeScale.ts          # Escala logarítmica do mapa de rota
 │   ├── App.tsx
@@ -581,3 +598,25 @@ O arquivo `src/physics/RelativityEngine.test.ts` deve passar nos seguintes teste
 2. **Cartão** (botão "💡 Explicar" ao lado da partida, ligado por padrão e persistido): o loop (`tick`) anuncia cada efeito na **transição** inativo → ativo, uma vez por missão, só no Autopilot. O scrub não anuncia e dispensa o cartão. A nova partida e a troca de missão zeram os anúncios. Cada cartão fica ≥ 6 s reais na tela (a 20x/100x mostra o mais recente ao fim do prazo). Ligar o modo no meio do voo mostra o efeito mais próprio do instante.
 3. **Painel de efeitos ativos** (botão "∑ Efeitos", ou automático ao pausar com o modo Explicar ligado; retomar fecha, Esc fecha): todos os efeitos ativos com resumo, fórmulas com os valores atuais e "Saiba mais". Acompanha o scrub e o slider do Cruzeiro Livre a 4 Hz. O efeito vindo do cartão aparece destacado no topo até o instante mudar. Enquanto o painel está aberto, o holograma central se esconde. No celular, o painel ocupa a tela inteira e tem "▶ Retomar".
 4. **Texto pt-BR:** vírgula decimal (`{,}` no TeX), milhares com espaço ("11 069", nunca "11.069") e durações por extenso ("22 min 28 s"). Todas as fórmulas passam no KaTeX em modo estrito em qualquer instante, destino e modo (teste em `explanations.test.ts`).
+
+---
+## 11. Simulador de Sondas (`#sondas`)
+O segundo modo do app: um Sistema Solar dinâmico com as trajetórias reais das sondas. O cockpit tem o link "🛰 Sondas"; as sondas, "🚀 Viagem relativística". O modo carrega sob demanda (`React.lazy`) e o áudio do cockpit é suspenso enquanto ele está fora da tela.
+
+1. **Dados** (`scripts/fetch-horizons.mjs`): vetores do JPL Horizons na eclíptica J2000 (ICRF), centro do Sol, em UA e UA/dia, com tempo em dias desde J2000 (TDB ≈ UTC).
+   - Cada tabela é baixada numa grade fina (1 dia ou 5 dias no espaço interplanetário; 2 h e 1 min perto dos planetas) e enxugada: uma amostra só fica se a interpolação de Hermite (posição + velocidade) sem ela errar mais que **150 km** (15 km nos encontros). As Voyagers inteiras (1977–2036) somam ~100 KB.
+   - **Encontros** (partida da Terra e sobrevoos) são guardados **centrados no planeta**. Na tela, a sonda vale planeta(t) + trajetória relativa, então o sobrevoo passa no lugar exato mesmo que o planeta tenha erro. Nas bordas da janela (25% de cada lado), a posição relativa se mistura suavemente com a heliocêntrica.
+   - Planetas externos e Plutão usam os **baricentros** dos sistemas (5–9): o centro de cada planeta gira em torno deles com as luas (Plutão: ~2 100 km a cada 6,4 dias), o que não cabe numa grade de 10 dias.
+2. **Planetas** (`planets.ts`): Mercúrio a Marte pelos elementos de Kepler do JPL (Standish, Tabela 1, 1800–2050; erro de 1 000 a 45 000 km); Júpiter a Plutão pelas tabelas do Horizons (1969–2036, erro < 1 500 km). Os elementos dos externos (erro até 0,03 UA) só desenham as órbitas.
+3. **Sobrevoos** (`analyzeFlyby`): maior aproximação por seção áurea na interpolação; $v_\infty$ por energia, $v_\infty^2 = v^2 - 2\mu/r$, nas bordas da janela; deflexão medida contra a da hipérbole, $\sin(\delta/2) = 1/(1 + r_p v_\infty^2/\mu)$, com erro < 1°; e velocidade heliocêntrica antes e depois por $|\vec V_{\text{planeta}} + \vec v_\infty|$.
+   - Valores que saem dos dados: Voyager 1 a 348 mil km de Júpiter (5/3/1979) e 124 mil km acima das nuvens de Saturno; Voyager 2 a 81,5 mil km de Urano e 29,2 mil km do centro de Netuno (25/8/1989). Júpiter acelerou as duas em ~10 km/s; Netuno freou a Voyager 2.
+4. **Eventos** (`missions.ts`): lançamentos e sobrevoos pelos dados; Pálido Ponto Azul (14/2/1990), objeto humano mais distante (17/2/1998), choques de terminação (16/12/2004 e 30/8/2007), heliopausas (25/8/2012 e 5/11/2018); e o dia-luz da Voyager 1, calculado pelos dados (18/11/2026). Cada evento tem explicação com fórmulas (`eventExplanations.ts`): $v_\infty$ e $C_3$ no lançamento, estilingue nos sobrevoos, $\theta = 2R_\oplus/d$ no Pálido Ponto Azul, escape solar e tempo-luz.
+5. **Cena** (`SolarSystemScene.tsx`): eclíptica no plano XY, norte para cima, **origem flutuante** (tudo relativo ao corpo em foco, em 64 bits) e depth buffer logarítmico.
+   - Planetas e sondas têm tamanho mínimo na tela (3–4 px).
+   - As órbitas são recalculadas a cada ano.
+   - As trilhas mostram o passado forte e a rota inteira apagada.
+   - Os rótulos são clicáveis para focar.
+   - Ao focar um planeta, a câmera fica do lado iluminado.
+   - **Escala "Log"**: $R = 10\log_{10}(1 + r/0{,}5\text{ UA})$, com planetas e Voyagers na mesma tela. **"Real"** é a escala linear, usada nos sobrevoos.
+6. **Tempo** (`useProbeStore.ts`): de 1977 a 2035, em ritmos de 1 h/s a 1 ano/s. Com "Desacelerar nos sobrevoos", cada encontro (±3 dias) passa a 6 h/s (~24 s na tela) e depois volta ao ritmo anterior. Ir a um evento pausa, foca o planeta (em escala real) ou a sonda e abre o cartão. "Hoje" vai para a data atual.
+7. **Painel da sonda**: distância do Sol e da Terra, tempo do sinal, velocidade contra o escape solar local e os selos "Escapando do Sistema Solar" e "Espaço interestelar".
