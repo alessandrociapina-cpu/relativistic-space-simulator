@@ -9,10 +9,11 @@
  * de encontro) é desenhado com uma escala só, a tangencial do planeta: assim
  * as órbitas em torno dele não ficam achatadas pela compressão radial.
  */
-import { BODIES, bodyPosition, isBody, isMoon, isSmallBody, smallBodySpan, type BodyId } from './bodies';
-import { craft, isCompanionId, isProbeId, type CraftId } from './missions';
-import { AU_KM, currentEncounter, encounterWeight, probePosition, type ProbeTrajectory } from './probes';
-import { add, lerp, norm, scale as scaleVec, sub, type Vec3 } from './vec3';
+import { BODIES, bodyPosition, bodyState, isBody, isMoon, isSmallBody, smallBodySpan, type BodyId } from './bodies';
+import { muAu } from './ephemeris';
+import { COMPANIONS, craft, isCompanionId, isProbeId, type CraftId } from './missions';
+import { AU_KM, currentEncounter, encounterWeight, probePosition, probeState, type ProbeTrajectory } from './probes';
+import { add, cross, lerp, norm, scale as scaleVec, sub, type Vec3 } from './vec3';
 
 export type FocusId = 'sun' | BodyId | CraftId;
 /** `log`: distâncias ao Sol em escala logarítmica (visão geral); `linear`: escala real. */
@@ -125,9 +126,8 @@ export function focusPosition(focus: FocusId, t: number): Vec3 {
 
 /** Companheira antes de se separar: está na nave-mãe. */
 function craftParentPosition(id: CraftId, t: number): Vec3 | null {
-  if (!isCompanionId(id)) return null;
-  const parent = id === 'huygens' ? 'cassini' : 'galileo';
-  return probePosition(craft(parent).trajectory, t);
+  const companion = COMPANIONS.find((c) => c.id === id);
+  return companion ? probePosition(craft(companion.parent).trajectory, t) : null;
 }
 
 /** Posição do foco na cena. */
@@ -157,4 +157,104 @@ export function viewDistance(focus: FocusId, t: number, mode: ScaleMode): number
   // Corpos: ~60 raios, o bastante para ver um sobrevoo inteiro em escala real.
   if (isBodyFocus(focus)) return Math.max(bodyRadiusAu(focus) * 60 * s, mode === 'log' ? 1e-4 : 1e-7);
   return mode === 'log' ? 3 : 0.6;
+}
+
+// ── Rastros ──────────────────────────────────────────────────────────────────
+/** Passo angular dos rastros em torno do corpo central do momento. */
+const TRAIL_STEP_RAD = (3 * Math.PI) / 180;
+/** Passo máximo dos rastros dentro das janelas de encontro (dias). */
+const WINDOW_TRAIL_MAX_STEP_DAYS = 1;
+/**
+ * Órbitas rápidas que duram anos (Magellan, Dawn, Vikings): o rastro guarda
+ * uma volta inteira a cada `RING_SPACING_DAYS`, com lacunas entre elas, e a
+ * cena desenha a volta mais recente na hora. Vale para janelas longas e
+ * órbitas mais curtas que `RING_PERIOD_DAYS`.
+ */
+const RING_SPACING_DAYS = 10;
+const RING_PERIOD_DAYS = 5;
+const RING_WINDOW_DAYS = 60;
+
+
+/**
+ * Pontos do rastro: o passo segue o giro da sonda em torno do corpo central
+ * do momento (o Sol, ou o planeta/lua/cometa da janela), ~3° por ponto. Assim
+ * um periélio da Parker ou uma passagem rente a Júpiter saem lisos sem
+ * encher de pontos os anos de cruzeiro.
+ */
+export function trailPoints(trajectory: ProbeTrajectory): { times: number[]; points: TrailPoint[]; gaps: boolean[] } {
+  const times: number[] = [];
+  const points: TrailPoint[] = [];
+  /** gaps[k]: não há linha entre o ponto k − 1 e o ponto k. */
+  const gaps: boolean[] = [];
+  let gapNext = false;
+  /** Volta em andamento numa órbita rápida e longa: início e ângulo percorrido. */
+  let ring: { start: number; angle: number } | null = null;
+  for (let t = trajectory.launch; ; ) {
+    const point = craftPoint(trajectory, t);
+    const state = probeState(trajectory, t);
+    if (point && state) {
+      times.push(t);
+      points.push(point);
+      gaps.push(gapNext);
+      gapNext = false;
+    }
+    if (t >= trajectory.end || !state) break;
+    const e = currentEncounter(trajectory, t);
+    if (e?.kind === 'surface') {
+      // Pousado: o módulo fica no lugar (gira com o corpo); só a ponta final do pouso entra no rastro.
+      gapNext = true;
+      t = Math.min(e.end, trajectory.end);
+      if (t === e.end && t < trajectory.end) t += 1e-6;
+      continue;
+    }
+    const center = e ? bodyState(e.body, t) : null;
+    const r = center ? sub(state.position, center.position) : state.position;
+    const v = center ? sub(state.velocity, center.velocity) : state.velocity;
+    const omega = norm(cross(r, v)) / Math.max(norm(r) ** 2, 1e-30);
+    // Numa aproximação quase em linha reta o giro em torno do corpo é lento, e só o passo angular
+    // pularia o sobrevoo inteiro: o passo também não passa de 1/4 do tempo para percorrer a distância
+    // atual. E numa janela de encontro, onde a cena mistura a posição relativa ao corpo com a
+    // heliocêntrica (e, na escala log, duas escalas), fica em no máximo 1 dia.
+    const approach = (0.25 * norm(r)) / Math.max(norm(v), 1e-30);
+    const maxStep = e ? WINDOW_TRAIL_MAX_STEP_DAYS : 30;
+    const step = Math.min(Math.max(Math.min(TRAIL_STEP_RAD / omega, approach), 1 / 1440), maxStep);
+    const period = e ? orbitPeriodDays(r, v, e.body) : null;
+    const fastLongOrbit = e !== null && e.kind === 'orbit' && e.end - e.start > RING_WINDOW_DAYS && period !== null && period < RING_PERIOD_DAYS;
+    if (!fastLongOrbit) {
+      ring = null;
+    } else {
+      ring ??= { start: t, angle: 0 };
+      ring.angle += omega * step;
+      if (ring.angle >= 2 * Math.PI) {
+        // Volta completa: pula até a próxima, deixando uma lacuna no rastro.
+        const next: number = ring.start + RING_SPACING_DAYS;
+        if (next > t + step && next < e.end) {
+          ring = { start: next, angle: 0 };
+          gapNext = true;
+          t = next;
+          continue;
+        }
+        ring = { start: t + step, angle: 0 };
+      }
+    }
+    t = Math.min(t + step, trajectory.end);
+  }
+  return { times, points, gaps };
+}
+
+/** Período (dias) da elipse com posição e velocidade relativas ao corpo (UA, UA/dia), pela energia; null se não for fechada. */
+function orbitPeriodDays(r: Vec3, v: Vec3, body: BodyId): number | null {
+  const mu = muAu(BODIES[body].gm);
+  if (mu <= 0) return null;
+  const inverseA = 2 / norm(r) - (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]) / mu;
+  return inverseA > 0 ? 2 * Math.PI * Math.sqrt(1 / (inverseA * inverseA * inverseA) / mu) : null;
+}
+
+/** Período da órbita em que a sonda está (dias), ou null fora de uma órbita fechada. */
+export function localPeriodDays(trajectory: ProbeTrajectory, t: number): number | null {
+  const e = currentEncounter(trajectory, t);
+  const state = probeState(trajectory, t);
+  if (!e || !state) return null;
+  const c = bodyState(e.body, t);
+  return c ? orbitPeriodDays(sub(state.position, c.position), sub(state.velocity, c.velocity), e.body) : null;
 }

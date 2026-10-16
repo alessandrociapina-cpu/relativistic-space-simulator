@@ -1,5 +1,6 @@
 /**
- * Trajetórias das sondas a partir das tabelas do JPL Horizons.
+ * Trajetórias das sondas a partir das tabelas do JPL Horizons (ou das
+ * reconstruídas por `scripts/reconstruct.mjs`, no mesmo formato).
  *
  * Fora dos encontros vale a tabela heliocêntrica. Num encontro (partida da
  * Terra, sobrevoo, órbita em torno de um planeta ou do cometa), a sonda é
@@ -7,12 +8,14 @@
  * do Horizons. Assim o encontro passa no lugar exato mesmo com o corpo pelos
  * elementos aproximados ou pela série de Fourier. Nas bordas da janela as
  * duas posições se misturam suavemente, sem saltos; janelas de luas ficam
- * dentro da janela do planeta e se misturam sobre ela.
+ * dentro da janela do planeta e se misturam sobre ela. Um módulo pousado
+ * fica num ponto da superfície que gira com o corpo (`rotation.ts`).
  */
 import { BODIES, bodyState, isBody, isGaseous, isMoon, type BodyId } from './bodies';
 import { interpolateState, muAu, tableEnd, tableStart, unpackTable, type PackedTable, type StateTable, type TableState } from './ephemeris';
 import { orbitalPeriod } from './kepler';
 import { SUN_GM } from './planets';
+import { surfaceState } from './rotation';
 import { add, angle, dot, lerp, norm, scale, sub, type Vec3 } from './vec3';
 
 export const AU_KM = 149_597_870.7;
@@ -22,13 +25,22 @@ export const C_KMS = 299_792.458;
 /** UA/dia → km/s. */
 export const AU_PER_DAY_TO_KMS = AU_KM / DAY_S;
 
-/** Janela relativa no JSON: em UA e UA/dia, ou em km e km/s (`units: 'km'`). */
+/**
+ * Janela relativa no JSON: em UA e UA/dia, ou em km e km/s (`units: 'km'`).
+ * Um pouso (`site`: latitude e longitude leste em graus) só tem início e fim
+ * em `t` e nenhuma amostra em `s`.
+ */
 export interface EncounterData extends PackedTable {
   readonly body: string;
   readonly departure?: boolean;
   /** Dias de mistura com a trajetória heliocêntrica na entrada e na saída. */
   readonly ramp?: readonly number[];
   readonly units?: string;
+  /** Tipo explícito (as reconstruções o informam; nos dados do Horizons ele é deduzido). */
+  readonly kind?: string;
+  /** GM (km³/s²) da interpolação, quando não é o do corpo (0 nas descidas freadas pela atmosfera ou pelo motor). */
+  readonly gm?: number;
+  readonly site?: readonly number[];
 }
 
 export interface ProbeData {
@@ -39,18 +51,28 @@ export interface ProbeData {
   readonly encounters: readonly EncounterData[];
 }
 
-/** Partida da Terra, sobrevoo, ou órbita em que a missão termina (sem saída). */
-export type EncounterKind = 'departure' | 'flyby' | 'orbit';
+/** Partida da Terra, sobrevoo, órbita em torno do corpo, ou pousado na superfície. */
+export type EncounterKind = 'departure' | 'flyby' | 'orbit' | 'surface';
+
+/** Ponto da superfície: latitude e longitude leste (graus). */
+export interface SurfaceSite {
+  readonly latDeg: number;
+  readonly lonDeg: number;
+}
 
 export interface Encounter {
   readonly body: BodyId;
-  readonly table: StateTable;
+  /** Trajetória relativa ao corpo; `null` no pouso, que usa `site`. */
+  readonly table: StateTable | null;
+  readonly site: SurfaceSite | null;
   readonly start: number;
   readonly end: number;
   readonly rampIn: number;
   readonly rampOut: number;
   readonly kind: EncounterKind;
 }
+
+const KINDS: readonly EncounterKind[] = ['departure', 'flyby', 'orbit', 'surface'];
 
 export interface ProbeTrajectory {
   readonly id: string;
@@ -83,13 +105,18 @@ export function loadTrajectory(data: ProbeData): ProbeTrajectory {
   const helioStart = helio ? tableStart(helio) : NaN;
   const encounters = data.encounters.map((e): Encounter => {
     if (!isBody(e.body)) throw new Error(`Corpo desconhecido no encontro: ${e.body}`);
-    const table = relativeTable(e, muAu(BODIES[e.body].gm));
+    if (e.kind !== undefined && !KINDS.includes(e.kind as EncounterKind)) throw new Error(`Tipo de encontro desconhecido: ${e.kind}`);
+    if (e.site) {
+      const [latDeg, lonDeg] = e.site;
+      return { body: e.body, table: null, site: { latDeg: latDeg!, lonDeg: lonDeg! }, start: e.t[0]!, end: e.t[1]!, rampIn: 0, rampOut: 0, kind: 'surface' };
+    }
+    const table = relativeTable(e, muAu(e.gm ?? BODIES[e.body].gm));
     const start = tableStart(table);
     const end = tableEnd(table);
     const departure = e.departure ?? Math.abs(start - helioStart) < 1e-6;
     const [rampIn, rampOut] = e.ramp ?? [departure ? 0 : BLEND_FRACTION * (end - start), BLEND_FRACTION * (end - start)];
-    const kind: EncounterKind = departure ? 'departure' : e.ramp && e.ramp[1] === 0 ? 'orbit' : 'flyby';
-    return { body: e.body, table, start, end, rampIn: rampIn!, rampOut: rampOut!, kind };
+    const kind = (e.kind as EncounterKind | undefined) ?? (departure ? 'departure' : e.ramp && e.ramp[1] === 0 ? 'orbit' : 'flyby');
+    return { body: e.body, table, site: null, start, end, rampIn: rampIn!, rampOut: rampOut!, kind };
   });
   return makeTrajectory(data.id, data.name, helio, encounters);
 }
@@ -107,6 +134,13 @@ export function encounterWeight(e: Encounter, t: number): number {
   return Math.min(fromStart, fromEnd);
 }
 
+/** Estado em relação ao corpo do encontro (UA, UA/dia): a tabela ou o ponto da superfície girando com ele. */
+export function encounterState(e: Encounter, t: number): TableState {
+  if (e.table) return interpolateState(e.table, t);
+  const { r, v } = surfaceState(e.body, e.site!.latDeg, e.site!.lonDeg, BODIES[e.body].radiusKm, t);
+  return { position: scale(r, 1 / AU_KM), velocity: scale(v, 1 / AU_PER_DAY_TO_KMS) };
+}
+
 /** Estado heliocêntrico (UA, UA/dia) da sonda; `null` antes do lançamento e depois do fim dos dados. */
 export function probeState(probe: ProbeTrajectory, t: number): TableState | null {
   if (t < probe.launch || t > probe.end) return null;
@@ -116,7 +150,7 @@ export function probeState(probe: ProbeTrajectory, t: number): TableState | null
     if (w <= 0) continue;
     const body = bodyState(e.body, t);
     if (!body) continue;
-    const rel = interpolateState(e.table, t);
+    const rel = encounterState(e, t);
     const here = { position: add(body.position, rel.position), velocity: add(body.velocity, rel.velocity) };
     state =
       !state || w >= 1
@@ -249,9 +283,10 @@ const MOON_SIDE_DAYS = 2;
 
 export function analyzeFlyby(probe: ProbeTrajectory, e: Encounter): FlybyAnalysis {
   const body = BODIES[e.body];
-  const closest = closestApproach(e.table);
+  const table = e.table!;
+  const closest = closestApproach(table);
   const closestKm = closest.r * AU_KM;
-  const atClosest = interpolateState(e.table, closest.t);
+  const atClosest = interpolateState(table, closest.t);
   const relativeKms = speedKms(atClosest.velocity);
   const vInfKms = Math.sqrt(Math.max(relativeKms * relativeKms - (2 * body.gm) / closestKm, 0));
   const predicted = body.gm > 0 ? 2 * Math.asin(1 / (1 + (closestKm * vInfKms * vInfKms) / body.gm)) : 0;
@@ -280,8 +315,8 @@ export function analyzeFlyby(probe: ProbeTrajectory, e: Encounter): FlybyAnalysi
     periodBeforeDays = periodDays(before);
     periodAfterDays = periodDays(after);
   } else {
-    const incoming = interpolateState(e.table, e.start);
-    const outgoing = interpolateState(e.table, e.end);
+    const incoming = interpolateState(table, e.start);
+    const outgoing = interpolateState(table, e.end);
     // v∞ nas bordas da janela, onde a gravidade do corpo já é fraca.
     const vInfAt = (s: TableState) => Math.sqrt(Math.max(0, 2 * energyKm(s, body.gm)));
     const vInfEdges = body.gm > 0 ? (vInfAt(incoming) + vInfAt(outgoing)) / 2 : relativeKms;
@@ -333,9 +368,10 @@ export interface CaptureAnalysis {
  */
 export function analyzeCapture(e: Encounter): CaptureAnalysis {
   const body = BODIES[e.body];
-  const peri = closestApproach(e.table, e.start, e.start + 90);
-  const before = interpolateState(e.table, peri.t - 3);
-  const after = interpolateState(e.table, peri.t + 3);
+  const table = e.table!;
+  const peri = closestApproach(table, e.start, e.start + 90);
+  const before = interpolateState(table, peri.t - 3);
+  const after = interpolateState(table, peri.t + 3);
   const e1 = energyKm(before, body.gm);
   const e2 = energyKm(after, body.gm);
   const rp = peri.r * AU_KM;

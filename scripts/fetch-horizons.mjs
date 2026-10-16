@@ -11,11 +11,12 @@
  * - Cada tabela é baixada numa grade fina e enxugada: uma amostra só fica se
  *   a interpolação sem ela errar mais que a tolerância (150 km no espaço
  *   interplanetário, 15 km nos sobrevoos, 50 km nas órbitas em torno dos
- *   planetas, 0,5 km em torno do cometa). A interpolação é a do app
- *   (src/probes/ephemeris.ts): entre duas amostras, a órbita de Kepler em
- *   torno do corpo central propagada a partir de cada ponta, misturadas. Só
- *   sobram amostras onde há manobras, sobrevoos e perturbações.
- * - Luas: série de Fourier ajustada aos vetores do Horizons de 1970 a 2036
+ *   planetas, 5 km em torno de Vesta e Ceres, 0,5 km em torno do cometa). A
+ *   interpolação é a do app (src/probes/ephemeris.ts): entre duas amostras,
+ *   a órbita de Kepler em torno do corpo central propagada a partir da
+ *   primeira, mais uma correção cúbica que leva à segunda. Só sobram amostras
+ *   onde há manobras, sobrevoos e perturbações.
+ * - Luas: série de Fourier ajustada aos vetores do Horizons de 1968 a 2036
  *   (frequências achadas uma a uma no espectro do resíduo, amplitudes por
  *   mínimos quadrados), até o erro máximo ficar abaixo de 100 km.
  * - Corpos pequenos (cometa, asteroides, Arrokoth): tabelas heliocêntricas
@@ -62,15 +63,18 @@ const GM = {
   titan: 8978.1,
   enceladus: 7.21,
   triton: 1427.6,
+  moon: 4902.8,
   comet67p: 6.66e-7,
+  vesta: 17.288,
+  ceres: 62.6284,
   arrokoth: 0,
   steins: 0,
   lutetia: 0,
   gaspra: 0,
   ida: 0,
 };
-/** Tolerâncias da dizimação (km). */
-const TOL_KM = { helio: 150, flyby: 15, orbit: 50, comet: 0.5 };
+/** Tolerâncias da dizimação (km): `asteroid` nas órbitas baixas da Dawn em torno de Vesta e Ceres. */
+const TOL_KM = { helio: 150, flyby: 15, orbit: 50, asteroid: 5, comet: 0.5 };
 /** O Horizons devolve no máximo ~90 000 linhas por pedido. */
 const MAX_ROWS = 80_000;
 
@@ -93,6 +97,8 @@ const CENTERS = {
   titan: '500@606',
   triton: '500@801',
   comet67p: '@1000012',
+  vesta: '@2000004',
+  ceres: '@2000001',
   arrokoth: '@2486958',
   steins: '@2002867',
 };
@@ -109,7 +115,8 @@ const RADIUS_KM = { jupiter: 71_492, saturn: 60_268 };
  * achado na grade grossa. Com `from`/`to`: grade única (`step`), usada nas
  * partidas e nas órbitas. `ramp` = [entrada, saída] em dias da mistura com a
  * trajetória heliocêntrica (padrão: 25% da janela de cada lado); `departure`
- * começa colada na Terra; `until: 'surface'` corta a sonda ao tocar o planeta.
+ * começa colada na Terra; `until: 'surface'` corta a sonda ao tocar o planeta;
+ * `kind: 'orbit'` marca uma estadia em órbita com saída (Dawn em Vesta).
  * Os sobrevoos de luas ficam dentro da janela do planeta e vêm depois dela na
  * lista: no app, cada janela se mistura sobre a anterior.
  */
@@ -249,6 +256,22 @@ const MISSIONS = {
       ...['2018-10-03', '2019-12-26', '2020-07-11', '2021-02-20', '2021-10-16', '2023-08-21', '2024-11-06'].map((d) => rocky('venus', d)),
     ],
   },
+  dawn: {
+    name: 'Dawn',
+    command: '-203',
+    // Fora das janelas de Vesta e Ceres; o motor iônico empurra quase o tempo todo.
+    helio: [
+      ['2007-09-27 12:45', '2011-05-25', '1 d'],
+      ['2012-09-08', '2015-01-20', '1 d'],
+    ],
+    encounters: [
+      departure('2007-09-27 12:45', '2007-10-12'),
+      rocky('mars', '2009-02-18'),
+      { body: 'vesta', from: '2011-05-03', to: '2012-09-25', step: '10 m', ramp: [15, 15], tol: 'asteroid', kind: 'orbit' },
+      // Fim da missão: a hidrazina acabou em 31/10/2018; a nave segue em órbita de Ceres.
+      { body: 'ceres', from: '2015-01-01', to: '2018-11-01', step: '10 m', ramp: [15, 0], tol: 'asteroid' },
+    ],
+  },
   rosetta: {
     name: 'Rosetta',
     command: '-226',
@@ -267,7 +290,7 @@ const MISSIONS = {
   },
 };
 
-/** Luas: centro no planeta (corpo), ajustadas de 1970 a 2036. */
+/** Luas: centro no planeta (corpo), ajustadas de 1968 a 2036 (a Apollo 8 é de dezembro de 1968). */
 const MOONS = {
   moon: { command: '301', parent: 'earth', step: '12 h' },
   io: { command: '501', parent: 'jupiter', step: '6 h' },
@@ -279,7 +302,7 @@ const MOONS = {
   triton: { command: '801', parent: 'neptune', step: '12 h' },
   charon: { command: '901', parent: 'pluto', step: '12 h' },
 };
-const MOON_SPAN = ['1970-01-01', '2036-01-01'];
+const MOON_SPAN = ['1968-01-01', '2036-01-01'];
 const MOON_TOL_KM = 100;
 const MOON_MAX_TERMS = 60;
 
@@ -301,6 +324,8 @@ const SMALL_BODIES = {
   lutetia: [['21;', '2004-03-01', '2016-10-01', '2 d']],
   gaspra: [['951;', '1989-10-01', '2003-10-01', '2 d']],
   ida: [['243;', '1989-10-01', '2003-10-01', '2 d']],
+  vesta: [['2000004', '2007-09-01', '2019-01-01', '2 d']],
+  ceres: [['2000001', '2007-09-01', '2019-01-01', '2 d']],
 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -535,18 +560,33 @@ function pack(rows) {
 }
 
 /**
- * Janelas relativas em km e km/s (`units: 'km'`), mais curtas no JSON: a
- * posição com `decimals` casas (0 basta para tolerâncias de 15 km) e a
- * velocidade com 5 casas (1 cm/s).
+ * Janelas relativas em km e km/s (`units: 'km'`), mais curtas no JSON: casas
+ * decimais conforme a tolerância (posição ao km e velocidade a 1 cm/s nos
+ * sobrevoos; 10 m e 1 mm/s nas órbitas baixas de Vesta e Ceres; metros e
+ * 0,01 mm/s em torno do cometa).
  */
-function packKm(rows, decimals) {
+const kmDecimals = (tolKm) => (tolKm < 1 ? [3, 8] : tolKm < 10 ? [2, 6] : [0, 5]);
+
+/** A amostra (UA, UA/dia) como ela fica no JSON em km e km/s. */
+function roundedKm(r, tolKm) {
+  const [posDecimals, velDecimals] = kmDecimals(tolKm);
+  const kms = AU_KM / DAY_S;
+  return [
+    Number(r[0].toFixed(7)),
+    ...r.slice(1, 4).map((v) => Number((v * AU_KM).toFixed(posDecimals)) / AU_KM),
+    ...r.slice(4, 7).map((v) => Number((v * kms).toFixed(velDecimals)) / kms),
+  ];
+}
+
+function packKm(rows, tolKm) {
+  const [posDecimals, velDecimals] = kmDecimals(tolKm);
   const kms = AU_KM / DAY_S;
   return {
     units: 'km',
     t: rows.map((r) => Number(r[0].toFixed(7))),
     s: rows.flatMap((r) => [
-      ...r.slice(1, 4).map((v) => Number((v * AU_KM).toFixed(decimals))),
-      ...r.slice(4, 7).map((v) => Number((v * kms).toFixed(decimals + 5))),
+      ...r.slice(1, 4).map((v) => Number((v * AU_KM).toFixed(posDecimals))),
+      ...r.slice(4, 7).map((v) => Number((v * kms).toFixed(velDecimals))),
     ]),
   };
 }
@@ -589,13 +629,15 @@ async function fetchEncounter(command, e) {
   }
   if (e.until === 'surface') rows = cutAtSurface(rows, RADIUS_KM[e.body] / AU_KM);
   const tolKm = TOL_KM[e.tol ?? (e.closest || e.departure ? 'flyby' : 'orbit')];
-  const kept = decimate(rows, tolKm / AU_KM, MU_AU(GM[e.body]));
+  // Enxuga com os números já arredondados como no JSON: numa órbita baixa, o arredondamento também erra.
+  const kept = decimate(rows.map((r) => roundedKm(r, tolKm)), tolKm / AU_KM, MU_AU(GM[e.body]));
   console.log(`   ${e.body}: ${rows.length} → ${kept.length} amostras`);
   return {
     body: e.body,
     ...(e.departure ? { departure: true } : {}),
+    ...(e.kind ? { kind: e.kind } : {}),
     ...(e.ramp ? { ramp: e.ramp } : {}),
-    ...packKm(kept, tolKm < 5 ? 3 : 0),
+    ...packKm(kept, tolKm),
   };
 }
 
@@ -870,7 +912,7 @@ async function fetchPlanets() {
     fetched: new Date().toISOString().slice(0, 10),
   };
   for (const [name, command] of Object.entries(BARYCENTERS)) {
-    const rows = await vectors(command, CENTERS.sun, '1969-01-01', '2037-01-01', '10 d');
+    const rows = await vectors(command, CENTERS.sun, '1968-01-01', '2037-01-01', '10 d');
     // Problema de dois corpos: o planeta orbita com μ = GM☉ + GM do planeta.
     const kept = decimate(rows, TOL_KM.helio / AU_KM, MU_AU(GM.sun + GM[name]));
     console.log(`== ${name}: ${rows.length} → ${kept.length} amostras`);
@@ -901,7 +943,7 @@ const SPECIAL = {
   'small-bodies': ['small-bodies', fetchSmallBodies],
   fixtures: ['planet-fixtures', fetchFixtures],
 };
-export { decimate, keplerBlend, propagate, relativeVectors, MU_AU, GM, CENTERS };
+export { decimate, keplerBlend, pack, packKm, propagate, relativeVectors, uniqueSorted, MU_AU, GM, CENTERS, TOL_KM, AU_KM, DAY_S };
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const targets = process.argv.slice(2);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { conicPolyline, lambert, orbitalPeriod, propagate, specificEnergy } from './kepler';
+import { conicPolyline, lambert, lambertRevs, orbitalPeriod, propagate, specificEnergy } from './kepler';
 import { norm, sub, type Vec3 } from './vec3';
 
 const MU_EARTH = 398_600;
@@ -51,6 +51,29 @@ describe('problema de Lambert', () => {
     const dt = 120 * 86_400;
     const { v1 } = lambert(r1, r2, dt, MU_SUN);
     expect(norm(sub(propagate({ r: r1, v: v1 }, dt, MU_SUN).r, r2))).toBeLessThan(1);
+  });
+});
+
+describe('Lambert com voltas completas', () => {
+  it('as duas soluções de uma volta chegam ao destino no tempo pedido (transferência do tipo IV, como a da Magellan)', () => {
+    const r1: Vec3 = [AU, 0, 0];
+    const r2: Vec3 = [0.2 * 0.723 * AU, -0.98 * 0.723 * AU, 0.01 * AU];
+    const dt = 460 * 86_400;
+    const solutions = lambertRevs(r1, r2, dt, MU_SUN, 1);
+    expect(solutions).toHaveLength(2);
+    for (const { v1, a } of solutions) {
+      const end = propagate({ r: r1, v: v1 }, dt, MU_SUN);
+      expect(norm(sub(end.r, r2)) / AU).toBeLessThan(1e-9);
+      expect(a).toBeGreaterThan(0);
+    }
+    expect(Math.abs(solutions[0]!.a - solutions[1]!.a) / AU).toBeGreaterThan(1e-3);
+    // Pouco tempo para uma volta inteira: não há solução.
+    expect(lambertRevs(r1, r2, 100 * 86_400, MU_SUN, 1)).toHaveLength(0);
+  });
+
+  it('sem voltas, coincide com o Lambert simples', () => {
+    const [only] = lambertRevs([5000, 10_000, 2100], [-14_600, 2500, 7000], 3600, MU_EARTH, 0);
+    expect(only!.v1[0]).toBeCloseTo(-5.9925, 3);
   });
 });
 

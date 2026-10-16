@@ -78,14 +78,15 @@ export function propagate({ r: r0, v: v0 }: State, dt: number, mu: number): Stat
 
 /**
  * Problema de Lambert: as velocidades da cônica que liga r1 a r2 em `dt`
- * segundos, no sentido direto (prógrado, como os planetas) e com menos de uma
- * volta. A variável z da equação de tempo é achada por bisseção.
+ * segundos, com menos de uma volta, girando no sentido de `normal` (o norte
+ * da eclíptica: prógrado, como os planetas). A variável z da equação de tempo
+ * é achada por bisseção.
  */
-export function lambert(r1: Vec3, r2: Vec3, dt: number, mu: number): { v1: Vec3; v2: Vec3 } {
+export function lambert(r1: Vec3, r2: Vec3, dt: number, mu: number, normal: Vec3 = [0, 0, 1]): { v1: Vec3; v2: Vec3 } {
   const r1n = norm(r1);
   const r2n = norm(r2);
   let theta = Math.acos(Math.min(Math.max(dot(r1, r2) / (r1n * r2n), -1), 1));
-  if (cross(r1, r2)[2] < 0) theta = 2 * Math.PI - theta;
+  if (dot(cross(r1, r2), normal) < 0) theta = 2 * Math.PI - theta;
   const A = Math.sin(theta) * Math.sqrt((r1n * r2n) / (1 - Math.cos(theta)));
   const y = (z: number) => {
     const { C, S } = stumpff(z);
@@ -111,6 +112,91 @@ export function lambert(r1: Vec3, r2: Vec3, dt: number, mu: number): { v1: Vec3;
   const g = A * Math.sqrt(yz / mu);
   const gDot = 1 - yz / r2n;
   return { v1: scale(sub(r2, scale(r1, f)), 1 / g), v2: scale(sub(scale(r2, gDot), r1), 1 / g) };
+}
+
+/**
+ * Lambert com `revs` voltas completas antes de chegar (sentido direto). Com
+ * N ≥ 1 voltas, z fica em (4π²N², 4π²(N+1)²) e o tempo de voo tem um mínimo
+ * no meio: acima dele há duas cônicas, uma de cada lado do mínimo (abaixo,
+ * nenhuma). Devolve as soluções encontradas, com o semieixo maior de cada uma.
+ */
+export function lambertRevs(
+  r1: Vec3,
+  r2: Vec3,
+  dt: number,
+  mu: number,
+  revs: number,
+  normal: Vec3 = [0, 0, 1],
+): { v1: Vec3; v2: Vec3; a: number }[] {
+  if (revs < 1) {
+    const { v1, v2 } = lambert(r1, r2, dt, mu, normal);
+    return [{ v1, v2, a: -mu / (2 * specificEnergy({ r: r1, v: v1 }, mu)) }];
+  }
+  const r1n = norm(r1);
+  const r2n = norm(r2);
+  let theta = Math.acos(Math.min(Math.max(dot(r1, r2) / (r1n * r2n), -1), 1));
+  if (dot(cross(r1, r2), normal) < 0) theta = 2 * Math.PI - theta;
+  const A = Math.sin(theta) * Math.sqrt((r1n * r2n) / (1 - Math.cos(theta)));
+  const y = (z: number) => {
+    const { C, S } = stumpff(z);
+    return r1n + r2n + (A * (z * S - 1)) / Math.sqrt(C);
+  };
+  /** Tempo de voo (s) em função de z; infinito onde a cônica não existe. */
+  const tof = (z: number) => {
+    const yz = y(z);
+    if (!(yz > 0)) return Infinity;
+    const { C, S } = stumpff(z);
+    return ((yz / C) ** 1.5 * S + A * Math.sqrt(yz)) / Math.sqrt(mu);
+  };
+  const edge = 1e-9;
+  const zLo = (2 * Math.PI * revs) ** 2 + edge;
+  const zHi = (2 * Math.PI * (revs + 1)) ** 2 - edge;
+
+  // Mínimo do tempo de voo por seção áurea.
+  const g = (Math.sqrt(5) - 1) / 2;
+  let lo = zLo;
+  let hi = zHi;
+  let a = hi - g * (hi - lo);
+  let b = lo + g * (hi - lo);
+  let ta = tof(a);
+  let tb = tof(b);
+  for (let k = 0; k < 200; k++) {
+    if (ta < tb) {
+      hi = b;
+      b = a;
+      tb = ta;
+      a = hi - g * (hi - lo);
+      ta = tof(a);
+    } else {
+      lo = a;
+      a = b;
+      ta = tb;
+      b = lo + g * (hi - lo);
+      tb = tof(b);
+    }
+  }
+  const zMin = (lo + hi) / 2;
+  if (!(tof(zMin) < dt)) return [];
+
+  /** Raiz de tof(z) = dt num lado do mínimo, onde tof é monótona. */
+  const root = (from: number, to: number) => {
+    let p = from;
+    let q = to;
+    for (let k = 0; k < 200; k++) {
+      const mid = (p + q) / 2;
+      if (tof(mid) > dt) p = mid;
+      else q = mid;
+    }
+    return (p + q) / 2;
+  };
+  return [root(zLo, zMin), root(zHi, zMin)].map((z) => {
+    const yz = y(z);
+    const f = 1 - yz / r1n;
+    const gg = A * Math.sqrt(yz / mu);
+    const gDot = 1 - yz / r2n;
+    const v1 = scale(sub(r2, scale(r1, f)), 1 / gg);
+    return { v1, v2: scale(sub(scale(r2, gDot), r1), 1 / gg), a: -mu / (2 * specificEnergy({ r: r1, v: v1 }, mu)) };
+  });
 }
 
 /** Energia específica ε = v²/2 − μ/r: negativa na elipse, positiva na hipérbole. */

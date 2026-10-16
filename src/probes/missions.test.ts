@@ -5,7 +5,7 @@ import { BODIES, MOON_LIST, bodyPosition, moonPeriodDays, type MoonId } from './
 import { explainEvent } from './eventExplanations';
 import { ALL_EVENTS, LIGHT_DAY_AU, MISSIONS, MISSION_LIST } from './missions';
 import { AU_KM } from './probes';
-import { LOG_K, LOG_R0_AU, localScale, toDisplay, viewDistance } from './sceneMath';
+import { LOG_K, LOG_R0_AU, localScale, toDisplay, trailPoints, viewDistance } from './sceneMath';
 import { daysToMs, isoToDays } from './time';
 import { FLYBY_SLOWDOWN, PROBE_TIME_RANGE, useProbeStore } from './useProbeStore';
 import { norm, sub } from './vec3';
@@ -13,24 +13,34 @@ import { norm, sub } from './vec3';
 const isoDay = (days: number) => new Date(daysToMs(days)).toISOString().slice(0, 10);
 
 describe('catálogo das sondas', () => {
-  it('12 sondas, em ordem de lançamento, da Venera 7 à Parker', () => {
-    expect(MISSION_LIST.map((m) => m.id)).toEqual([
+  it('17 sondas em ordem de lançamento, da Venera 7 à Parker, e as nove Apollo lunares', () => {
+    const probes = MISSION_LIST.filter((m) => m.group === 'probe');
+    const apollos = MISSION_LIST.filter((m) => m.group === 'apollo');
+    expect(probes.map((m) => m.id)).toEqual([
       'venera7',
       'pioneer10',
       'pioneer11',
+      'mariner10',
+      'viking1',
+      'viking2',
       'voyager2',
       'voyager1',
       'venera13',
+      'magellan',
       'galileo',
       'cassini',
       'rosetta',
       'newhorizons',
+      'dawn',
       'juno',
       'parker',
     ]);
-    const launches = MISSION_LIST.map((m) => m.trajectory.launch);
-    expect([...launches].sort((a, b) => a - b)).toEqual(launches);
-    expect(PROBE_TIME_RANGE.start).toBeLessThan(MISSIONS.venera7.trajectory.launch);
+    expect(apollos.map((m) => m.id)).toEqual(['apollo8', 'apollo10', 'apollo11', 'apollo12', 'apollo13', 'apollo14', 'apollo15', 'apollo16', 'apollo17']);
+    for (const group of [probes, apollos]) {
+      const launches = group.map((m) => m.launchT);
+      expect([...launches].sort((a, b) => a - b)).toEqual(launches);
+    }
+    expect(PROBE_TIME_RANGE.start).toBeLessThan(MISSIONS.apollo8.launchT);
   });
 
   it('Voyager 2: lançamento, os quatro gigantes, Tritão e a saída da heliosfera, em ordem', () => {
@@ -204,5 +214,18 @@ describe('loop de tempo das sondas', () => {
     expect(store()).toMatchObject({ t: PROBE_TIME_RANGE.end, playing: false });
     store().togglePlay();
     expect(store().t).toBe(PROBE_TIME_RANGE.start);
+  });
+});
+
+describe('rastros', () => {
+  it('o passo não pula sobrevoos, e órbitas rápidas de anos viram voltas espaçadas', () => {
+    const v2 = trailPoints(MISSIONS.voyager2.trajectory).times;
+    const neptune = MISSIONS.voyager2.events.find((e) => e.id === 'voyager2-neptune')!.t;
+    expect(Math.min(...v2.map((t) => Math.abs(t - neptune)))).toBeLessThan(1 / 24);
+    const magellan = trailPoints(MISSIONS.magellan.trajectory);
+    expect(magellan.times.length).toBeLessThan(30_000);
+    expect(magellan.gaps.some(Boolean)).toBe(true);
+    // Pousado, o módulo não precisa de rastro: só a descida.
+    expect(trailPoints(MISSIONS.viking1.companions[0]!.trajectory).times.length).toBeLessThan(300);
   });
 });

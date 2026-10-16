@@ -82,6 +82,7 @@ function table(rows: readonly { t: number; state: State }[], muKm: number): Stat
 const encounter = (body: Encounter['body'], t: StateTable, kind: Encounter['kind'], rampIn: number, rampOut: number): Encounter => ({
   body,
   table: t,
+  site: null,
   start: t.t[0]!,
   end: t.t[t.t.length - 1]!,
   rampIn,

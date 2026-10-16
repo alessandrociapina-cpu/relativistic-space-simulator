@@ -18,7 +18,7 @@ export function ProbesApp() {
         <header className="pointer-events-auto flex items-start justify-between gap-2 font-mono">
           <div>
             <h1 className="text-[11px] tracking-widest text-cyan-300 uppercase">Sondas · Sistema Solar</h1>
-            <p className="text-[10px] text-slate-500">Trajetórias reais do JPL Horizons; Veneras reconstruídas</p>
+            <p className="text-[10px] text-slate-500">Trajetórias do JPL Horizons; Veneras, Mariner 10, Vikings, Magellan e Apollo reconstruídas</p>
           </div>
           <div className="flex shrink-0 gap-1.5 text-[11px]">
             <button

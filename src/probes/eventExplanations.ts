@@ -14,6 +14,7 @@ import {
   AU_KM,
   DAY_S,
   altitudeLabel,
+  encounterState,
   firstEncounter,
   lightTimeS,
   probePosition,
@@ -23,6 +24,7 @@ import {
   speedKms,
   type ProbeTrajectory,
 } from './probes';
+import { explainApolloEvent } from './apolloExplanations';
 import { interpolateState } from './ephemeris';
 import { formatDate, formatDateTime, isoToDays } from './time';
 import { norm, sub } from './vec3';
@@ -77,9 +79,9 @@ function relativeKm(trajectory: ProbeTrajectory, body: BodyId, t: number) {
 // ── Lançamento ───────────────────────────────────────────────────────────────
 /** Excesso hiperbólico de saída da Terra (km/s), no fim da janela de partida. */
 export function departureVInf(mission: ProbeMission): number {
-  if (mission.reconstruction) return mission.reconstruction.departureVInfKms;
+  if (mission.venera) return mission.venera.departureVInfKms;
   const departure = mission.trajectory.encounters.find((e) => e.kind === 'departure')!;
-  const state = interpolateState(departure.table, departure.end);
+  const state = encounterState(departure, departure.end);
   const v = speedKms(state.velocity);
   return Math.sqrt(v * v - (2 * BODIES.earth.gm) / (norm(state.position) * AU_KM));
 }
@@ -94,6 +96,14 @@ function hoursToMoonDistance(trajectory: ProbeTrajectory): number | null {
 }
 
 const LAUNCH_NOTES: Readonly<Record<string, string>> = {
+  mariner10:
+    'A Mariner 10 partiu num Atlas-Centaur rumo a Vênus: foi a primeira sonda a usar a gravidade de um planeta para chegar a outro, Mercúrio, que de outro modo exigiria um foguete muito maior.',
+  viking1:
+    'A Viking 1 partiu num Titan IIIE–Centaur com um orbitador e um módulo de pouso esterilizado em forno, para não levar micróbios da Terra a Marte.',
+  viking2: 'A Viking 2, gêmea da primeira, partiu 20 dias depois na mesma janela de lançamento para Marte, que se abre a cada ~26 meses.',
+  magellan:
+    'A Magellan subiu no ônibus espacial Atlantis e partiu da órbita da Terra com um estágio IUS. Foi a primeira sonda planetária lançada por um ônibus espacial.',
+  dawn: 'A Dawn partiu num Delta II. Leve, com três motores iônicos, ela ganharia mais velocidade com eles ao longo dos anos do que o foguete lhe deu.',
   venera7:
     'A Venera 7 partiu de Baikonur num foguete Molniya, na janela que se abre a cada 19 meses, quando Vênus fica na posição certa para uma viagem curta.',
   pioneer10:
@@ -121,8 +131,9 @@ function explainLaunch(event: MissionEvent, mission: ProbeMission): EventExplana
   const vInf = departureVInf(mission);
   const trajectory = mission.trajectory;
   const helio = speedKms(interpolateState(trajectory.helio!, trajectory.launch + 3).velocity);
-  const hours = mission.reconstruction ? null : hoursToMoonDistance(trajectory);
-  const ranking = [...MISSION_LIST].sort((a, b) => departureVInf(b) - departureVInf(a)).findIndex((m) => m.id === mission.id);
+  const hours = mission.venera ? null : hoursToMoonDistance(trajectory);
+  const probes = MISSION_LIST.filter((m) => m.group === 'probe');
+  const ranking = [...probes].sort((a, b) => departureVInf(b) - departureVInf(a)).findIndex((m) => m.id === mission.id);
   const inward = helio < EARTH_ORBIT_KMS;
   return {
     title: event.title,
@@ -134,11 +145,19 @@ function explainLaunch(event: MissionEvent, mission: ProbeMission): EventExplana
         `${num(EARTH_ORBIT_KMS)} km/s da órbita da Terra, ele dá a velocidade em torno do Sol: ${kms(helio)}` +
         (inward ? ', menos que a da Terra: para cair rumo ao Sol, a sonda sai "para trás".' : '.'),
       ...(hours !== null ? [`A sonda passou pela distância da Lua ${num(hours)} horas depois de deixar a órbita da Terra.`] : []),
-      ...(mission.reconstruction
+      ...(mission.venera
         ? [
             'Os dados do JPL não incluem as Veneras: esta rota foi reconstruída pela mecânica orbital. O arco de Lambert é a cônica em ' +
-              `torno do Sol que liga a Terra, na partida, a Vênus, na chegada, em ${num(mission.reconstruction.entryT - mission.reconstruction.departureT)} dias.`,
+              `torno do Sol que liga a Terra, na partida, a Vênus, na chegada, em ${num(mission.venera.entryT - mission.venera.departureT)} dias.`,
           ]
+        : mission.reconstructed
+          ? [
+              `Os dados do JPL não incluem a ${mission.name}: esta rota foi reconstruída pela mecânica orbital, com arcos de Lambert ` +
+                'entre os planetas nas datas da missão (scripts/reconstruct.mjs).',
+            ]
+          : []),
+      ...(mission.id === 'magellan'
+        ? ['A transferência é do tipo IV: uma volta e meia em torno do Sol antes de chegar a Vênus, 15 meses depois, para chegar mais devagar e gastar menos na freada.']
         : []),
     ],
     formulas: [
@@ -207,6 +226,15 @@ const FLYBY_NOTES: Readonly<Record<string, string>> = {
   'juno-europa': 'A passagem mais próxima de Europa desde a Galileo: fotos de alta resolução do gelo rachado.',
   'juno-io': 'Os sobrevoos mais próximos de Io desde a Galileo: a lua mais vulcânica do Sistema Solar, aquecida pelas marés de Júpiter.',
   'juno-io-2': 'Este segundo sobrevoo de Io completou a sequência que encurtou a órbita da Juno.',
+  'mariner10-venus':
+    'O primeiro estilingue gravitacional da história: Vênus freou a Mariner 10 em relação ao Sol, e ela caiu até a órbita de Mercúrio. Na passagem, fotografou as nuvens de Vênus em ultravioleta.',
+  'mariner10-mercury':
+    'A primeira visita a Mercúrio, pelo lado noturno: crateras como as da Lua e um campo magnético inesperado. A órbita da sonda dura 176 dias, exatamente dois anos de Mercúrio, para reencontrá-lo.',
+  'mariner10-mercury-2':
+    'O segundo encontro, seis meses depois, passou bem mais longe, sobre o polo sul iluminado, para fotografar outra região. Correções de rota de poucos m/s mantinham o compasso com Mercúrio.',
+  'mariner10-mercury-3':
+    'A passagem mais baixa: a 327 km, para medir o campo magnético de perto e confirmar que ele é do próprio planeta. Ao todo, ~45% da superfície foi fotografada, pois nos três encontros o mesmo lado estava iluminado.',
+  'dawn-mars': 'Marte desviou e freou a Dawn rumo ao cinturão de asteroides; a sonda passou a ~550 km da superfície com os motores iônicos desligados.',
 };
 
 function explainFlyby(event: MissionEvent, mission: ProbeMission): EventExplanation {
@@ -320,6 +348,11 @@ const CAPTURE_NOTES: Readonly<Record<string, string>> = {
     'Para entrar em órbita, a Cassini atravessou o plano dos anéis duas vezes, por uma brecha entre os anéis F e G, e ligou o motor por 96 minutos.',
   juno:
     'A Juno ligou o motor por 35 minutos. O plano de encurtar depois a órbita para 14 dias foi cancelado por causa de uma válvula de hélio lenta: a Juno seguiu na órbita de 53 dias.',
+  viking1:
+    'Depois, um ajuste no periapse deixou a órbita com período de ~1 sol (24,6 h): a cada volta a sonda passa sobre a mesma região de Marte. O pouso marcado para 4 de julho foi adiado: as fotos mostraram que o local era acidentado demais.',
+  viking2: 'A órbita foi ajustada para ~1 sol e, mais tarde, inclinada até 75° para fotografar as regiões polares.',
+  magellan:
+    'Um motor de combustível sólido Star 48B queimou por 83 segundos. A órbita quase polar fica fixa no espaço enquanto Vênus gira por baixo, uma volta a cada 243 dias: em oito meses o radar viu o planeta inteiro.',
 };
 
 function explainCapture(event: MissionEvent, mission: ProbeMission): EventExplanation {
@@ -350,6 +383,7 @@ function explainCapture(event: MissionEvent, mission: ProbeMission): EventExplan
 
 // ── Chegada ao cometa ────────────────────────────────────────────────────────
 function explainArrival(event: MissionEvent, mission: ProbeMission): EventExplanation {
+  if (mission.id === 'dawn') return explainDawnArrival(event, mission);
   const rel = relativeKm(mission.trajectory, event.body!, event.t)!;
   const gm = BODIES[event.body!].gm;
   const escape = Math.sqrt((2 * gm) / rel.distance) * 1000;
@@ -372,8 +406,55 @@ function explainArrival(event: MissionEvent, mission: ProbeMission): EventExplan
   };
 }
 
+/** Dawn chega a Vesta ou a Ceres: captura lenta, com o motor iônico, sem freada brusca. */
+function explainDawnArrival(event: MissionEvent, mission: ProbeMission): EventExplanation {
+  const body = BODIES[event.body!];
+  const rel = relativeKm(mission.trajectory, event.body!, event.t)!;
+  const escape = Math.sqrt((2 * body.gm) / rel.distance);
+  const isVesta = event.body === 'vesta';
+  const sun = norm(probePosition(mission.trajectory, event.t)!);
+  return {
+    title: event.title,
+    summary:
+      `Em ${formatDate(event.t)}, a ${au(sun)} do Sol, a Dawn é capturada por ${body.name} a ${km(rel.distance)} do centro, andando a ` +
+      `${num(rel.speed * 1000)} m/s em relação a ${isVesta ? 'ele' : 'ela'}. ` +
+      (isVesta
+        ? 'Vesta, de ~525 km, é o segundo maior corpo do cinturão de asteroides e a origem de ~6% dos meteoritos que caem na Terra.'
+        : 'Ceres, de ~940 km, é o maior corpo do cinturão de asteroides e um planeta anão: a Dawn foi a primeira sonda a orbitar dois corpos além da Terra.'),
+    details: [
+      'Não há freada no periapse, como nas inserções em órbita de planetas: o motor iônico, de empuxo minúsculo (~90 mN, o peso de uma folha de papel), ' +
+        'foi igualando aos poucos a velocidade da Dawn à do asteroide, e ela entrou em órbita quase parada em relação a ele.',
+      'Depois, a sonda desceu em espiral por órbitas cada vez mais baixas, de ~2 700 km a ~200 km de altitude, mapeando a superfície e o campo gravitacional.',
+      ...(isVesta
+        ? ['A Dawn encontrou em Vesta uma cratera de impacto gigante no polo sul, Rheasilvia, com um pico central de ~22 km de altura.']
+        : ['Em Ceres, manchas brilhantes na cratera Occator: sais de carbonato deixados por salmoura que subiu do interior.']),
+    ],
+    formulas: [
+      { card: true, tex: tex`v_{\text{esc}} = \sqrt{\frac{2\mu}{r}} = ${n(escape * 1000)}\ \mathrm{m/s}, \quad \mu = ${n(body.gm)}\ \mathrm{km^3/s^2}` },
+      lightFormula(norm(sub(probePosition(mission.trajectory, event.t)!, bodyState('earth', event.t)!.position))),
+    ],
+  };
+}
+
 // ── Separação, entrada, pouso e fim ──────────────────────────────────────────
 function explainRelease(event: MissionEvent, mission: ProbeMission): EventExplanation {
+  if (event.craft === 'viking1-lander' || event.craft === 'viking2-lander') {
+    const lander = craft(event.craft);
+    const info = mission.companions[0]?.info ?? {};
+    const rel = relativeKm(lander.trajectory, 'mars', event.t)!;
+    const landing = mission.events.find((e) => e.kind === 'landing')!;
+    const dv = Number(info['deorbitDeltaVKms']) * 1000;
+    return {
+      title: event.title,
+      summary:
+        `Em ${formatDateTime(event.t)}, a ${km(rel.distance - BODIES.mars.radiusKm)} de altitude, o módulo de pouso se separa do orbitador e ` +
+        `freia ${num(dv)} m/s para cair em direção a Marte. A queda até o topo da atmosfera e a descida levam ${formatSpan((landing.t - event.t) * DAY_S)}.`,
+      details: [
+        'O módulo descia dentro de uma cápsula com escudo de calor. Na reconstrução, a queda é o arco de Lambert entre o ponto de separação e o topo da atmosfera, atrás do local de pouso.',
+      ],
+      formulas: [{ card: true, tex: tex`\Delta v_{\text{saída de órbita}} = ${n(dv)}\ \mathrm{m/s}` }],
+    };
+  }
   const companion = craft(event.craft!);
   const isHuygens = event.craft === 'huygens';
   const target: BodyId = isHuygens ? 'titan' : 'jupiter';
@@ -433,8 +514,8 @@ function explainEntry(event: MissionEvent): EventExplanation {
 }
 
 function explainLanding(event: MissionEvent, mission: ProbeMission): EventExplanation {
-  if (mission.reconstruction) {
-    const rec = mission.reconstruction;
+  if (mission.venera) {
+    const rec = mission.venera;
     const v7 = mission.id === 'venera7';
     return {
       title: event.title,
@@ -457,6 +538,29 @@ function explainLanding(event: MissionEvent, mission: ProbeMission): EventExplan
           tex: tex`v_\infty^{\text{saída}} = ${n(rec.departureVInfKms)}, \quad v_\infty^{\text{chegada}} = ${n(rec.arrivalVInfKms)}\ \mathrm{km/s}`,
           note: 'Do arco de Lambert entre a Terra e Vênus nas datas da missão.',
         },
+      ],
+    };
+  }
+  if (event.craft === 'viking1-lander' || event.craft === 'viking2-lander') {
+    const info = mission.companions[0]?.info ?? {};
+    const entry = Number(info['entrySpeedKms']);
+    const toEarth = norm(sub(probePosition(craft(event.craft).trajectory, event.t)!, bodyState('earth', event.t)!.position));
+    const v1 = event.craft === 'viking1-lander';
+    return {
+      title: event.title,
+      summary: v1
+        ? `Em ${formatDateTime(event.t)}, o módulo da Viking 1 pousa em Chryse Planitia: o primeiro pouso bem-sucedido em Marte, ` +
+          'e as primeiras fotos da superfície, um deserto de pedras sob um céu cor de salmão.'
+        : `Em ${formatDateTime(event.t)}, o módulo da Viking 2 pousa em Utopia Planitia, mais ao norte, onde depois veria geada no inverno marciano.`,
+      details: [
+        `A cápsula entra na atmosfera a ${kms(entry)}; o escudo de calor freia até ~250 m/s, um paraquedas abre a ~6 km e, no fim, três ` +
+          'retrofoguetes levam o módulo ao solo a ~2,4 m/s.',
+        'Os dois módulos procuraram vida no solo com três experimentos biológicos. Os resultados foram ambíguos, e até hoje se discute se a química do solo os explica.',
+        'O sinal levava ' + formatSpan(lightTimeS(toEarth)) + ' para chegar à Terra: tudo no pouso era automático.',
+      ],
+      formulas: [
+        { card: true, tex: tex`v_{\text{entrada}} = ${n(entry)}\ \mathrm{km/s}` },
+        lightFormula(toEarth),
       ],
     };
   }
@@ -493,9 +597,49 @@ function explainLanding(event: MissionEvent, mission: ProbeMission): EventExplan
 function explainEnd(event: MissionEvent, mission: ProbeMission): EventExplanation {
   const trajectory = mission.trajectory;
   const final = firstEncounter(trajectory, event.body!);
-  const state = final ? interpolateState(final.table, trajectory.end) : null;
+  const state = final ? encounterState(final, trajectory.end) : null;
   const speed = state ? speedKms(state.velocity) : 0;
   const toEarth = norm(sub(probePosition(trajectory, trajectory.end)!, bodyState('earth', trajectory.end)!.position));
+  if (mission.id === 'viking1' || mission.id === 'viking2') {
+    const v1 = mission.id === 'viking1';
+    return {
+      title: event.title,
+      summary:
+        `Em ${formatDate(event.t)}, sem gás para controlar a orientação, o orbitador da ${mission.name} é desligado depois de ` +
+        `${formatSpan((event.t - mission.launchT) * DAY_S)} de missão. ` +
+        (v1 ? 'Antes, foi posto numa órbita mais alta, para não cair em Marte antes de 2019.' : 'Ele segue em órbita de Marte, mudo.'),
+      details: [
+        'Os dois orbitadores fotografaram Marte inteiro com resolução de até ~150 m: vales de rios secos, vulcões gigantes e calotas polares. Também retransmitiam os dados dos módulos de pouso.',
+      ],
+      formulas: [lightFormula(toEarth)],
+    };
+  }
+  if (mission.id === 'magellan') {
+    return {
+      title: event.title,
+      summary:
+        `Em ${formatDateTime(event.t)}, a Magellan perde contato depois de mergulhar de propósito na atmosfera de Vênus, a ${kms(speed)}: ` +
+        'um último experimento para medir a densidade do ar em grande altitude. Ela se desintegrou nos dias seguintes.',
+      details: [
+        'Em quatro anos, o radar mapeou 98% da superfície de Vênus, escondida sob nuvens permanentes: planícies vulcânicas, coroas, crateras pouco erodidas e quase nenhum sinal de placas tectônicas.',
+      ],
+      formulas: [lightFormula(toEarth), { card: true, tex: tex`v = ${n(speed)}\ \mathrm{km/s}`, note: 'Velocidade em relação a Vênus no fim da reconstrução.' }],
+    };
+  }
+  if (mission.id === 'dawn') {
+    const ceres = relativeKm(trajectory, 'ceres', event.t);
+    return {
+      title: event.title,
+      summary:
+        `Em ${formatDate(event.t)}, a Dawn esgota a hidrazina dos propulsores de orientação e não consegue mais apontar a antena para a Terra. ` +
+        'Ela fica numa órbita estável em torno de Ceres, escolhida para não cair no planeta anão por décadas.',
+      details: [
+        'Ceres tem gelo e talvez salmoura no subsolo: a órbita alta protege o planeta anão de contaminação com micróbios da Terra.',
+        ...(ceres ? [`No fim dos dados do JPL, a sonda estava a ${km(ceres.distance)} do centro de Ceres.`] : []),
+      ],
+      formulas: [lightFormula(toEarth)],
+    };
+  }
   if (mission.id === 'rosetta') {
     return {
       title: event.title,
@@ -529,6 +673,35 @@ function explainEnd(event: MissionEvent, mission: ProbeMission): EventExplanatio
 // ── Último contato e periélio ────────────────────────────────────────────────
 function explainLastContact(event: MissionEvent, mission: ProbeMission): EventExplanation {
   const { r, toEarth, speed, escape } = situation(event);
+  if (mission.id === 'mariner10') {
+    const tcm = (mission.info?.['tcmMs'] as number[] | undefined) ?? [];
+    return {
+      title: event.title,
+      summary:
+        `Em ${formatDateTime(event.t)}, sem nitrogênio para controlar a orientação, a Mariner 10 recebe o comando de desligar o transmissor. ` +
+        `Ela segue a ${au(r)} do Sol, na órbita de 176 dias que a faz reencontrar Mercúrio a cada duas voltas dele.`,
+      details: [
+        'Foi a única sonda a visitar Mercúrio até a MESSENGER, em 2008.',
+        ...(tcm.length
+          ? [`Na reconstrução, cada volta de 176 dias precisou de uma correção de ${tcm.map((x) => `${num(x)} m/s`).join(' e ')} para reencontrar Mercúrio no dia certo.`]
+          : []),
+      ],
+      formulas: [lightFormula(toEarth), escapeFormula(r, speed, escape)],
+    };
+  }
+  if (event.craft === 'viking1-lander' || event.craft === 'viking2-lander') {
+    const landing = mission.events.find((e) => e.kind === 'landing')!;
+    const v1 = event.craft === 'viking1-lander';
+    return {
+      title: event.title,
+      summary:
+        `Em ${formatDate(event.t)}, depois de ${formatSpan((event.t - landing.t) * DAY_S)} na superfície, a Terra perde contato com o módulo de ` +
+        `pouso da ${mission.name}. ` +
+        (v1 ? 'Um comando errado apagou a orientação da antena.' : 'A bateria falhou.'),
+      details: ['Os módulos mediram o tempo de Marte por anos: temperatura, pressão (que varia com as estações, quando parte da atmosfera congela nos polos) e ventos.'],
+      formulas: [lightFormula(toEarth)],
+    };
+  }
   const p10 = mission.id === 'pioneer10';
   return {
     title: event.title,
@@ -651,6 +824,54 @@ function explainMilestone(event: MissionEvent, mission: ProbeMission): EventExpl
         formulas: [{ card: true, tex: tex`r = ${n(r * AU_KM)}\ \mathrm{km} = ${n(radii)}\,R_\odot` }],
       };
     }
+    case 'magellan-mapping': {
+      const period = Number(mission.info?.['mappingPeriodH']);
+      return {
+        title: event.title,
+        summary:
+          `Em ${formatDate(event.t)}, a Magellan começa a mapear Vênus por radar, que atravessa as nuvens. A cada volta de ${num(period)} h, ` +
+          'ela grava uma faixa de ~20 km de largura perto do periapse e transmite os dados para a Terra no resto da órbita.',
+        details: ['O radar de abertura sintética combina ecos de vários pontos da órbita para obter detalhes de ~100 m, a partir de 300 km de altitude.'],
+        formulas: [{ card: true, tex: tex`T = 2\pi\sqrt{\frac{a^3}{\mu_{\text{V}}}} = ${n(period)}\ \mathrm{h}` }, lightFormula(toEarth)],
+      };
+    }
+    case 'magellan-aerobraking':
+    case 'magellan-aerobraking-end': {
+      const passes = Number(mission.info?.['aerobrakingPasses']);
+      const dv = Number(mission.info?.['aerobrakingDeltaVPerPassMs']);
+      const total = Number(mission.info?.['aerobrakingTotalDeltaVKms']);
+      const final = Number(mission.info?.['finalPeriodMin']);
+      const starting = event.id === 'magellan-aerobraking';
+      return {
+        title: event.title,
+        summary: starting
+          ? `Em ${formatDate(event.t)}, a Magellan baixa o periapse para ~140 km, dentro do topo da atmosfera de Vênus, e começa a primeira aerofrenagem ` +
+            'de uma sonda planetária: em vez de queimar combustível, usa o atrito com o ar para encolher a órbita.'
+          : `Em ${formatDate(event.t)}, depois de ${num(passes)} passagens pelo ar, o apoapse desceu de 8 500 km para ~540 km. Uma queima ergue ` +
+            `o periapse para fora da atmosfera, e a órbita final dura ${num(final)} minutos, boa para medir o campo gravitacional.`,
+        details: [
+          `Na reconstrução, cada passagem tira ~${num(dv)} m/s; somadas, ${kms(total)}, que custariam centenas de quilos de combustível. ` +
+            'A técnica foi depois usada em Marte pela Mars Global Surveyor e pelas sondas seguintes.',
+        ],
+        formulas: [
+          { card: true, tex: tex`\Delta v_{\text{total}} = N\,\Delta v_1 = ${n(passes, 3)} \times ${n(dv)}\ \mathrm{m/s} = ${n(total)}\ \mathrm{km/s}` },
+          { tex: tex`T_{\text{final}} = ${n(final)}\ \text{min}` },
+        ],
+      };
+    }
+    case 'dawn-vesta-departure': {
+      const rel = relativeKm(mission.trajectory, 'vesta', event.t)!;
+      return {
+        title: event.title,
+        summary:
+          `Em ${formatDate(event.t)}, depois de 14 meses em órbita, a Dawn sai de Vesta subindo em espiral com o motor iônico, a ${km(rel.distance)} ` +
+          'do centro. Nenhuma sonda tinha saído da órbita de um corpo para orbitar outro.',
+        details: [
+          'Com o motor iônico ligado quase o tempo todo, a Dawn acumulou ~11 km/s de mudança de velocidade na missão, mais que o próprio foguete lhe deu: um recorde para propulsão de uma sonda.',
+        ],
+        formulas: [{ card: true, tex: tex`\Delta v = v_e \ln\frac{m_0}{m_1} \approx 11\ \mathrm{km/s}`, note: 'Equação do foguete: o íon de xenônio sai a ~30 km/s.' }],
+      };
+    }
     default:
       return { title: event.title, summary: formatDate(event.t), details: [], formulas: [lightFormula(toEarth)] };
   }
@@ -659,6 +880,7 @@ function explainMilestone(event: MissionEvent, mission: ProbeMission): EventExpl
 // ── Voyagers ─────────────────────────────────────────────────────────────────
 export function explainEvent(event: MissionEvent): EventExplanation {
   const mission = MISSIONS[event.probeId];
+  if (mission.group === 'apollo') return explainApolloEvent(event, mission);
   const name = mission.name;
   const date = formatDate(event.t);
 
@@ -771,4 +993,6 @@ export function explainEvent(event: MissionEvent): EventExplanation {
         ],
       };
   }
+  // Os tipos das Apollo (TLI, LOI, decolagem...) só aparecem nelas, explicadas acima.
+  return { title: event.title, summary: `${date}: ${event.title}.`, details: [], formulas: [lightFormula(toEarth)] };
 }
