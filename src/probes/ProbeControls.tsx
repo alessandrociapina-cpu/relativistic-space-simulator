@@ -1,4 +1,5 @@
-import { MISSION_LIST } from './missions';
+import { MOON_LIST, SMALL_BODY_LIST } from './bodies';
+import { COMPANIONS, MISSION_LIST } from './missions';
 import { PLANET_LIST } from './planets';
 import { formatDateTime, msToDays } from './time';
 import { PROBE_RATES, PROBE_TIME_RANGE, useProbeStore, type FocusId, type ScaleMode } from './useProbeStore';
@@ -9,8 +10,8 @@ const segmentClass = (active: boolean) =>
   }`;
 
 const SCALES: readonly { value: ScaleMode; label: string; title: string }[] = [
-  { value: 'log', label: 'Log', title: 'Distâncias ao Sol em escala logarítmica: planetas e Voyagers na mesma tela' },
-  { value: 'linear', label: 'Real', title: 'Escala real: ideal para ver um sobrevoo de perto' },
+  { value: 'log', label: 'Log', title: 'Distâncias ao Sol em escala logarítmica: os planetas e as sondas na mesma tela' },
+  { value: 'linear', label: 'Real', title: 'Escala real: ideal para ver um sobrevoo ou uma órbita de perto' },
 ];
 
 /** Data, reprodução, velocidade do tempo, foco da câmera e escala. */
@@ -64,7 +65,7 @@ export function ProbeControls({ className = '' }: { className?: string }) {
               {r.label}
             </button>
           ))}
-          {slowed && <span className="ml-1 text-[10px] text-amber-300">sobrevoo</span>}
+          {slowed && <span className="ml-1 text-[10px] text-amber-300">encontro</span>}
         </div>
         <button
           type="button"
@@ -76,7 +77,7 @@ export function ProbeControls({ className = '' }: { className?: string }) {
         </button>
         <label className="flex items-center gap-1.5 text-slate-300">
           <input type="checkbox" className="accent-cyan-400" checked={autoSlow} onChange={(e) => setAutoSlow(e.target.checked)} />
-          Desacelerar nos sobrevoos
+          Desacelerar nos encontros
         </label>
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
@@ -87,17 +88,40 @@ export function ProbeControls({ className = '' }: { className?: string }) {
             value={focus}
             onChange={(e) => setFocus(e.target.value as FocusId)}
           >
-            <option value="sun">Sol</option>
-            {PLANET_LIST.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-            {MISSION_LIST.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
+            <optgroup label="Sol e planetas">
+              <option value="sun">Sol</option>
+              {PLANET_LIST.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="Luas">
+              {MOON_LIST.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="Cometa e asteroides">
+              {SMALL_BODY_LIST.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+            </optgroup>
+            <optgroup label="Sondas">
+              {MISSION_LIST.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+              {COMPANIONS.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name} ({MISSION_LIST.find((m) => m.id === c.parent)!.name})
+                </option>
+              ))}
+            </optgroup>
           </select>
         </label>
         <div className="flex items-center gap-1" role="radiogroup" aria-label="Escala das distâncias">

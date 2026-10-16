@@ -14,11 +14,11 @@ export function ProbesApp() {
   return (
     <div className="relative h-full w-full overflow-hidden bg-black select-none">
       <SolarSystemScene className="absolute inset-0" />
-      <div className="pointer-events-none absolute inset-0 flex flex-col gap-2 pt-[max(0.75rem,env(safe-area-inset-top))] pr-[max(0.75rem,env(safe-area-inset-right))] pb-[max(0.75rem,env(safe-area-inset-bottom))] pl-[max(0.75rem,env(safe-area-inset-left))]">
+      <div className="pointer-events-none absolute inset-0 z-10 flex flex-col gap-2 pt-[max(0.75rem,env(safe-area-inset-top))] pr-[max(0.75rem,env(safe-area-inset-right))] pb-[max(0.75rem,env(safe-area-inset-bottom))] pl-[max(0.75rem,env(safe-area-inset-left))]">
         <header className="pointer-events-auto flex items-start justify-between gap-2 font-mono">
           <div>
             <h1 className="text-[11px] tracking-widest text-cyan-300 uppercase">Sondas · Sistema Solar</h1>
-            <p className="text-[10px] text-slate-500">Trajetórias reais do JPL Horizons</p>
+            <p className="text-[10px] text-slate-500">Trajetórias reais do JPL Horizons; Veneras reconstruídas</p>
           </div>
           <div className="flex shrink-0 gap-1.5 text-[11px]">
             <button

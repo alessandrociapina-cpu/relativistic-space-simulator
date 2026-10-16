@@ -1,15 +1,15 @@
 import { useEffect } from 'react';
 import { create } from 'zustand';
-import { ALL_EVENTS, type MissionEvent, type ProbeId } from './missions';
-import type { PlanetId } from './planets';
+import { BODIES, isMoon } from './bodies';
+import { ALL_EVENTS, MISSIONS, craft, type MissionEvent, type ProbeId } from './missions';
+import { AU_KM, distanceTo, probePosition } from './probes';
+import type { FocusId, ScaleMode } from './sceneMath';
 import { DAYS_PER_YEAR, isoToDays } from './time';
 
-export type FocusId = 'sun' | PlanetId | ProbeId;
-/** `log`: distâncias ao Sol em escala logarítmica (visão geral); `linear`: escala real. */
-export type ScaleMode = 'log' | 'linear';
+export type { FocusId, ScaleMode } from './sceneMath';
 
-/** Datas cobertas pelo simulador (as tabelas do JPL vão de 1969 a 2036). */
-export const PROBE_TIME_RANGE = { start: isoToDays('1977-01-01'), end: isoToDays('2035-12-31') } as const;
+/** Datas cobertas pelo simulador: da Venera 7 (1970) ao fim das tabelas do JPL (2036). */
+export const PROBE_TIME_RANGE = { start: isoToDays('1970-08-01'), end: isoToDays('2035-12-31') } as const;
 /** Abre pouco antes do lançamento da Voyager 2. */
 const INITIAL_T = isoToDays('1977-08-10');
 
@@ -28,9 +28,11 @@ export const PROBE_RATES: readonly ProbeRate[] = [
   { value: DAYS_PER_YEAR, label: '1 ano/s' },
 ];
 
-/** Perto de cada sobrevoo (±3 dias) o tempo desacelera para 6 h/s: o encontro dura ~24 s na tela. */
+/** Perto de cada encontro da sonda escolhida (±3 dias) o tempo desacelera para 6 h/s: o encontro dura ~24 s na tela. */
 export const FLYBY_SLOWDOWN = { windowDays: 3, rate: 0.25 } as const;
 const MAX_FRAME_DT_S = 0.25;
+/** Eventos em que vale desacelerar: os que acontecem perto de um corpo. */
+const SLOW_KINDS: ReadonlySet<MissionEvent['kind']> = new Set(['flyby', 'capture', 'arrival', 'entry', 'landing', 'end', 'perihelion']);
 
 /** Pedido de reposicionar a câmera (distância em unidades da cena), atendido pela cena. */
 export interface ViewRequest {
@@ -43,7 +45,7 @@ interface ProbeStore {
   readonly playing: boolean;
   readonly rate: number;
   readonly autoSlow: boolean;
-  /** Taxa a restaurar e instante em que a desaceleração de um sobrevoo termina. */
+  /** Taxa a restaurar e instante em que a desaceleração de um encontro termina. */
   readonly slowdown: { readonly until: number; readonly resumeRate: number } | null;
   readonly focus: FocusId;
   readonly selected: ProbeId;
@@ -68,6 +70,24 @@ interface ProbeStore {
 const clampT = (t: number) => Math.min(Math.max(t, PROBE_TIME_RANGE.start), PROBE_TIME_RANGE.end);
 const slowStart = (e: MissionEvent) => e.t - FLYBY_SLOWDOWN.windowDays;
 
+/**
+ * Onde a câmera fica num evento: perto do corpo, em escala real (a órbita de
+ * captura inteira, na inserção; o Sol, no periélio); nos demais, a sonda na
+ * escala atual.
+ */
+export function eventView(event: MissionEvent): { focus: FocusId; scale: ScaleMode | null; distance: number | null } {
+  if (event.kind === 'perihelion') return { focus: 'sun', scale: 'linear', distance: 0.25 };
+  if (event.capture) return { focus: event.capture.body, scale: 'linear', distance: (event.capture.apoapsisKm * 1.25) / AU_KM };
+  if (event.body) {
+    // ~60 raios do corpo (40 numa lua), ou mais longe se a sonda estiver além disso (a Rosetta chega ao cometa a 120 km).
+    const p = probePosition(craft(event.craft ?? event.probeId).trajectory, event.t);
+    const away = p ? (distanceTo(p, event.body, event.t) ?? 0) : 0;
+    const radii = (BODIES[event.body].radiusKm * (isMoon(event.body) ? 40 : 60)) / AU_KM;
+    return { focus: event.body, scale: 'linear', distance: Math.max(radii, 2.5 * away) };
+  }
+  return { focus: event.craft ?? event.probeId, scale: null, distance: null };
+}
+
 export const useProbeStore = create<ProbeStore>()((set, get) => ({
   t: INITIAL_T,
   playing: false,
@@ -88,23 +108,22 @@ export const useProbeStore = create<ProbeStore>()((set, get) => ({
   setRate: (rate) => set({ rate, slowdown: null }),
   setAutoSlow: (autoSlow) => set({ autoSlow }),
   setFocus: (focus) => set((s) => ({ focus, view: { distance: null, nonce: s.view.nonce + 1 } })),
-  setSelected: (selected) => set({ selected }),
+  setSelected: (selected) => set({ selected, eventId: null }),
   setScale: (scale) => set((s) => ({ scale, view: { distance: null, nonce: s.view.nonce + 1 } })),
   showEvent: (eventId) => set({ eventId }),
   jumpToEvent: (id) => {
     const event = ALL_EVENTS.find((e) => e.id === id);
     if (!event) return;
-    // Sobrevoo: o planeta em escala real; os demais marcos: a sonda na visão geral.
-    const flyby = event.kind === 'flyby' && event.body !== undefined;
+    const view = eventView(event);
     set((s) => ({
       t: clampT(event.t),
       playing: false,
       slowdown: null,
       eventId: id,
       selected: event.probeId,
-      focus: flyby ? event.body! : event.probeId,
-      scale: flyby ? 'linear' : s.scale,
-      view: { distance: null, nonce: s.view.nonce + 1 },
+      focus: view.focus,
+      scale: view.scale ?? s.scale,
+      view: { distance: view.distance, nonce: s.view.nonce + 1 },
     }));
   },
 
@@ -114,14 +133,15 @@ export const useProbeStore = create<ProbeStore>()((set, get) => ({
     let rate = s.rate;
     let slowdown = s.slowdown;
     let t = s.t + Math.min(dtRealS, MAX_FRAME_DT_S) * rate;
+    const events = MISSIONS[s.selected].events;
 
     if (slowdown && t >= slowdown.until) {
       rate = slowdown.resumeRate;
       slowdown = null;
     }
     if (s.autoSlow && rate > FLYBY_SLOWDOWN.rate) {
-      // Entrada na janela de um sobrevoo, mesmo que um frame longo pule por cima dela.
-      const entered = ALL_EVENTS.find((e) => e.kind === 'flyby' && slowStart(e) > s.t && slowStart(e) <= t);
+      // Entrada na janela de um encontro, mesmo que um frame longo pule por cima dela.
+      const entered = events.find((e) => SLOW_KINDS.has(e.kind) && slowStart(e) > s.t && slowStart(e) <= t);
       if (entered) {
         t = slowStart(entered);
         slowdown = { until: entered.t + FLYBY_SLOWDOWN.windowDays, resumeRate: rate };
@@ -129,7 +149,7 @@ export const useProbeStore = create<ProbeStore>()((set, get) => ({
       }
     }
 
-    const crossed = ALL_EVENTS.filter((e) => e.t > s.t && e.t <= t);
+    const crossed = events.filter((e) => e.t > s.t && e.t <= t);
     const playing = t < PROBE_TIME_RANGE.end;
     set({
       t: clampT(t),

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import fixtures from './data/planet-fixtures.json';
 import planetTables from './data/planets.json';
-import { interpolatePosition, unpackTable } from './ephemeris';
-import { PLANETS, PLANET_LIST, keplerPosition, orbitPolyline, planetPosition, planetVelocity, type PlanetId } from './planets';
+import { interpolatePosition, muAu, unpackTable } from './ephemeris';
+import { PLANETS, PLANET_LIST, SUN_GM, keplerPosition, orbitPolyline, planetPosition, planetVelocity, type PlanetId } from './planets';
 import { AU_KM } from './probes';
 import { norm, sub, type Vec3 } from './vec3';
 
@@ -28,7 +28,7 @@ describe('posições dos planetas contra o JPL Horizons', () => {
   });
 
   it('os elementos de Plutão (só para desenhar a órbita) ficam a < 0,01 UA da tabela', () => {
-    const table = unpackTable(planetTables.pluto);
+    const table = unpackTable(planetTables.pluto, muAu(SUN_GM + PLANETS.pluto.gm));
     for (const t of [-10_000, 0, 5_675, 9_000]) {
       expect(norm(sub(keplerPosition(PLANETS.pluto, t), interpolatePosition(table, t)))).toBeLessThan(0.01);
     }

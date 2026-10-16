@@ -17,9 +17,12 @@ const dateFormat = new Intl.DateTimeFormat('pt-BR', { day: 'numeric', month: 'sh
 const shortDateFormat = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });
 const timeFormat = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
 
+/** Milissegundos arredondados ao segundo: 11:38 não pode virar 11:37:59,999. */
+const roundedMs = (days: number) => Math.round(daysToMs(days) / 1000) * 1000;
+
 /** "5 de mar. de 1979". */
-export const formatDate = (days: number) => dateFormat.format(daysToMs(days));
+export const formatDate = (days: number) => dateFormat.format(roundedMs(days));
 /** "05/03/1979". */
-export const formatShortDate = (days: number) => shortDateFormat.format(daysToMs(days));
+export const formatShortDate = (days: number) => shortDateFormat.format(roundedMs(days));
 /** "5 de mar. de 1979, 12:05 UTC". */
-export const formatDateTime = (days: number) => `${formatDate(days)}, ${timeFormat.format(daysToMs(days))} UTC`;
+export const formatDateTime = (days: number) => `${formatDate(days)}, ${timeFormat.format(roundedMs(days))} UTC`;

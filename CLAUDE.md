@@ -471,15 +471,18 @@ relativistic-space-simulator/
 │   │   ├── RelativisticSky.vert
 │   │   └── RelativisticSky.frag
 │   ├── probes/                    # Simulador de sondas (§11), carregado sob demanda em #sondas
-│   │   ├── data/                  # voyager1/2.json, planets.json (Júpiter–Plutão), planet-fixtures.json
-│   │   ├── ephemeris.ts           # Tabelas de estado do Horizons e interpolação de Hermite
+│   │   ├── data/                  # Uma tabela por sonda, planets.json, moons.json, small-bodies.json, planet-fixtures.json
+│   │   ├── ephemeris.ts           # Tabelas do Horizons; interpolação de Kepler com correção de Hermite
+│   │   ├── kepler.ts              # Propagação em variáveis universais, Lambert, período, cônica + teste
 │   │   ├── planets.ts             # Planetas: Kepler (Mercúrio–Marte) e tabelas (Júpiter–Plutão) + teste
-│   │   ├── probes.ts              # Trajetória das sondas, janelas de encontro, análise de sobrevoo + teste
-│   │   ├── missions.ts            # Catálogo das sondas e eventos + missions.test.ts
+│   │   ├── bodies.ts              # Todos os corpos: planetas, luas (série de Fourier) e corpos pequenos
+│   │   ├── probes.ts              # Trajetórias, janelas de encontro, sobrevoo, captura e periélio + teste
+│   │   ├── venera.ts              # Venera 7 e 13 reconstruídas por Lambert e hipérboles
+│   │   ├── missions.ts            # Catálogo das 12 sondas, companheiras e eventos + missions.test.ts
 │   │   ├── eventExplanations.ts   # Explicações e fórmulas de cada evento
-│   │   ├── sceneMath.ts           # Escala log/real, foco e distância da câmera
-│   │   ├── useProbeStore.ts       # Data, ritmo, foco, escala e loop com desaceleração nos sobrevoos
-│   │   ├── SolarSystemScene.tsx   # Cena R3F com origem flutuante: Sol, planetas, órbitas, trilhas
+│   │   ├── sceneMath.ts           # Escala log/real, foco, referencial dos rastros e distância da câmera
+│   │   ├── useProbeStore.ts       # Data, ritmo, foco, escala e loop com desaceleração nos encontros
+│   │   ├── SolarSystemScene.tsx   # Cena R3F com origem flutuante: Sol, planetas, luas, corpos pequenos, sondas
 │   │   ├── ProbesApp.tsx          # Layout do modo Sondas
 │   │   ├── ProbeHUD.tsx, ProbeControls.tsx, ProbeEvents.tsx
 │   │   ├── time.ts, vec3.ts       # Dias desde J2000 e vetores em 64 bits
@@ -601,22 +604,23 @@ O arquivo `src/physics/RelativityEngine.test.ts` deve passar nos seguintes teste
 
 ---
 ## 11. Simulador de Sondas (`#sondas`)
-O segundo modo do app: um Sistema Solar dinâmico com as trajetórias reais das sondas. O cockpit tem o link "🛰 Sondas"; as sondas, "🚀 Viagem relativística". O modo carrega sob demanda (`React.lazy`) e o áudio do cockpit é suspenso enquanto ele está fora da tela.
+O segundo modo do app: um Sistema Solar dinâmico com as trajetórias reais de 12 sondas, de 1970 a 2035. O cockpit tem o link "🛰 Sondas"; as sondas, "🚀 Viagem relativística". O modo carrega sob demanda (`React.lazy`) e o áudio do cockpit é suspenso enquanto ele está fora da tela.
 
-1. **Dados** (`scripts/fetch-horizons.mjs`): vetores do JPL Horizons na eclíptica J2000 (ICRF), centro do Sol, em UA e UA/dia, com tempo em dias desde J2000 (TDB ≈ UTC).
-   - Cada tabela é baixada numa grade fina (1 dia ou 5 dias no espaço interplanetário; 2 h e 1 min perto dos planetas) e enxugada: uma amostra só fica se a interpolação de Hermite (posição + velocidade) sem ela errar mais que **150 km** (15 km nos encontros). As Voyagers inteiras (1977–2036) somam ~100 KB.
-   - **Encontros** (partida da Terra e sobrevoos) são guardados **centrados no planeta**. Na tela, a sonda vale planeta(t) + trajetória relativa, então o sobrevoo passa no lugar exato mesmo que o planeta tenha erro. Nas bordas da janela (25% de cada lado), a posição relativa se mistura suavemente com a heliocêntrica.
-   - Planetas externos e Plutão usam os **baricentros** dos sistemas (5–9): o centro de cada planeta gira em torno deles com as luas (Plutão: ~2 100 km a cada 6,4 dias), o que não cabe numa grade de 10 dias.
-2. **Planetas** (`planets.ts`): Mercúrio a Marte pelos elementos de Kepler do JPL (Standish, Tabela 1, 1800–2050; erro de 1 000 a 45 000 km); Júpiter a Plutão pelas tabelas do Horizons (1969–2036, erro < 1 500 km). Os elementos dos externos (erro até 0,03 UA) só desenham as órbitas.
-3. **Sobrevoos** (`analyzeFlyby`): maior aproximação por seção áurea na interpolação; $v_\infty$ por energia, $v_\infty^2 = v^2 - 2\mu/r$, nas bordas da janela; deflexão medida contra a da hipérbole, $\sin(\delta/2) = 1/(1 + r_p v_\infty^2/\mu)$, com erro < 1°; e velocidade heliocêntrica antes e depois por $|\vec V_{\text{planeta}} + \vec v_\infty|$.
-   - Valores que saem dos dados: Voyager 1 a 348 mil km de Júpiter (5/3/1979) e 124 mil km acima das nuvens de Saturno; Voyager 2 a 81,5 mil km de Urano e 29,2 mil km do centro de Netuno (25/8/1989). Júpiter acelerou as duas em ~10 km/s; Netuno freou a Voyager 2.
-4. **Eventos** (`missions.ts`): lançamentos e sobrevoos pelos dados; Pálido Ponto Azul (14/2/1990), objeto humano mais distante (17/2/1998), choques de terminação (16/12/2004 e 30/8/2007), heliopausas (25/8/2012 e 5/11/2018); e o dia-luz da Voyager 1, calculado pelos dados (18/11/2026). Cada evento tem explicação com fórmulas (`eventExplanations.ts`): $v_\infty$ e $C_3$ no lançamento, estilingue nos sobrevoos, $\theta = 2R_\oplus/d$ no Pálido Ponto Azul, escape solar e tempo-luz.
-5. **Cena** (`SolarSystemScene.tsx`): eclíptica no plano XY, norte para cima, **origem flutuante** (tudo relativo ao corpo em foco, em 64 bits) e depth buffer logarítmico.
-   - Planetas e sondas têm tamanho mínimo na tela (3–4 px).
-   - As órbitas são recalculadas a cada ano.
-   - As trilhas mostram o passado forte e a rota inteira apagada.
-   - Os rótulos são clicáveis para focar.
-   - Ao focar um planeta, a câmera fica do lado iluminado.
-   - **Escala "Log"**: $R = 10\log_{10}(1 + r/0{,}5\text{ UA})$, com planetas e Voyagers na mesma tela. **"Real"** é a escala linear, usada nos sobrevoos.
-6. **Tempo** (`useProbeStore.ts`): de 1977 a 2035, em ritmos de 1 h/s a 1 ano/s. Com "Desacelerar nos sobrevoos", cada encontro (±3 dias) passa a 6 h/s (~24 s na tela) e depois volta ao ritmo anterior. Ir a um evento pausa, foca o planeta (em escala real) ou a sonda e abre o cartão. "Hoje" vai para a data atual.
-7. **Painel da sonda**: distância do Sol e da Terra, tempo do sinal, velocidade contra o escape solar local e os selos "Escapando do Sistema Solar" e "Espaço interestelar".
+1. **Sondas** (`missions.ts`, em ordem de lançamento): Venera 7, Pioneer 10, Pioneer 11, Voyager 2, Voyager 1, Venera 13, Galileo (com a sonda atmosférica), Cassini (com a Huygens), Rosetta, New Horizons, Juno e Parker Solar Probe. As companheiras são trajetórias próprias do Horizons, desenhadas junto da nave-mãe.
+2. **Dados** (`scripts/fetch-horizons.mjs`, respostas em cache em `node_modules/.cache/horizons`): vetores do JPL Horizons na eclíptica J2000 (ICRF), em UA e UA/dia (janelas em km e km/s), tempo em dias desde J2000 (TDB ≈ UTC).
+   - **Interpolação** (`ephemeris.ts`, a mesma no script): entre duas amostras, a órbita de Kepler em torno do corpo central propagada da primeira (`kepler.ts`), mais uma correção cúbica de Hermite que leva exatamente ao estado da segunda. A cônica cobre a curvatura (periélios, passagens rentes) e a correção, as perturbações suaves. Uma amostra só fica se a interpolação sem ela errar mais que **150 km** no espaço interplanetário, **15 km** nos sobrevoos, **50 km** nas órbitas em torno de planetas e **0,5 km** em torno do cometa. Todas as tabelas somam ~800 KB (~350 KB comprimidas).
+   - **Janelas de encontro**: partida da Terra, sobrevoos (planetas, luas, asteroides, Arrokoth), órbitas (Galileo e Juno em Júpiter, Cassini em Saturno, Rosetta no cometa) guardadas **relativas ao corpo**. Na tela, a sonda vale corpo(t) + trajetória relativa, então o encontro passa no lugar exato mesmo que o corpo tenha erro. A posição relativa se mistura com a heliocêntrica nas bordas (25% da janela, ou 15 dias na entrada das órbitas); janelas de lua ficam dentro da do planeta e se misturam sobre ela. Galileo e Cassini terminam onde a trajetória cruza o nível de 1 bar.
+   - Asteroides integrados não servem de centro no Horizons: a trajetória relativa a Gaspra, Ida e Lutécia é a diferença das heliocêntricas. O trecho de Šteins nos dados é uma previsão da ESA anterior ao sobrevoo (~580 km; o real foi ~800 km).
+3. **Corpos** (`bodies.ts`): planetas (`planets.ts`: Kepler de Standish para Mercúrio–Marte, erro de 1 000 a 45 000 km; tabelas dos baricentros para Júpiter–Plutão, interpoladas com μ = GM☉ + GM do planeta); **luas** (Lua, Io, Europa, Ganimedes, Calisto, Encélado, Titã, Tritão, Caronte) por uma **série de Fourier** relativa ao centro do planeta, ajustada pelo script aos vetores de 1970 a 2036: frequências achadas uma a uma no pico do espectro do resíduo (FFT com janela de Hann, refinada por seção áurea) e amplitudes por mínimos quadrados, até o erro máximo ficar abaixo de 100 km (1 termo para Caronte, até 60 para a Lua, Europa e Ganimedes; ~20 KB no total); **corpos pequenos** (cometa 67P, Arrokoth, Šteins, Lutécia, Gaspra, Ida) por tabelas nos anos das missões, com a órbita desenhada pela cônica do estado.
+4. **Veneras** (`venera.ts`): o Horizons não tem as sondas soviéticas. Arco de Lambert entre a Terra na injeção e Vênus na entrada da atmosfera; hipérbole de saída a partir de 200 km na direção de v∞; hipérbole de chegada mirando o lado voltado para a Terra até 125 km; descida e tempo de transmissão no solo (23 min e 127 min). Resultado: C₃ de 8,6 e 16,2 km²/s² e entrada a 11,5 e 11,2 km/s. O painel marca "Rota reconstruída".
+5. **Análises** (`probes.ts`), todas pelos dados:
+   - **Sobrevoo** (`analyzeFlyby`): maior aproximação por seção áurea; v∞² = v² − 2μ/r; deflexão medida contra a da hipérbole, sin(δ/2) = 1/(1 + r_p v∞²/μ), com erro < 1° (< 3° rente ao planeta, por causa do achatamento); velocidade em relação ao Sol antes e depois por |V_planeta + v∞|. Numa lua, o efeito na órbita em torno do planeta: período antes e depois pela energia (Juno: Ganimedes 53 → 43 dias, Europa → 38, Io → 33).
+   - **Captura** (`analyzeCapture`): energia relativa ao planeta três dias antes (hipérbole) e depois (elipse) do primeiro periapse: v∞, Δv instantâneo no periapse, período e apoapse (Juno: 518 m/s e 53,4 dias; Cassini: 117 dias; Galileo: a freada soma Io e o motor).
+   - **Periélio** (`analyzePerihelion`): Parker a 9,86 raios solares e ~191 km/s em 24/12/2024.
+6. **Eventos** (`missions.ts`): lançamentos, sobrevoos (numerados quando se repetem), inserções em órbita, separação e entrada/pouso das companheiras, pousos (Veneras, Philae), fins de missão, último contato das Pioneers, marcos fixos (Pálido Ponto Azul, heliopausas, SL-9, Grand Finale, hibernação da Rosetta, coroa solar) e marcos calculados (dia-luz da Voyager 1 em 18/11/2026; a New Horizons passa a distância da Lua ~8 h depois da injeção). Cada evento tem explicação com fórmulas (`eventExplanations.ts`), todas válidas no KaTeX estrito.
+7. **Cena** (`SolarSystemScene.tsx`): eclíptica no plano XY, norte para cima, **origem flutuante** e depth buffer logarítmico.
+   - Planetas, luas, corpos pequenos e sondas têm tamanho mínimo na tela; uma lua só aparece quando se afasta do planeta ≥ 10 px.
+   - **Rastros** com passo adaptativo (~3° de giro em torno do corpo central do momento). Na escala real com foco num corpo (ou numa sonda em encontro), os rastros ficam no **referencial do corpo** (que o acompanha sem girar) e mostram só o trecho das janelas com ele: a órbita em torno de Júpiter ou do cometa aparece como órbita, e os sobrevoos antigos se sobrepõem. A sonda escolhida tem rastro forte e a rota inteira apagada; as demais, rastro fraco.
+   - **Escala "Log"**: R = 10 log₁₀(1 + r/0,5 UA); um sistema planetário inteiro (luas e sondas nas janelas) usa a escala tangencial do planeta, sem achatar as órbitas. **"Real"** é a escala linear; perto de um corpo (< 0,005 UA) as órbitas heliocêntricas somem.
+8. **Tempo** (`useProbeStore.ts`): de 01/08/1970 a 2035, em ritmos de 1 h/s a 1 ano/s. Com "Desacelerar nos encontros", cada encontro da sonda escolhida (±3 dias) passa a 6 h/s e o cartão abre; os das outras sondas não interrompem. Ir a um evento pausa e põe a câmera perto do corpo em escala real (~60 raios, 40 numa lua, a órbita de captura inteira, o Sol no periélio) ou na sonda.
+9. **Painel da sonda**: seletor com as 12 sondas (anos e uma linha cada), distância do corpo do encontro, do Sol e da Terra, tempo do sinal, velocidade contra o escape solar e os selos "Escapando do Sistema Solar", "Espaço interestelar", "Em órbita de…", "Rota reconstruída", "Sem contato desde…" e "Previsão" (depois de hoje). Depois do fim: "Missão encerrada" ou "Fim dos dados do JPL".
