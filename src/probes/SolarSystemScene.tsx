@@ -443,18 +443,19 @@ function SceneContent() {
       const group = craftGroups.current[i];
       const mesh = craftMeshes.current[i];
       const trail = trails[i]!;
-      const point = craftPoint(c.trajectory, t);
+      // Com as outras sondas ocultas, só a escolhida (e as companheiras) e a que está em foco aparecem.
+      const shown = showOthers || c.mission === selectedRef.current || c.id === focus;
+      const point = shown ? craftPoint(c.trajectory, t) : null;
       const visible = point !== null;
       setDisplay(craftLabels.current[i] ?? null, visible);
-      // Com as outras sondas ocultas, só a escolhida (e as companheiras) e a que está em foco deixam rastro.
-      const traced = showOthers || c.mission === selectedRef.current || c.id === focus;
+      const traced = shown;
       const range = trail.range;
       const last = lastIndexAtOrBefore(trail.times, t);
       const first = range ? trail.ends[range[0]]! : 0;
       const drawn = range && last >= range[0] ? trail.ends[Math.min(last, range[1])]! - first : 0;
       trail.line.visible = traced && visible && drawn > 0;
       trail.tip.visible = traced && visible && range !== null && last >= range[0] && last < range[1];
-      trail.future.visible = c.mission === selectedRef.current && range !== null;
+      trail.future.visible = shown && c.mission === selectedRef.current && range !== null;
       if (!group || !mesh) return;
       group.visible = visible;
       if (!point) return;

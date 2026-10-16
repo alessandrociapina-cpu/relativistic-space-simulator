@@ -143,9 +143,9 @@ export function ProbeControls({ className = '' }: { className?: string }) {
             </button>
           ))}
         </div>
-        <label className="flex items-center gap-1.5 text-slate-300" title="Desligado: só a rota da missão escolhida, sem as das outras sondas">
+        <label className="flex items-center gap-1.5 text-slate-300" title="Desligado: só a missão escolhida (e as companheiras) aparece na cena, sem as outras sondas e suas rotas">
           <input type="checkbox" className="accent-cyan-400" checked={showOthers} onChange={(e) => setShowOthers(e.target.checked)} />
-          Rotas das outras sondas
+          Mostrar outras sondas
         </label>
       </div>
     </section>

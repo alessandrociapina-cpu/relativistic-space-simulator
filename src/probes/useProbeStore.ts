@@ -54,7 +54,7 @@ interface ProbeStore {
   readonly focus: FocusId;
   readonly selected: ProbeId;
   readonly scale: ScaleMode;
-  /** Rastros das outras sondas na cena (desligados, só a escolhida e as companheiras). */
+  /** As outras sondas na cena (desligado: só a escolhida, as companheiras e a sonda em foco, com seus rastros). */
   readonly showOthers: boolean;
   /** Evento cujo cartão está aberto (alcançado na reprodução ou escolhido na lista). */
   readonly eventId: string | null;
