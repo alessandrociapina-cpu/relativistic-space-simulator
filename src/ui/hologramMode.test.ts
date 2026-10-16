@@ -3,7 +3,7 @@ import { computeFlightState, withRapidity } from '../physics/RelativityEngine';
 import { DESTINATIONS, destinationMissionProfile } from '../physics/destinations';
 import { cmbTemperatureAhead, wienPeakNm } from '../physics/EyeAndPhotometry';
 import { AU_M, arrivalDistanceM } from '../physics/sky';
-import { selectHologramMode, type HologramMode } from './hologramMode';
+import { hologramCountdownS, selectHologramMode, type HologramMode } from './hologramMode';
 import { OORT_CLOUD_AU, SATURN_AU, routeGeometry, routePosition, sunMarkerPosition } from './routeScale';
 
 const proxima = DESTINATIONS.proxima;
@@ -46,6 +46,39 @@ describe('cronologia dos hologramas na missão para Proxima', () => {
   it('no Cruzeiro Livre só aparece o espectro da CMB', () => {
     expect(modeAt(150, 'manual')).toBe('cmb-spectrum');
     expect(modeAt(295, 'manual')).toBe('none');
+  });
+});
+
+describe('hologramas em viagens longas', () => {
+  const oneG = destinationMissionProfile(proxima, 1);
+  const at = (tau: number, eyeDimmer?: number) => {
+    const flight = computeFlightState(oneG, tau);
+    const cmbTempK = cmbTemperatureAhead(flight.eta);
+    return selectHologramMode({
+      mode: 'autopilot',
+      flight,
+      profile: oneG,
+      sunDistanceAu: (AU_M + flight.positionM) / AU_M,
+      cmbTempK,
+      cmbPeakNm: wienPeakNm(cmbTempK),
+      ...(eyeDimmer === undefined ? {} : { eyeDimmer }),
+    });
+  };
+
+  it('a contagem do flip e da chegada ocupa 1/60 da viagem (dias, não segundos)', () => {
+    expect(hologramCountdownS(profile)).toBe(10);
+    expect(at(oneG.brakeStartTau - oneG.tauTotal / 100)).toBe('countdown-flip');
+    expect(at(oneG.tauTotal - oneG.tauTotal / 100)).toBe('countdown-arrival');
+    expect(at(oneG.brakeStartTau - oneG.tauTotal / 30)).not.toBe('countdown-flip');
+  });
+
+  it('o holograma do olho só aparece quando a luz parece mesmo mais fraca', () => {
+    const tau = 449;
+    const base = { mode: 'autopilot' as const, profile, flight: computeFlightState(profile, tau) };
+    const cmbTempK = cmbTemperatureAhead(base.flight.eta);
+    const ctx = { ...base, sunDistanceAu: 1e5, cmbTempK, cmbPeakNm: wienPeakNm(cmbTempK) };
+    expect(selectHologramMode({ ...ctx, eyeDimmer: 1286 })).toBe('eye-adaptation');
+    expect(selectHologramMode({ ...ctx, eyeDimmer: 1.1 })).toBe('cmb-spectrum');
   });
 });
 

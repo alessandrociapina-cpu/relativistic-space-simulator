@@ -9,6 +9,7 @@ import { useLiveExplainContext } from './useLiveExplainContext';
 
 const PHASE_LABEL: Readonly<Record<FlightPhase, string>> = {
   accelerating: 'aceleração',
+  coasting: 'inércia',
   decelerating: 'frenagem',
   arrived: 'chegada',
   cruise: 'cruzeiro livre',

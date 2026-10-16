@@ -7,6 +7,8 @@ import {
   activeWindowsAt,
   computeCriticalWindows,
   firstWindowStartingIn,
+  missionScaledS,
+  preFlipWindowS,
 } from './criticalEvents';
 
 const profile = destinationMissionProfile(DESTINATIONS.proxima);
@@ -57,17 +59,44 @@ describe('janelas críticas em outros regimes', () => {
     expect(computeCriticalWindows(slow).map((w) => w.kind)).toEqual(['pre-flip']);
   });
 
-  it('se γ_max < 15000, a janela da aceleração termina no flip', () => {
+  it('se γ_max < 15000, a CMB fica no visível do γ = 400 da ida ao da volta: uma janela só', () => {
     // γ_max ≈ 1000: α·(D/2)/c² ≈ 999
     const alpha = 1e7;
     const profile = computeMissionProfile((2 * 999 * C * C) / alpha, alpha);
     const cmb = computeCriticalWindows(profile).filter((w) => w.kind === 'cmb-visible');
-    expect(cmb[0]!.endTau).toBe(profile.tauHalf);
-    expect(cmb[1]!.startTau).toBeCloseTo(profile.tauHalf, 9);
+    expect(cmb).toHaveLength(1);
+    expect(computeFlightState(profile, cmb[0]!.startTau).gamma).toBeCloseTo(400, 6);
+    expect(computeFlightState(profile, cmb[0]!.endTau).gamma).toBeCloseTo(400, 6);
   });
 
   it('missão mais curta que 10 s: a janela do flip começa em τ = 0', () => {
     const profile = computeMissionProfile(100, 10); // τ½ ≈ 3,2 s
     expect(computeCriticalWindows(profile)[0]).toMatchObject({ kind: 'pre-flip', startTau: 0 });
+  });
+});
+
+describe('janelas na escala de missões longas', () => {
+  it('a janela do flip é 1/60 da viagem quando ela passa de 10 min (1 g até Proxima: ~21,6 dias)', () => {
+    const oneG = computeMissionProfile(4.25 * LIGHT_YEAR_M, G0);
+    expect(preFlipWindowS(profile)).toBe(PRE_FLIP_WINDOW_S);
+    expect(preFlipWindowS(oneG)).toBeCloseTo(oneG.tauTotal / 60, 6);
+    expect(preFlipWindowS(oneG) / 86_400).toBeCloseTo(21.6, 1);
+    expect(missionScaledS(profile, 20)).toBe(20);
+  });
+
+  it('com cruzeiro, a janela do flip antecede o início da frenagem', () => {
+    const coast = computeMissionProfile(4.25 * LIGHT_YEAR_M, G0, Math.atanh(0.9));
+    const preFlip = computeCriticalWindows(coast).find((w) => w.kind === 'pre-flip')!;
+    expect(preFlip.endTau).toBe(coast.brakeStartTau);
+    expect(preFlip.startTau).toBeCloseTo(coast.brakeStartTau - coast.tauTotal / 60, 3);
+  });
+
+  it('cruzeiro dentro da faixa da CMB: a janela atravessa a fase de inércia', () => {
+    const alpha = 1e6;
+    const coast = computeMissionProfile(LIGHT_YEAR_M, alpha, Math.acosh(1000));
+    const cmb = computeCriticalWindows(coast).filter((w) => w.kind === 'cmb-visible');
+    expect(cmb).toHaveLength(1);
+    expect(cmb[0]!.startTau).toBeLessThan(coast.burnEndTau);
+    expect(cmb[0]!.endTau).toBeGreaterThan(coast.brakeStartTau);
   });
 });

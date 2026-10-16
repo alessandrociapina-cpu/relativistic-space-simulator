@@ -1,6 +1,6 @@
 import katex from 'katex';
 import { describe, expect, it } from 'vitest';
-import { computeFlightState, withRapidity } from '../physics/RelativityEngine';
+import { computeFlightState, rocketMassRatio, withRapidity } from '../physics/RelativityEngine';
 import { DESTINATIONS, DESTINATION_LIST, destinationMissionProfile, type Destination } from '../physics/destinations';
 import { computeEyeTimeline, computePhotometryAndEyeState } from '../physics/EyeAndPhotometry';
 import { computeBodyAngularRadii } from '../physics/sky';
@@ -16,8 +16,8 @@ import {
 import { formatProse } from './format';
 
 /** Contexto das explicações no instante τ, como o store o monta. */
-function contextFactory(destination: Destination, accelG = destination.defaultAccelG) {
-  const profile = destinationMissionProfile(destination, accelG);
+function contextFactory(destination: Destination, accelG = destination.defaultAccelG, coastEta: number | null = null) {
+  const profile = destinationMissionProfile(destination, accelG, coastEta);
   const timeline = computeEyeTimeline(profile);
   return (tau: number, manualEta?: number): ExplainContext => {
     const base = computeFlightState(profile, tau);
@@ -77,9 +77,9 @@ describe('cronologia dos cartões na missão para Proxima', () => {
     ]);
   });
 
-  it('a 1x, os cartões chegam com pelo menos 10 s de intervalo', () => {
+  it('a 1x, os cartões chegam com pelo menos 6 s de intervalo (o tempo mínimo de cada um na tela)', () => {
     for (let i = 1; i < onsets.length; i++) {
-      expect(onsets[i]!.tau - onsets[i - 1]!.tau).toBeGreaterThanOrEqual(9.99);
+      expect(onsets[i]!.tau - onsets[i - 1]!.tau).toBeGreaterThanOrEqual(6);
     }
   });
 
@@ -93,16 +93,65 @@ describe('cronologia dos cartões na missão para Proxima', () => {
   });
 });
 
+describe('viagens longas e perfil com cruzeiro', () => {
+  it('1 g até Proxima: os efeitos de γ ≈ 3 aparecem, e o olho acompanha a luz (sem "mais escuro")', () => {
+    const at = contextFactory(proxima, 1);
+    const total = destinationMissionProfile(proxima, 1).tauTotal;
+    const ids = announcementTimeline(at, total, total / 4000).map((o) => o.id);
+    // A 1 g o Sistema Solar fica para trás em dias, a ~1 % de c, antes de qualquer efeito óptico.
+    expect(ids).toEqual([
+      'kinematics',
+      'solar-system',
+      'aberration',
+      'doppler',
+      'time-dilation',
+      'length-contraction',
+      'flip',
+      'braking',
+      'arrival',
+    ]);
+  });
+
+  it('1 g até Andrômeda: a CMB aparece, mas a frenagem não traz o "olhos adaptados"', () => {
+    const andromeda = DESTINATIONS.andromeda;
+    const at = contextFactory(andromeda, 1);
+    const total = destinationMissionProfile(andromeda, 1).tauTotal;
+    const ids = announcementTimeline(at, total, total / 6000).map((o) => o.id);
+    expect(ids).toEqual(expect.arrayContaining(['cmb-visible', 'illuminance', 'hot-cone', 'cmb-xray', 'target-blueshift']));
+    expect(ids).not.toContain('eye-adaptation');
+  });
+
+  it('acelerar, cruzar e frear: a inércia é anunciada e o flip antecede o início da frenagem', () => {
+    const coastEta = Math.atanh(0.9);
+    const at = contextFactory(proxima, 1, coastEta);
+    const profile = destinationMissionProfile(proxima, 1, coastEta);
+    const onsets = announcementTimeline(at, profile.tauTotal, profile.tauTotal / 4000);
+    const ids = onsets.map((o) => o.id);
+    expect(ids.indexOf('coasting')).toBeLessThan(ids.indexOf('flip'));
+    expect(onsets.find((o) => o.id === 'flip')!.tau).toBeLessThan(profile.brakeStartTau);
+    expect(onsets.find((o) => o.id === 'braking')!.tau).toBeCloseTo(profile.brakeStartTau, -5);
+    const coast = explainEffect('coasting', at(profile.tauHalf));
+    expect(coast.summary).toContain('0,9000 c');
+  });
+
+  it('combustível: a razão de massa do foguete de fótons aparece no texto', () => {
+    const rocket = explainEffect('rocket', contextFactory(proxima, 1)(0));
+    const ratio = rocketMassRatio(destinationMissionProfile(proxima, 1));
+    expect(ratio).toBeCloseTo(38.8, 1);
+    expect(rocket.summary).toContain(`${formatProse(ratio)} vezes`);
+  });
+});
+
 describe('efeitos ativos', () => {
-  it('em repouso, antes da partida, só a missão', () => {
-    expect(activeEffects(proximaAt(0))).toEqual(['mission']);
+  it('em repouso, antes da partida, só a missão e o combustível', () => {
+    expect(activeEffects(proximaAt(0))).toEqual(['mission', 'rocket']);
   });
 
   it('no flip, o que é próprio do instante vem primeiro', () => {
     const effects = activeEffects(proximaAt(tauHalf - 5));
     expect(effects[0]).toBe('flip');
     expect(effects).toContain('cmb-xray');
-    expect(effects.at(-1)).toBe('mission');
+    expect(effects.slice(-2)).toEqual(['mission', 'rocket']);
     expect(headlineEffect(effects)).toBe('flip');
   });
 
@@ -143,9 +192,14 @@ describe('textos e fórmulas com os valores do instante', () => {
 
   it('qualquer efeito, em qualquer instante, destino e modo, gera texto limpo e TeX válido', () => {
     for (const destination of DESTINATION_LIST) {
-      for (const accelG of [1, destination.defaultAccelG]) {
-        const at = contextFactory(destination, accelG);
-        const total = destinationMissionProfile(destination, accelG).tauTotal;
+      for (const [accelG, coastEta] of [
+        [1, null],
+        [1, Math.atanh(0.9)],
+        [destination.defaultAccelG, null],
+        [destination.defaultAccelG, 12],
+      ] as const) {
+        const at = contextFactory(destination, accelG, coastEta);
+        const total = destinationMissionProfile(destination, accelG, coastEta).tauTotal;
         for (let i = 0; i <= 12; i++) {
           const tau = (i / 12) * total;
           for (const ctx of [at(tau), at(tau, i * 1.5)]) {

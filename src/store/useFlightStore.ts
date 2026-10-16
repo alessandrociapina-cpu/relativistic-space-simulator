@@ -21,6 +21,7 @@ import {
 } from '../physics/EyeAndPhotometry';
 import { computeBodyAngularRadii } from '../physics/sky';
 import { activeEffects, newAnnouncements, type EffectId } from '../ui/explanations';
+import { stepDownTimeScale, timeScaleForMission } from './timeScales';
 import {
   COUNTDOWN_FROM_S,
   computeMilestones,
@@ -37,10 +38,6 @@ import {
 
 export type FlightMode = 'autopilot' | 'manual';
 
-/** Multiplicadores de tempo próprio M_τ (§7.2). */
-export const TIME_SCALES = [0.1, 1, 5, 20, 100] as const;
-export type TimeScale = (typeof TIME_SCALES)[number];
-
 /** Faixa do slider logarítmico do Cruzeiro Livre: log₁₀γ ∈ [0, 7,5] (η ≈ 18). */
 export const MAX_LOG10_GAMMA = 7.5;
 export const MAX_MANUAL_ETA = rapidityFromLog10Gamma(MAX_LOG10_GAMMA);
@@ -50,6 +47,8 @@ export interface FlightStore {
   readonly destination: Destination;
   /** Aceleração própria em múltiplos de g₀. */
   readonly accelG: number;
+  /** Rapidez de cruzeiro (acelerar, cruzar e frear); `null` no Flip-and-Burn. */
+  readonly coastEta: number | null;
   readonly profile: MissionProfile;
   readonly criticalWindows: readonly CriticalWindow[];
   readonly milestones: readonly Milestone[];
@@ -60,8 +59,9 @@ export interface FlightStore {
   readonly playing: boolean;
   /** Segundos reais até a ignição durante a contagem regressiva; `null` fora dela. */
   readonly ignitionCountdownS: number | null;
-  readonly timeScale: TimeScale;
-  /** Reduz M_τ para 1x ao entrar em um evento crítico. */
+  /** Multiplicador de tempo próprio M_τ: segundos de bordo por segundo real (ver `timeScales`). */
+  readonly timeScale: number;
+  /** Desacelera M_τ ao entrar em um evento crítico (1x na demonstração). */
   readonly autoStepDown: boolean;
   /** Rapidez imposta no Cruzeiro Livre. */
   readonly manualEta: number;
@@ -77,10 +77,11 @@ export interface FlightStore {
   setMode: (mode: FlightMode) => void;
   setDestination: (id: DestinationId) => void;
   setAccelG: (accelG: number) => void;
+  setCoastEta: (coastEta: number | null) => void;
   /** Partida (com contagem regressiva a partir de τ = 0), pausa, retomada ou aborto da contagem. */
   togglePlay: () => void;
   seek: (tau: number) => void;
-  setTimeScale: (timeScale: TimeScale) => void;
+  setTimeScale: (timeScale: number) => void;
   setAutoStepDown: (on: boolean) => void;
   setManualEta: (eta: number) => void;
   showInsight: (id: EffectId | null) => void;
@@ -109,12 +110,13 @@ function newFlightLog(): Pick<FlightStore, 'insight' | 'announcedEffects'> {
 }
 
 /** Nova missão parada no instante da partida. */
-function newMission(destination: Destination, accelG: number) {
-  const profile = destinationMissionProfile(destination, accelG);
+function newMission(destination: Destination, accelG: number, coastEta: number | null) {
+  const profile = destinationMissionProfile(destination, accelG, coastEta);
   const criticalWindows = computeCriticalWindows(profile);
   return {
     destination,
     accelG,
+    coastEta,
     profile,
     criticalWindows,
     milestones: computeMilestones(profile, criticalWindows),
@@ -140,7 +142,12 @@ export const useFlightStore = create<FlightStore>()((set, get) => {
     set({ ...patch, flight, photometry: derivePhotometry(flight, next) });
   };
 
-  const initial = newMission(DESTINATIONS.proxima, DESTINATIONS.proxima.defaultAccelG);
+  const initial = newMission(DESTINATIONS.proxima, DESTINATIONS.proxima.defaultAccelG, null);
+  /** Troca de missão: mantém o multiplicador se ele ainda faz sentido para a nova viagem. */
+  const remission = (destination: Destination, accelG: number, coastEta: number | null) => {
+    const mission = newMission(destination, accelG, coastEta);
+    update({ ...mission, timeScale: timeScaleForMission(get().timeScale, mission.profile) });
+  };
   const initialFlight = computeFlightState(initial.profile, 0);
 
   return {
@@ -166,8 +173,9 @@ export const useFlightStore = create<FlightStore>()((set, get) => {
           : { mode },
       );
     },
-    setDestination: (id) => update(newMission(DESTINATIONS[id], get().accelG)),
-    setAccelG: (accelG) => update(newMission(get().destination, accelG)),
+    setDestination: (id) => remission(DESTINATIONS[id], get().accelG, get().coastEta),
+    setAccelG: (accelG) => remission(get().destination, accelG, get().coastEta),
+    setCoastEta: (coastEta) => remission(get().destination, get().accelG, coastEta),
     togglePlay: () => {
       const { playing, ignitionCountdownS, tau, profile } = get();
       if (ignitionCountdownS !== null) return update({ ignitionCountdownS: null });
@@ -208,12 +216,13 @@ export const useFlightStore = create<FlightStore>()((set, get) => {
       if (!s.playing) return;
       let tau = Math.min(s.tau + dtRealS * s.timeScale, s.profile.tauTotal);
       let timeScale = s.timeScale;
-      if (s.autoStepDown && timeScale > 1) {
+      if (s.autoStepDown) {
         // Detecta a entrada mesmo que um frame longo pule por cima do início.
         const entered = firstWindowStartingIn(s.criticalWindows, s.tau, tau);
-        if (entered) {
+        const slower = entered ? stepDownTimeScale(entered) : timeScale;
+        if (entered && slower < timeScale) {
           tau = entered.startTau;
-          timeScale = 1;
+          timeScale = slower;
         }
       }
       update({ tau, timeScale, playing: tau < s.profile.tauTotal });

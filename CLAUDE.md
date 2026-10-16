@@ -56,6 +56,10 @@ Dado um destino a distância em repouso $D_{\text{total}}$ (metros) e aceleraç�
    $$L_{\text{contraída}}(\tau) = \frac{L_{\text{repouso}}(\tau)}{\gamma(\tau)}$$
 5. **Tempo Estimado Até o Alvo Sem Frenagem (Métrica Educativa do Vídeo):**
    No ponto médio, se a nave não freasse, o tempo próprio restante aproximado para cruzar $L_{\text{contraída}}$ seria $\Delta\tau_{\text{no-brake}} = \frac{c}{\alpha}\left[\text{acosh}\left(1 + \frac{\alpha D_{\text{total}}}{c^2}\right) - \eta_{\text{max}}\right] \approx \frac{c}{\alpha}\ln(2) \approx 13\text{ s}$ para Proxima Centauri a $1,61 \times 10^6\text{ G}$.
+6. **Perfil acelerar, cruzar e frear** (`coastEta` em `computeMissionProfile`): com rapidez de cruzeiro $\eta_c$ menor que a do ponto médio, o motor desliga em $\tau_1 = \frac{c}{\alpha}\eta_c$ e a nave segue por inércia (fase `coasting`), com $\frac{dx}{d\tau} = c\sinh\eta_c$ e $\frac{dt}{d\tau} = \cosh\eta_c$:
+   $$L_{\text{cruzeiro}} = D_{\text{total}} - 2\frac{c^2}{\alpha}(\cosh\eta_c - 1), \quad \tau_{\text{total}} = 2\tau_1 + \frac{L_{\text{cruzeiro}}}{c\sinh\eta_c}, \quad t_{\text{total}} = 2\frac{c}{\alpha}\sinh\eta_c + \frac{L_{\text{cruzeiro}}}{c\tanh\eta_c}$$
+   A frenagem começa em `brakeStartTau` $= \tau_{\text{total}} - \tau_1$ (o flip). Com $\eta_c$ acima da rapidez do ponto médio, o perfil é o Flip-and-Burn e `burnEndTau = brakeStartTau = tauHalf`.
+7. **Equação do foguete** (`rocketMassRatio`): $\frac{m_0}{m_1} = e^{2\eta_{\max} c / v_e}$. Foguete de fótons ($v_e = c$): 38,8 para Proxima a 1 g e $6,9 \times 10^{12}$ para Andrômeda; fusão ideal ($v_e = 0,1c$): a mesma razão elevada à 10ª potência.
 ### 4.3 Catálogo de Destinos Pré-Configurados (`src/physics/destinations.ts`)
 
 | ID | Nome | Distância ($D_{\text{total}}$) | Temp. Estrela ($K$) | Raio Estelar ($R_\odot$) | Aceleração Padrão Sugerida |
@@ -482,6 +486,7 @@ relativistic-space-simulator/
 │   ├── store/
 │   │   ├── useFlightStore.ts      # Estado global e loop de tempo próprio com Auto-Step Down + teste
 │   │   ├── flightEvents.ts        # Marcos do voo e contagens regressivas + teste
+│   │   ├── timeScales.ts          # Degraus de M_τ (0,1x a 1 ano/s) e Auto-Step Down + teste
 │   │   └── useFlightLoop.ts       # requestAnimationFrame que chama tick(dt)
 │   ├── ui/
 │   │   ├── format.ts              # Formatação (relógios, distâncias, γ, c − v, milhares com espaço) + teste
@@ -499,11 +504,14 @@ relativistic-space-simulator/
 ---
 ## 7. Regras de UX e Controles de Voo
 1. **Dois Modos de Operação:**
-   - **Modo Autopilot (Flip-and-Burn):** O usuário escolhe o destino, ajusta a aceleração própria $\alpha$ (padrão $1.61 \times 10^6\text{ G}$) e dá a partida. Inclui barra de progresso da linha do tempo do voo ($\tau$ de $0$ a $\tau_{\text{total}}$) permitindo também arrastar (*scrub*) para qualquer instante da viagem.
+   - **Modo Autopilot (Flip-and-Burn):** O usuário escolhe o destino, ajusta a aceleração própria $\alpha$ e dá a partida. Inclui barra de progresso da linha do tempo do voo ($\tau$ de $0$ a $\tau_{\text{total}}$) permitindo também arrastar (*scrub*) para qualquer instante da viagem.
+     - **Aceleração:** "Demonstração" ($1.61 \times 10^6\text{ G}$, padrão), "1 g" (viagem tripulada: Proxima em 3,54 anos de bordo e 5,88 na Terra; Andrômeda em 28,6 anos de bordo) ou "Personalizada" (campo em g e slider log, de 0,1 g a $10^7$ g).
+     - **Perfil:** "Acelerar e frear" (Flip-and-Burn) ou "Acelerar, cruzar e frear", com a velocidade de cruzeiro num slider de rapidez (sugestão: 0,9c). O resumo mostra a razão de massa do foguete de fótons.
    - **Modo Cruzeiro Livre (Manual):** O usuário controla diretamente um slider logarítmico de Rapidez $\eta \in [0, 18]$ (ou $\log_{10}\gamma \in [0, 7.5]$) para inspecionar estacionariamente qualquer regime óptico.
 2. **Multiplicador de Tempo Próprio ($M_\tau$) com *Auto-Step Down*:**
-   - Botões de escala de tempo próprio: `0.1x`, `1x (Real Time)`, `5x`, `20x`, `100x`.
-   - Opção "Reduzir automaticamente para 1x em eventos críticos" (quando a CMB atravessa o espectro visível em $\gamma \in [400, 15000]$ e nos 10 segundos finais antes do *Flip* de desaceleração).
+   - Degraus de tempo próprio por segundo real (`src/store/timeScales.ts`): `0,1x`, `1x (Real Time)`, `5x`, `20x`, `100x`, `1 h/s`, `1 dia/s`, `1 sem/s`, `1 mês/s`, `1 ano/s`. Cada missão mostra 5 degraus: um abaixo e três acima do "natural", o que encaixa a viagem em ~10 min (demonstração: 0,1x a 100x, natural 1x; 1 g até Proxima: 1 h/s a 1 ano/s, natural 1 dia/s). Trocar de missão mantém o multiplicador se ele ainda está entre os 5; senão, vai para o natural.
+   - Opção "Desacelerar nos eventos críticos" (quando a CMB atravessa o espectro visível em $\gamma \in [400, 15000]$ e na reta final antes do *Flip*): ao entrar na janela, M_τ cai para o maior degrau com que ela dura ≥ 20 s reais, nunca abaixo de 1x. Na demonstração, isso é sempre 1x.
+   - **Durações na escala da missão** (`missionScaledS`): as janelas da demonstração (10 s antes do flip, contagens holográficas de 10 s, câmera traseira nos 20 s finais) valem $\max(d, \tau_{\text{total}}\,d/600\text{ s})$: iguais na demonstração, 1/60 da viagem nas longas (~21,6 dias antes do flip a 1 g até Proxima). Se o pico de $\gamma$ fica dentro da faixa da CMB, a janela da CMB é uma só, da entrada na ida à saída na volta.
 3. **Comportamento implementado:**
    - O Auto-Step Down age na **entrada** de cada janela crítica (a da CMB acontece na aceleração e na frenagem). Se um frame longo pularia o início da janela, $\tau$ é posicionado exatamente nele. Dentro da janela, o usuário pode voltar a acelerar.
    - O Cruzeiro Livre começa na rapidez atual, pausa o Autopilot e congela a posição e os relógios. Só $\eta$ muda: Doppler, aberração, $\gamma$ e $L_{\text{contraída}}$.
@@ -536,9 +544,9 @@ O arquivo `src/physics/RelativityEngine.test.ts` deve passar nos seguintes teste
 4. **Telescópio:** zoom $\max(13,\ \min(0{,}253\,\gamma,\ \text{zoom que põe o alvo em 35\% da altura}))$, relativo ao FOV de 70° do para-brisa.
 5. **Monitor direito:** "ROUTE · LOG SCALE" (log a partir do Sol até HALFWAY, espelhado até o alvo) e "REAR VIEW · x 12" sozinho nos 20 s finais; botões AUTO / ROTA / TRÁS.
 6. **Hologramas** (`selectHologramMode`, por critérios físicos), em ordem de prioridade:
-   1. "DECELERATION IN" nos 10 s antes do flip; "DECELERATION COMPLETE IN" nos 10 s antes da chegada.
+   1. "DECELERATION IN" antes do início da frenagem; "DECELERATION COMPLETE IN" antes da chegada (10 s na demonstração, 1/60 da viagem nas longas, quando a contagem mostra o tempo de bordo restante, como "6,47 dias").
    2. Anéis do Sistema Solar: aceleração, 5–32 UA do Sol.
-   3. "YOUR EYES": frenagem, $T_{\text{CMB}} \in (5\,000, 60\,000)$ K.
+   3. "YOUR EYES": frenagem, $T_{\text{CMB}} \in (5\,000, 60\,000)$ K e fator "mais escuro" ≥ 2 (em viagens de anos o olho acompanha a luz e o fator fica em ~1).
    4. Espectro da CMB ("PEAK nm"): pico de Wien entre 260 e 980 nm.
    5. Curva de lux: aceleração, $T_{\text{CMB}} \in (15\,000, 180\,000)$ K.
    6. Blueshift do alvo: frenagem, $\gamma \in [8, 220]$.
@@ -551,20 +559,24 @@ O arquivo `src/physics/RelativityEngine.test.ts` deve passar nos seguintes teste
    | :--- | :--- | :--- |
    | Rapidez η | $\eta > 0$ | 0 s |
    | Aberração | $\beta \ge 0{,}5$ | 10 s |
-   | Doppler e beaming | $D_{\text{frente}} = e^{\eta} \ge 3$ | 21 s |
-   | Dilatação do tempo | $\gamma \ge 3$ | 34 s |
-   | Contração de Lorentz | $\gamma \ge 10$ | 57 s |
+   | Doppler e beaming | $D_{\text{frente}} = e^{\eta} \ge 2{,}5$ | 17 s |
+   | Dilatação do tempo | $\gamma \ge 2$ | 25 s |
+   | Contração de Lorentz | $\gamma \ge 3$ | 34 s |
    | Sistema Solar | aceleração, 5,2–120 UA do Sol | 103 s |
    | CMB no visível | $\gamma \in [400, 15\,000]$ | 127 s |
    | Ofuscamento | $E \ge 1\,500$ lux | 147 s |
    | Cone quente | $\gamma$ acima do pico de lux ($\approx 6\,955$) | 181 s |
    | CMB em raios X | pico de Wien $\le 10$ nm | 220 s |
-   | Flip | 10 s antes de $\tau_{1/2}$ | 289 s |
+   | Flip | janela antes do início da frenagem (10 s na demonstração) | 289 s |
+   | Inércia (motor desligado) | fase `coasting` do perfil com cruzeiro | — |
    | Frenagem | fase de frenagem | 299 s |
-   | Olhos adaptados | frenagem, $T_{\text{CMB}} \in (5\,000, 60\,000)$ K | 409 s |
+   | Olhos adaptados | frenagem, $T_{\text{CMB}} \in (5\,000, 60\,000)$ K e fator ≥ 2 | 409 s |
    | Alvo azulado | frenagem, $\gamma \in [8, 220]$ | 483 s |
    | Chegada | fase de chegada | 599 s |
    | Missão | sempre no Autopilot (só no painel) | — |
+   | Combustível (equação do foguete) | sempre no Autopilot (só no painel) | — |
+
+   Os limiares de γ também são atravessados pela viagem a 1 g até as estrelas próximas ($\gamma_{\max} \approx 3$), e na demonstração os cartões chegam com ≥ 6 s de intervalo, o tempo mínimo de cada um na tela.
 
 2. **Cartão** (botão "💡 Explicar" ao lado da partida, ligado por padrão e persistido): o loop (`tick`) anuncia cada efeito na **transição** inativo → ativo, uma vez por missão, só no Autopilot. O scrub não anuncia e dispensa o cartão. A nova partida e a troca de missão zeram os anúncios. Cada cartão fica ≥ 6 s reais na tela (a 20x/100x mostra o mais recente ao fim do prazo). Ligar o modo no meio do voo mostra o efeito mais próprio do instante.
 3. **Painel de efeitos ativos** (botão "∑ Efeitos", ou automático ao pausar com o modo Explicar ligado; retomar fecha, Esc fecha): todos os efeitos ativos com resumo, fórmulas com os valores atuais e "Saiba mais". Acompanha o scrub e o slider do Cruzeiro Livre a 4 Hz. O efeito vindo do cartão aparece destacado no topo até o instante mudar. Enquanto o painel está aberto, o holograma central se esconde. No celular, o painel ocupa a tela inteira e tem "▶ Retomar".

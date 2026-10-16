@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { blackbodyCssColor } from '../physics/blackbody';
+import { missionScaledS } from '../physics/criticalEvents';
 import { AU_M, arrivalDistanceM } from '../physics/sky';
 import { useFlightStore } from '../store/useFlightStore';
 import { formatRouteDistance } from '../ui/format';
@@ -9,11 +10,11 @@ import { REAR_VIEW_ZOOM, RearCameraView } from './RearCameraView';
 
 type RightMonitorChoice = 'auto' | 'route' | 'rear';
 
-/** Nos últimos segundos da frenagem o monitor passa sozinho para a câmera traseira. */
+/** Nos últimos 20 s da frenagem (na escala da missão) o monitor passa sozinho para a câmera traseira. */
 const REAR_VIEW_SWITCH_S = 20;
 
 const CHOICES = [
-  { value: 'auto', label: 'AUTO', title: 'Rota durante o voo, traseira nos 20 s finais' },
+  { value: 'auto', label: 'AUTO', title: 'Rota durante o voo, traseira na reta final' },
   { value: 'route', label: 'ROTA', title: 'Mapa da rota em escala logarítmica' },
   { value: 'rear', label: 'TRÁS', title: `Câmera traseira (x ${REAR_VIEW_ZOOM})` },
 ] as const;
@@ -39,7 +40,7 @@ function RouteMap() {
   ].filter((m) => m.au < halfwayAu);
 
   const status =
-    flight.phase === 'cruise'
+    flight.phase === 'cruise' || flight.phase === 'coasting'
       ? 'COASTING'
       : flight.phase === 'arrived'
         ? 'ARRIVED'
@@ -113,7 +114,10 @@ function RouteMap() {
 export function RouteMapAndRearMonitor({ className = '' }: { className?: string }) {
   const [choice, setChoice] = useState<RightMonitorChoice>('auto');
   const nearArrival = useFlightStore(
-    (s) => s.mode === 'autopilot' && s.flight.tau > 0 && s.profile.tauTotal - s.flight.tau <= REAR_VIEW_SWITCH_S,
+    (s) =>
+      s.mode === 'autopilot' &&
+      s.flight.tau > 0 &&
+      s.profile.tauTotal - s.flight.tau <= missionScaledS(s.profile, REAR_VIEW_SWITCH_S),
   );
   const showRear = choice === 'rear' || (choice === 'auto' && nearArrival);
 
