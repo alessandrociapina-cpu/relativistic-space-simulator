@@ -11,7 +11,7 @@
  * `probes.ts`), então eles passam no lugar exato em qualquer caso.
  */
 import planetTables from './data/planets.json';
-import { interpolatePosition, tableEnd, tableStart, unpackTable, type StateTable } from './ephemeris';
+import { interpolatePosition, muAu, tableEnd, tableStart, unpackTable, type PackedTable, type StateTable } from './ephemeris';
 import { DAYS_PER_CENTURY } from './time';
 import type { Vec3 } from './vec3';
 
@@ -144,13 +144,14 @@ export const SUN_RADIUS_KM = 695_700;
 
 const DEG = Math.PI / 180;
 
-/** Planetas com tabela do Horizons (baricentro do sistema). */
+/** Planetas com tabela do Horizons (baricentro do sistema), interpolada na órbita de μ = GM☉ + GM do planeta. */
+const tableOf = (id: PlanetId) => unpackTable(planetTables[id as keyof typeof planetTables] as PackedTable, muAu(SUN_GM + PLANETS[id].gm));
 const TABLES: Partial<Record<PlanetId, StateTable>> = {
-  jupiter: unpackTable(planetTables.jupiter),
-  saturn: unpackTable(planetTables.saturn),
-  uranus: unpackTable(planetTables.uranus),
-  neptune: unpackTable(planetTables.neptune),
-  pluto: unpackTable(planetTables.pluto),
+  jupiter: tableOf('jupiter'),
+  saturn: tableOf('saturn'),
+  uranus: tableOf('uranus'),
+  neptune: tableOf('neptune'),
+  pluto: tableOf('pluto'),
 };
 
 /** Elementos no instante (dias desde J2000), em radianos. */

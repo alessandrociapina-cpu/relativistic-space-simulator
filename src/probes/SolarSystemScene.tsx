@@ -1,6 +1,6 @@
 import { Html, OrbitControls } from '@react-three/drei';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { useEffect, useMemo, useRef } from 'react';
+import { forwardRef, useEffect, useMemo, useRef } from 'react';
 import {
   AdditiveBlending,
   BufferGeometry,
@@ -17,19 +17,56 @@ import {
   type Sprite,
 } from 'three';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
-import { MISSION_LIST, type ProbeMission } from './missions';
-import { PLANET_LIST, orbitPolyline, planetPosition } from './planets';
-import { probePosition } from './probes';
-import { bodyRadiusAu, focusPosition, isPlanet, localScale, toDisplay, viewDistance } from './sceneMath';
-import { isoToDays } from './time';
-import { useProbeStore, type FocusId } from './useProbeStore';
-import type { Vec3 } from './vec3';
+import {
+  BODIES,
+  MOON_LIST,
+  SMALL_BODY_LIST,
+  bodyPosition,
+  bodyState,
+  moonOffset,
+  moonPeriodDays,
+  type BodyId,
+  type MoonId,
+  type SmallBodyId,
+} from './bodies';
+import { muAu } from './ephemeris';
+import { conicPolyline } from './kepler';
+import { COMPANIONS, MISSION_LIST, type CraftId, type ProbeId } from './missions';
+import { PLANET_LIST, SUN_GM, orbitPolyline, planetPosition } from './planets';
+import { currentEncounter, probeState, type ProbeTrajectory } from './probes';
+import {
+  bodyRadiusAu,
+  craftPoint,
+  focusDisplay,
+  focusPosition,
+  frameBody,
+  framePosition,
+  isBodyFocus,
+  localScale,
+  nearDisplay,
+  pointDisplay,
+  systemCenter,
+  toDisplay,
+  viewDistance,
+  type FocusId,
+  type ScaleMode,
+  type TrailPoint,
+} from './sceneMath';
+import { useProbeStore } from './useProbeStore';
+import { cross, norm, sub, type Vec3 } from './vec3';
 
 /** Tamanho mínimo na tela: planetas e sondas nunca somem, mesmo a 100 UA. */
 const MIN_BODY_PX = 3;
+const MIN_MOON_PX = 2;
 const MIN_PROBE_PX = 4;
 const SUN_GLOW_PX = 26;
+/** Uma lua só aparece quando se afasta do planeta pelo menos isto na tela. */
+const MOON_MIN_SEPARATION_PX = 10;
 const STAR_SPHERE = 20_000;
+/** Em escala real, as órbitas dos planetas e dos corpos pequenos somem com a câmera mais perto que isto (UA). */
+const ORBIT_LINES_MIN_AU = 0.005;
+/** Passo angular dos rastros em torno do corpo central do momento. */
+const TRAIL_STEP_RAD = (3 * Math.PI) / 180;
 
 /** Linha simples (o JSX `<line>` colide com o do SVG; aqui é o objeto do three). */
 function makeLine(color: string, opacity: number): Line {
@@ -69,18 +106,46 @@ function glowTexture(): CanvasTexture {
   return new CanvasTexture(canvas);
 }
 
-/** Instantes da trilha: grade regular, mais densa até 1990, e os pontos dos encontros subdivididos. */
-function trailTimes(mission: ProbeMission): number[] {
-  const { launch, end, encounters } = mission.trajectory;
-  const dense = isoToDays('1990-01-01');
+/**
+ * Pontos do rastro: o passo segue o giro da sonda em torno do corpo central
+ * do momento (o Sol, ou o planeta/lua/cometa da janela), ~3° por ponto. Assim
+ * um periélio da Parker ou uma passagem rente a Júpiter saem lisos sem
+ * encher de pontos os anos de cruzeiro.
+ */
+function trailPoints(trajectory: ProbeTrajectory): { times: number[]; points: TrailPoint[] } {
   const times: number[] = [];
-  for (let t = launch; t < end; t += t < dense ? 4 : 30) times.push(t);
-  for (const e of encounters) {
-    const ts = e.table.t;
-    for (let i = 0; i < ts.length - 1; i++) for (let k = 0; k < 4; k++) times.push(ts[i]! + ((ts[i + 1]! - ts[i]!) * k) / 4);
+  const points: TrailPoint[] = [];
+  for (let t = trajectory.launch; ; ) {
+    const point = craftPoint(trajectory, t);
+    const state = probeState(trajectory, t);
+    if (point && state) {
+      times.push(t);
+      points.push(point);
+    }
+    if (t >= trajectory.end || !state) break;
+    const e = currentEncounter(trajectory, t);
+    const center = e ? bodyState(e.body, t) : null;
+    const r = center ? sub(state.position, center.position) : state.position;
+    const v = center ? sub(state.velocity, center.velocity) : state.velocity;
+    const omega = norm(cross(r, v)) / Math.max(norm(r) ** 2, 1e-30);
+    t = Math.min(t + Math.min(Math.max(TRAIL_STEP_RAD / omega, 1 / 1440), 30), trajectory.end);
   }
-  times.push(end);
-  return [...new Set(times)].sort((a, b) => a - b);
+  return { times, points };
+}
+
+/**
+ * No referencial de um corpo, o rastro mostra só o trecho dos encontros com
+ * ele (do primeiro ao último): fora disso a rota vira uma curva enorme e sem
+ * sentido em torno de um corpo que nem estava por perto.
+ */
+function windowRange(trajectory: ProbeTrajectory, times: readonly number[], frame: BodyId): [number, number] | null {
+  const windows = trajectory.encounters.filter((e) => e.body === frame || systemCenter(e.body) === frame);
+  if (windows.length === 0) return null;
+  const start = Math.min(...windows.map((e) => e.start));
+  const end = Math.max(...windows.map((e) => e.end));
+  const first = times.findIndex((t) => t >= start);
+  const last = lastIndexAtOrBefore(times, end);
+  return first >= 0 && last > first ? [first, last] : null;
 }
 
 /** Índice da última amostra com tempo ≤ t. */
@@ -95,12 +160,14 @@ function lastIndexAtOrBefore(times: readonly number[], t: number): number {
   return lo;
 }
 
-function Label({ id, name, color }: { id: FocusId; name: string; color: string }) {
+/** Rótulo clicável; a cena esconde ou mostra o elemento a cada frame. */
+const Label = forwardRef<HTMLButtonElement, { id: FocusId; name: string; color: string }>(function Label({ id, name, color }, ref) {
   const setFocus = useProbeStore((s) => s.setFocus);
   const focused = useProbeStore((s) => s.focus === id);
   return (
     <Html zIndexRange={[4, 0]} style={{ pointerEvents: 'none' }}>
       <button
+        ref={ref}
         type="button"
         onClick={() => setFocus(id)}
         className={`pointer-events-auto ml-2 -translate-y-1/2 font-mono text-[10px] whitespace-nowrap select-none hover:text-white ${
@@ -112,17 +179,11 @@ function Label({ id, name, color }: { id: FocusId; name: string; color: string }
       </button>
     </Html>
   );
-}
-
-/** Rótulo da sonda só depois do lançamento (o HTML não some com `visible = false`). */
-function ProbeLabel({ mission }: { mission: ProbeMission }) {
-  const launched = useProbeStore((s) => s.t >= mission.trajectory.launch);
-  return launched ? <Label id={mission.id} name={mission.name} color={mission.color} /> : null;
-}
+});
 
 /**
- * Direção da câmera ao focar um planeta: do lado iluminado pelo Sol, um pouco
- * acima da eclíptica e de lado, para o planeta e o sobrevoo aparecerem de dia.
+ * Direção da câmera ao focar um corpo: do lado iluminado pelo Sol, um pouco
+ * acima da eclíptica e de lado, para o corpo e o sobrevoo aparecerem de dia.
  */
 function sunlitDirection(helio: Vec3): Vector3 {
   const toSun = new Vector3(-helio[0], -helio[1], -helio[2]).normalize();
@@ -130,8 +191,27 @@ function sunlitDirection(helio: Vec3): Vector3 {
   return toSun.multiplyScalar(0.8).add(side.multiplyScalar(0.45)).add(new Vector3(0, 0, 0.5)).normalize();
 }
 
+interface CraftView {
+  readonly id: CraftId;
+  readonly name: string;
+  readonly color: string;
+  readonly trajectory: ProbeTrajectory;
+  /** A missão do seletor a que pertence (a própria, ou a nave-mãe). */
+  readonly mission: ProbeId;
+}
+
+const CRAFTS: readonly CraftView[] = [
+  ...MISSION_LIST.map((m) => ({ id: m.id, name: m.name, color: m.color, trajectory: m.trajectory, mission: m.id })),
+  ...COMPANIONS.map((c) => ({ id: c.id, name: c.name, color: c.color, trajectory: c.trajectory, mission: c.parent })),
+];
+
+const setDisplay = (el: HTMLElement | null, visible: boolean) => {
+  if (el) el.style.display = visible ? '' : 'none';
+};
+
 function SceneContent() {
   const scale = useProbeStore((s) => s.scale);
+  const selected = useProbeStore((s) => s.selected);
   // As órbitas mudam devagar (precessão): basta recalcular a cada ano.
   const orbitYear = useProbeStore((s) => Math.floor(s.t / 365.25));
   const { camera } = useThree();
@@ -141,37 +221,69 @@ function SceneContent() {
   const sunGlow = useRef<Sprite>(null);
   const planetGroups = useRef<(Group | null)[]>([]);
   const planetMeshes = useRef<(Mesh | null)[]>([]);
-  const probeGroups = useRef<(Group | null)[]>([]);
-  const probeMeshes = useRef<(Mesh | null)[]>([]);
+  const moonGroups = useRef<(Group | null)[]>([]);
+  const moonMeshes = useRef<(Mesh | null)[]>([]);
+  const moonLabels = useRef<(HTMLButtonElement | null)[]>([]);
+  const smallGroups = useRef<(Group | null)[]>([]);
+  const smallMeshes = useRef<(Mesh | null)[]>([]);
+  const smallLabels = useRef<(HTMLButtonElement | null)[]>([]);
+  const craftGroups = useRef<(Group | null)[]>([]);
+  const craftMeshes = useRef<(Mesh | null)[]>([]);
+  const craftLabels = useRef<(HTMLButtonElement | null)[]>([]);
   const lines = useRef<Group>(null);
   const stars = useRef<Group>(null);
   const glow = useMemo(glowTexture, []);
 
   const orbits = useMemo(() => PLANET_LIST.map((p) => makeLine(p.color, 0.35)), []);
+  const smallOrbits = useMemo(() => SMALL_BODY_LIST.map((b) => makeLine(b.color, 0.22)), []);
   useEffect(() => {
     const t = orbitYear * 365.25;
     PLANET_LIST.forEach((p, i) => setLinePoints(orbits[i]!, orbitPolyline(p, t).map((q) => toDisplay(q, scale))));
-  }, [orbits, orbitYear, scale]);
+    SMALL_BODY_LIST.forEach((b, i) => {
+      const state = bodyState(b.id, t) ?? bodyState(b.id, useProbeStore.getState().t);
+      const polyline = state ? conicPolyline({ r: state.position, v: state.velocity }, muAu(SUN_GM)) : null;
+      setLinePoints(smallOrbits[i]!, (polyline ?? []).map((q) => toDisplay(q, scale)));
+    });
+  }, [orbits, smallOrbits, orbitYear, scale]);
+
+  // Órbitas das luas em torno do planeta (escala do sistema), refeitas quando a lua anda 1/40 da volta.
+  const moonOrbits = useMemo(
+    () => MOON_LIST.map((m) => ({ line: makeLine(m.color, 0.3), builtAt: NaN, builtScale: '' as ScaleMode | '' })),
+    [],
+  );
 
   const trails = useMemo(
     () =>
-      MISSION_LIST.map((m) => ({
-        times: trailTimes(m),
-        line: makeLine(m.color, 0.85),
-        tip: makeLine(m.color, 0.85),
-        // A rota inteira, apagada: dá para ver para onde a sonda vai.
-        future: makeLine(m.color, 0.16),
-      })),
+      CRAFTS.map((c) => {
+        const { times, points } = trailPoints(c.trajectory);
+        return {
+          times,
+          points,
+          /** Pontos como estão na linha (no referencial do corpo em foco, se houver). */
+          local: [] as Vec3[],
+          /** Trecho desenhado no referencial de um corpo: as janelas de encontro com ele (null = nenhum). */
+          range: [0, times.length - 1] as [number, number] | null,
+          line: makeLine(c.color, 0.85),
+          tip: makeLine(c.color, 0.85),
+          // A rota inteira, apagada: dá para ver para onde a sonda vai.
+          future: makeLine(c.color, 0.16),
+        };
+      }),
     [],
   );
+  /** Referencial em que os rastros estão desenhados (refeitos quando ele muda). */
+  const trailFrame = useRef<{ body: BodyId | null; mode: ScaleMode | '' }>({ body: null, mode: '' });
+  const trailGroup = useRef<Group>(null);
+  // A sonda escolhida (e as companheiras dela) em destaque; as demais, só o rastro, mais apagado.
+  const selectedRef = useRef(selected);
   useEffect(() => {
+    selectedRef.current = selected;
     trails.forEach((trail, i) => {
-      const trajectory = MISSION_LIST[i]!.trajectory;
-      const points = trail.times.map((t) => toDisplay(probePosition(trajectory, t)!, scale));
-      setLinePoints(trail.line, points);
-      setLinePoints(trail.future, points);
+      const mine = CRAFTS[i]!.mission === selected;
+      (trail.line.material as LineBasicMaterial).opacity = mine ? 0.9 : 0.4;
+      (trail.tip.material as LineBasicMaterial).opacity = mine ? 0.9 : 0.4;
     });
-  }, [trails, scale]);
+  }, [trails, selected]);
 
   const starPoints = useMemo(() => {
     const n = 2500;
@@ -194,8 +306,8 @@ function SceneContent() {
   const view = useProbeStore((s) => s.view);
   useEffect(() => {
     const { focus, t, scale: mode } = useProbeStore.getState();
-    const distance = view.distance ?? viewDistance(focus, t, mode);
-    if (isPlanet(focus)) camera.position.copy(sunlitDirection(planetPosition(focus, t)));
+    const distance = view.distance !== null ? view.distance * localScale(focusPosition(focus, t), mode) : viewDistance(focus, t, mode);
+    if (isBodyFocus(focus)) camera.position.copy(sunlitDirection(focusPosition(focus, t)));
     else if (camera.position.lengthSq() === 0) camera.position.set(0, -1, 0.55);
     camera.position.setLength(distance);
     controls.current?.update();
@@ -204,7 +316,7 @@ function SceneContent() {
   useFrame(({ size }) => {
     const { t, focus, scale: mode } = useProbeStore.getState();
     const cam = camera as PerspectiveCamera;
-    const origin = toDisplay(focusPosition(focus, t), mode);
+    const origin = focusDisplay(focus, t, mode);
     const worldPerPixel = (2 * Math.tan((cam.fov * Math.PI) / 360)) / size.height;
     const place = (obj: Group, p: Vec3) => obj.position.set(p[0] - origin[0], p[1] - origin[1], p[2] - origin[2]);
     const minRadius = (obj: Group, px: number) => obj.position.distanceTo(cam.position) * worldPerPixel * px;
@@ -215,37 +327,113 @@ function SceneContent() {
       mesh.scale.setScalar(Math.max(bodyRadiusAu('sun') * localScale([0, 0, 0], mode), minRadius(sun.current, MIN_BODY_PX)));
       sunGlow.current?.scale.setScalar(minRadius(sun.current, SUN_GLOW_PX));
     }
+
+    const planetHelio = new Map<string, Vec3>();
     PLANET_LIST.forEach((planet, i) => {
       const group = planetGroups.current[i];
       const mesh = planetMeshes.current[i];
-      if (!group || !mesh) return;
       const helio = planetPosition(planet.id, t);
+      planetHelio.set(planet.id, helio);
+      if (!group || !mesh) return;
       place(group, toDisplay(helio, mode));
       mesh.scale.setScalar(Math.max(bodyRadiusAu(planet.id) * localScale(helio, mode), minRadius(group, MIN_BODY_PX)));
     });
-    MISSION_LIST.forEach((mission, i) => {
-      const group = probeGroups.current[i];
-      const mesh = probeMeshes.current[i];
-      const trail = trails[i]!;
-      const helio = probePosition(mission.trajectory, t);
+
+    MOON_LIST.forEach((moon, i) => {
+      const group = moonGroups.current[i];
+      const mesh = moonMeshes.current[i];
+      const orbit = moonOrbits[i]!;
       if (!group || !mesh) return;
-      group.visible = helio !== null;
-      trail.line.visible = trail.tip.visible = helio !== null;
+      const parent = planetHelio.get(moon.parent!)!;
+      const s = localScale(parent, mode);
+      const helio = bodyPosition(moon.id, t)!;
+      place(group, nearDisplay(helio, parent, mode));
+      const parentDisplay = toDisplay(parent, mode);
+      const parentDistance = Math.hypot(parentDisplay[0] - origin[0] - cam.position.x, parentDisplay[1] - origin[1] - cam.position.y, parentDisplay[2] - origin[2] - cam.position.z);
+      const separationPx = (norm(sub(helio, parent)) * s) / (parentDistance * worldPerPixel);
+      const visible = separationPx > MOON_MIN_SEPARATION_PX || focus === moon.id;
+      group.visible = visible;
+      orbit.line.visible = visible;
+      setDisplay(moonLabels.current[i] ?? null, visible);
+      if (!visible) return;
+      mesh.scale.setScalar(Math.max(bodyRadiusAu(moon.id) * s, minRadius(group, MIN_MOON_PX)));
+      const period = moonPeriodDays(moon.id as MoonId);
+      if (!(Math.abs(t - orbit.builtAt) < period / 40) || orbit.builtScale !== mode) {
+        const points = Array.from({ length: 129 }, (_, k) => {
+          const offset = moonOffset(moon.id as MoonId, t + ((k - 64) / 128) * period).position;
+          return [offset[0] * s, offset[1] * s, offset[2] * s] as Vec3;
+        });
+        setLinePoints(orbit.line, points);
+        orbit.builtAt = t;
+        orbit.builtScale = mode;
+      }
+      orbit.line.position.set(parentDisplay[0] - origin[0], parentDisplay[1] - origin[1], parentDisplay[2] - origin[2]);
+    });
+
+    SMALL_BODY_LIST.forEach((body, i) => {
+      const group = smallGroups.current[i];
+      const mesh = smallMeshes.current[i];
+      const helio = bodyPosition(body.id as SmallBodyId, t);
+      const visible = helio !== null;
+      smallOrbits[i]!.visible = visible;
+      setDisplay(smallLabels.current[i] ?? null, visible);
+      if (!group || !mesh) return;
+      group.visible = visible;
       if (!helio) return;
-      const p = toDisplay(helio, mode);
+      place(group, toDisplay(helio, mode));
+      mesh.scale.setScalar(Math.max(bodyRadiusAu(body.id) * localScale(helio, mode), minRadius(group, MIN_BODY_PX)));
+    });
+
+    // Rastros no referencial do corpo em foco (em escala real): a órbita em torno de Júpiter ou do cometa
+    // aparece como órbita, não como a espiral que ela desenha em torno do Sol.
+    const frame = frameBody(focus, t, mode);
+    if (frame !== trailFrame.current.body || mode !== trailFrame.current.mode) {
+      trails.forEach((trail, i) => {
+        trail.local = trail.points.map((point, k) => {
+          const d = pointDisplay(point, mode);
+          return frame ? sub(d, framePosition(frame, trail.times[k]!)) : d;
+        });
+        trail.range = frame ? windowRange(CRAFTS[i]!.trajectory, trail.times, frame) : [0, trail.times.length - 1];
+        setLinePoints(trail.line, trail.local);
+        setLinePoints(trail.future, trail.local);
+        if (trail.range) trail.future.geometry.setDrawRange(trail.range[0], trail.range[1] - trail.range[0] + 1);
+      });
+      trailFrame.current = { body: frame, mode };
+    }
+    const frameNow: Vec3 = frame ? framePosition(frame, t) : [0, 0, 0];
+    trailGroup.current?.position.set(frameNow[0] - origin[0], frameNow[1] - origin[1], frameNow[2] - origin[2]);
+
+    CRAFTS.forEach((c, i) => {
+      const group = craftGroups.current[i];
+      const mesh = craftMeshes.current[i];
+      const trail = trails[i]!;
+      const point = craftPoint(c.trajectory, t);
+      const visible = point !== null;
+      setDisplay(craftLabels.current[i] ?? null, visible);
+      const range = trail.range;
+      const last = lastIndexAtOrBefore(trail.times, t);
+      const drawn = range ? Math.min(last, range[1]) - range[0] + 1 : 0;
+      trail.line.visible = visible && drawn > 0;
+      trail.tip.visible = visible && range !== null && last >= range[0] && last < range[1];
+      trail.future.visible = c.mission === selectedRef.current && range !== null;
+      if (!group || !mesh) return;
+      group.visible = visible;
+      if (!point) return;
+      const p = pointDisplay(point, mode);
       place(group, p);
       mesh.scale.setScalar(minRadius(group, MIN_PROBE_PX));
-      const last = lastIndexAtOrBefore(trail.times, t);
-      trail.line.geometry.setDrawRange(0, last + 1);
-      const from = toDisplay(probePosition(mission.trajectory, trail.times[Math.max(last, 0)]!)!, mode);
-      setSegment(trail.tip, from, p);
+      if (range && drawn > 0) trail.line.geometry.setDrawRange(range[0], drawn);
+      setSegment(trail.tip, trail.local[Math.max(last, 0)]!, sub(p, frameNow));
     });
+
     lines.current?.position.set(-origin[0], -origin[1], -origin[2]);
+    // Bem perto de um corpo, as órbitas heliocêntricas viram só segmentos de polígono cruzando a tela.
+    if (lines.current) lines.current.visible = mode === 'log' || cam.position.length() > ORBIT_LINES_MIN_AU;
     stars.current?.position.copy(cam.position);
 
     // Planos de recorte proporcionais à distância (com depth buffer logarítmico).
     const d = cam.position.length();
-    const near = Math.max(d * 1e-4, 1e-9);
+    const near = Math.max(d * 1e-4, 1e-11);
     if (Math.abs(cam.near - near) > near * 0.1) {
       cam.near = near;
       cam.far = Math.max(d * 1e4, STAR_SPHERE * 2);
@@ -276,21 +464,47 @@ function SceneContent() {
           <Label id={planet.id} name={planet.name} color={planet.color} />
         </group>
       ))}
-      {MISSION_LIST.map((mission, i) => (
-        <group key={mission.id} ref={(g) => void (probeGroups.current[i] = g)}>
-          <mesh ref={(m) => void (probeMeshes.current[i] = m)}>
-            <octahedronGeometry args={[1, 0]} />
-            <meshBasicMaterial color={mission.color} />
+      {MOON_LIST.map((moon, i) => (
+        <group key={moon.id} ref={(g) => void (moonGroups.current[i] = g)}>
+          <mesh ref={(m) => void (moonMeshes.current[i] = m)}>
+            <sphereGeometry args={[1, 24, 12]} />
+            <meshStandardMaterial color={moon.color} roughness={0.9} />
           </mesh>
-          <ProbeLabel mission={mission} />
+          <Label ref={(el) => void (moonLabels.current[i] = el)} id={moon.id} name={moon.name} color={moon.color} />
         </group>
+      ))}
+      {SMALL_BODY_LIST.map((body, i) => (
+        <group key={body.id} ref={(g) => void (smallGroups.current[i] = g)}>
+          <mesh ref={(m) => void (smallMeshes.current[i] = m)}>
+            <icosahedronGeometry args={[1, 1]} />
+            <meshStandardMaterial color={body.color} roughness={1} flatShading />
+          </mesh>
+          <Label ref={(el) => void (smallLabels.current[i] = el)} id={body.id} name={BODIES[body.id].name} color={body.color} />
+        </group>
+      ))}
+      {CRAFTS.map((c, i) => (
+        <group key={c.id} ref={(g) => void (craftGroups.current[i] = g)}>
+          <mesh ref={(m) => void (craftMeshes.current[i] = m)}>
+            <octahedronGeometry args={[1, 0]} />
+            <meshBasicMaterial color={c.color} />
+          </mesh>
+          <Label ref={(el) => void (craftLabels.current[i] = el)} id={c.id} name={c.name} color={c.color} />
+        </group>
+      ))}
+      {moonOrbits.map((orbit, i) => (
+        <primitive key={MOON_LIST[i]!.id} object={orbit.line} />
       ))}
       <group ref={lines}>
         {orbits.map((line, i) => (
           <primitive key={PLANET_LIST[i]!.id} object={line} />
         ))}
+        {smallOrbits.map((line, i) => (
+          <primitive key={SMALL_BODY_LIST[i]!.id} object={line} />
+        ))}
+      </group>
+      <group ref={trailGroup}>
         {trails.map((trail, i) => (
-          <group key={MISSION_LIST[i]!.id}>
+          <group key={CRAFTS[i]!.id}>
             <primitive object={trail.future} />
             <primitive object={trail.line} />
             <primitive object={trail.tip} />
@@ -308,7 +522,7 @@ function SceneContent() {
         dampingFactor={0.08}
         rotateSpeed={0.6}
         zoomSpeed={1.15}
-        minDistance={1e-7}
+        minDistance={1e-9}
         maxDistance={600}
       />
     </>
