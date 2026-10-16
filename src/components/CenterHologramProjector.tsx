@@ -3,6 +3,7 @@ import { blackbodyCssColor, planckSpectralRadiance } from '../physics/blackbody'
 import { WIEN_NM_K, type EyeTimeline } from '../physics/EyeAndPhotometry';
 import { AU_M } from '../physics/sky';
 import { useFlightStore } from '../store/useFlightStore';
+import { useCockpitUi, useIsWideCockpit } from '../ui/cockpitUi';
 import { useExplainSettings } from '../ui/explainSettings';
 import { formatFixed, formatSpaceNumber, formatSpan } from '../ui/format';
 import { hologramCountdownS, selectHologramMode, type HologramMode } from '../ui/hologramMode';
@@ -325,6 +326,9 @@ export function CenterHologramProjector() {
   const p = useFlightStore((s) => s.photometry);
   // O painel de efeitos traz o mesmo conteúdo, com as fórmulas, e precisa da altura.
   const effectsPanelOpen = useExplainSettings((s) => s.panelOpen);
+  // No celular, o telescópio aberto ocupa o espaço do holograma.
+  const wide = useIsWideCockpit();
+  const telescopeOpen = useCockpitUi((s) => s.telescopeOpen);
 
   const sunDistanceAu = (AU_M + flight.positionM) / AU_M;
   const hologram: HologramMode = selectHologramMode({
@@ -336,7 +340,7 @@ export function CenterHologramProjector() {
     cmbPeakNm: p.cmbWienPeakNm,
     eyeDimmer: p.dimmerFactor,
   });
-  if (hologram === 'none' || effectsPanelOpen) return null;
+  if (hologram === 'none' || effectsPanelOpen || (telescopeOpen && !wide)) return null;
 
   let content: ReactNode;
   switch (hologram) {

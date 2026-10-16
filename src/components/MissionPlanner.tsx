@@ -317,7 +317,7 @@ function Planner() {
       aria-label="Planejamento da missão"
       className="absolute inset-0 z-40 flex flex-col overflow-y-auto overscroll-contain bg-black/80 backdrop-blur-md select-text"
     >
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-28 sm:px-6 lg:pb-6">
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-4 sm:px-6 lg:pb-6">
         <header className="flex items-start justify-between gap-3">
           <div>
             <div className="font-display text-[10px] tracking-[0.4em] text-cyan-300/70 uppercase">Viagem interestelar</div>
@@ -438,8 +438,9 @@ function Planner() {
           </Section>
         </div>
       </div>
-      {/* No celular, o resumo e o embarque ficam sempre à mão no rodapé. */}
-      <div className="fixed inset-x-0 bottom-0 z-10 flex items-center justify-between gap-3 border-t border-cyan-400/30 bg-neutral-950/95 px-4 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] lg:hidden">
+      {/* No celular, o resumo e o embarque ficam sempre à mão no rodapé. `sticky`, não
+          `fixed`: o backdrop-blur do diálogo faria o `fixed` rolar junto com a lista. */}
+      <div className="sticky bottom-0 z-10 mt-auto flex shrink-0 items-center justify-between gap-3 border-t border-cyan-400/30 bg-neutral-950/95 px-4 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] lg:hidden">
         <div className="min-w-0 text-[11px] leading-tight text-slate-300">
           <div className="truncate font-semibold text-slate-50">
             {draft.destination.shortName} · {formatAccelG(draft.accelG)} ·{' '}
