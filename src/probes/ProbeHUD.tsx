@@ -3,7 +3,7 @@ import { formatProse as num, formatSpan } from '../ui/format';
 import { BODIES, bodyState } from './bodies';
 import { distanceText } from './eventExplanations';
 import { MISSIONS, MISSION_LIST, ofBody, type ProbeMission } from './missions';
-import { AU_KM, DAY_S, currentEncounter, lightTimeS, probeState, solarEscapeKms, speedKms } from './probes';
+import { AU_KM, DAY_S, currentEncounter, lightTimeS, probeState, relativeState, solarEscapeKms, speedKms } from './probes';
 import { daysToMs, formatDate, msToDays } from './time';
 import { useProbeStore } from './useProbeStore';
 import { dot, norm, sub } from './vec3';
@@ -34,7 +34,12 @@ const Badge = ({ className, children }: { className: string; children: string })
   <span className={`rounded-sm px-1.5 ${className}`}>{children}</span>
 );
 
-/** Botão com a sonda escolhida e a lista das 12, em ordem de lançamento. */
+const GROUPS = [
+  { id: 'probe', label: 'Sondas' },
+  { id: 'apollo', label: 'Apollo · missões tripuladas à Lua' },
+] as const;
+
+/** Botão com a missão escolhida e a lista: as sondas em ordem de lançamento e as Apollo. */
 function ProbePicker({ open, setOpen }: { open: boolean; setOpen: (open: boolean) => void }) {
   const selected = useProbeStore((s) => s.selected);
   const setSelected = useProbeStore((s) => s.setSelected);
@@ -75,32 +80,93 @@ function ProbePicker({ open, setOpen }: { open: boolean; setOpen: (open: boolean
       {open && (
         <ul
           role="listbox"
-          aria-label="Sondas"
+          aria-label="Missões"
           className="absolute top-full right-0 left-0 z-20 mt-1 max-h-[60vh] overflow-y-auto rounded-md border border-cyan-400/30 bg-slate-950/95 py-1 shadow-2xl"
         >
-          {MISSION_LIST.map((m) => (
-            <li key={m.id} role="option" aria-selected={m.id === selected}>
-              <button
-                type="button"
-                className={`flex w-full items-start gap-2 px-2 py-1 text-left hover:bg-slate-800 ${m.id === selected ? 'bg-slate-800/80' : ''}`}
-                onClick={() => {
-                  setSelected(m.id);
-                  setOpen(false);
-                }}
-              >
-                <span className="mt-1 h-2 w-2 shrink-0 rounded-full" style={{ background: m.color }} />
-                <span className="min-w-0">
-                  <span className="block text-[12px] text-slate-100">
-                    {m.name} <span className="text-slate-500">· {missionYears(m)}</span>
+          {GROUPS.flatMap((g) => [
+            <li key={g.id} role="presentation" className="px-2 pt-1.5 pb-0.5 text-[9px] tracking-widest text-cyan-300/70 uppercase">
+              {g.label}
+            </li>,
+            ...MISSION_LIST.filter((m) => m.group === g.id).map((m) => (
+              <li key={m.id} role="option" aria-selected={m.id === selected}>
+                <button
+                  type="button"
+                  className={`flex w-full items-start gap-2 px-2 py-1 text-left hover:bg-slate-800 ${m.id === selected ? 'bg-slate-800/80' : ''}`}
+                  onClick={() => {
+                    setSelected(m.id);
+                    setOpen(false);
+                  }}
+                >
+                  <span className="mt-1 h-2 w-2 shrink-0 rounded-full" style={{ background: m.color }} />
+                  <span className="min-w-0">
+                    <span className="block text-[12px] text-slate-100">
+                      {m.name} <span className="text-slate-500">· {missionYears(m)}</span>
+                    </span>
+                    <span className="block text-[10px] leading-snug text-slate-400">{m.tagline}</span>
                   </span>
-                  <span className="block text-[10px] leading-snug text-slate-400">{m.tagline}</span>
-                </span>
-              </button>
-            </li>
-          ))}
+                </button>
+              </li>
+            )),
+          ])}
         </ul>
       )}
     </div>
+  );
+}
+
+/** "11 km/s", "850 m/s", "0 m/s". */
+const speedText = (kms: number) => (kms < 1 ? `${num(Math.round(kms * 1000))} m/s` : `${num(kms)} km/s`);
+
+/** Fase do voo de uma Apollo, pelos eventos: órbita da Terra, ida, órbita da Lua, volta. */
+function apolloPhase(mission: ProbeMission, t: number): string {
+  const at = (kind: string) => mission.events.find((e) => e.kind === kind)?.t;
+  const tli = at('tli')!;
+  const loi = at('loi');
+  const tei = at('tei');
+  const entry = at('entry')!;
+  if (t < tli) return 'Em órbita da Terra';
+  if (t >= entry) return 'Reentrada';
+  if (loi !== undefined && tei !== undefined && t >= loi && t < tei) return 'Em órbita da Lua';
+  if (tei !== undefined ? t >= tei : t >= mission.events.find((e) => e.id.endsWith('pericynthion'))!.t) return 'Rumo à Terra';
+  return 'Rumo à Lua';
+}
+
+/** Painel de uma Apollo: distâncias à Terra e à Lua, velocidade em relação à Terra e o módulo lunar. */
+function ApolloReadouts({ mission, t }: { mission: ProbeMission; t: number }) {
+  const earth = relativeState(mission.trajectory, 'earth', t);
+  const moon = relativeState(mission.trajectory, 'moon', t);
+  const km = (s: typeof earth) => (s ? norm(s.position) * AU_KM : NaN);
+  const lm = mission.companions[0];
+  const lmOnSurface = lm ? currentEncounter(lm.trajectory, t)?.kind === 'surface' : false;
+  const lmFlying = lm ? probeState(lm.trajectory, t) !== null && !lmOnSurface : false;
+  const toEarth = km(earth);
+  return (
+    <>
+      <div className="mb-1 flex flex-wrap gap-1 text-[9px] tracking-widest uppercase">
+        <Badge className="bg-sky-400/90 text-black">{apolloPhase(mission, t)}</Badge>
+        {lmOnSurface && <Badge className="bg-orange-400/90 text-black">{`${lm!.name} na superfície`}</Badge>}
+        {lmFlying && <Badge className="bg-amber-300/90 text-black">{`${lm!.name} separado`}</Badge>}
+        <Badge className="bg-slate-600 text-slate-100">Rota reconstruída</Badge>
+      </div>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+        <Readout
+          label="Distância da Terra"
+          value={distanceText(Math.max(0, toEarth - BODIES.earth.radiusKm))}
+          detail={`do centro: ${distanceText(toEarth)}`}
+        />
+        <Readout
+          label="Distância da Lua"
+          value={distanceText(Math.max(0, km(moon) - BODIES.moon.radiusKm))}
+          detail={`sinal à Terra: ${formatSpan(lightTimeS(toEarth / AU_KM))}`}
+        />
+        <Readout
+          label="Velocidade (Terra)"
+          value={earth ? speedText(speedKms(earth.velocity)) : '—'}
+          detail={moon ? `em relação à Lua: ${speedText(speedKms(moon.velocity))}` : undefined}
+        />
+        <Readout label="Missão há" value={formatSpan((t - mission.launchT) * DAY_S)} />
+      </div>
+    </>
   );
 }
 
@@ -120,19 +186,26 @@ export function ProbeHUD({ className = '' }: { className?: string }) {
 
   let body;
   if (t < trajectory.launch) {
-    body = <Readout label="Lançamento em" value={formatSpan((trajectory.launch - t) * DAY_S)} detail={formatDate(trajectory.launch)} />;
+    body =
+      t < mission.launchT ? (
+        <Readout label="Lançamento em" value={formatSpan((mission.launchT - t) * DAY_S)} detail={formatDate(mission.launchT)} />
+      ) : (
+        <Readout label="Subindo para a órbita" value={`há ${formatSpan((t - mission.launchT) * DAY_S)}`} detail={formatDate(mission.launchT)} />
+      );
   } else if (!state) {
-    const finale = [...mission.events].reverse().find((e) => e.kind === 'end' || e.kind === 'landing');
+    const finale = [...mission.events].reverse().find((e) => e.kind === 'end' || e.kind === 'landing' || e.kind === 'splashdown');
     body = mission.endsAtTrajectoryEnd ? (
       <Readout
         label="Missão encerrada"
         value={`${formatDate(trajectory.end)}${finale ? ` · ${finale.title}` : ''}`}
-        detail={`Duração: ${formatSpan((trajectory.end - trajectory.launch) * DAY_S)}`}
+        detail={`Duração: ${formatSpan((trajectory.end - mission.launchT) * DAY_S)}`}
         wide
       />
     ) : (
       <Readout label="Fim dos dados do JPL" value={formatDate(trajectory.end)} detail="A trajetória publicada termina aqui." wide />
     );
+  } else if (mission.group === 'apollo') {
+    body = <ApolloReadouts mission={mission} t={t} />;
   } else {
     const r = norm(state.position);
     const toEarth = norm(sub(state.position, bodyState('earth', t)!.position));
@@ -146,7 +219,7 @@ export function ProbeHUD({ className = '' }: { className?: string }) {
     const relKms = rel ? speedKms(rel.v) : 0;
     const bound = near && rel ? (relKms * relKms) / 2 - BODIES[near].gm / relKm < 0 && encounter!.kind === 'orbit' : false;
     const silent = mission.lastContact !== undefined && t > mission.lastContact;
-    const landed = mission.reconstruction && t >= mission.reconstruction.landingT;
+    const landed = mission.landing !== undefined && t >= mission.landing.t;
     const approaching = rel ? dot(rel.r, rel.v) < 0 : false;
     body = (
       <>
@@ -154,8 +227,8 @@ export function ProbeHUD({ className = '' }: { className?: string }) {
           {speed > escape && !near && <Badge className="bg-emerald-500/85 text-black">Escapando do Sistema Solar</Badge>}
           {crossedHeliopause && <Badge className="bg-violet-400/90 text-black">Espaço interestelar</Badge>}
           {bound && near && !landed && <Badge className="bg-sky-400/90 text-black">{`Em órbita ${ofBody(near)}`}</Badge>}
-          {landed && <Badge className="bg-orange-400/90 text-black">No solo de Vênus</Badge>}
-          {mission.reconstruction && <Badge className="bg-slate-600 text-slate-100">Rota reconstruída</Badge>}
+          {landed && <Badge className="bg-orange-400/90 text-black">{`No solo ${ofBody(mission.landing!.body)}`}</Badge>}
+          {mission.reconstructed && <Badge className="bg-slate-600 text-slate-100">Rota reconstruída</Badge>}
           {silent && <Badge className="bg-slate-600 text-slate-100">{`Sem contato desde ${year(mission.lastContact!)}`}</Badge>}
           {t > today && <Badge className="bg-slate-700 text-slate-300">Previsão</Badge>}
         </div>
@@ -164,7 +237,7 @@ export function ProbeHUD({ className = '' }: { className?: string }) {
             <Readout
               label={`Distância ${ofBody(near)}`}
               value={landed ? 'no solo' : distanceText(relKm)}
-              detail={landed ? undefined : `${relKms < 1 ? `${num(relKms * 1000)} m/s` : `${num(relKms)} km/s`} · ${approaching ? 'aproximando' : 'afastando'}`}
+              detail={landed ? undefined : `${speedText(relKms)} · ${approaching ? 'aproximando' : 'afastando'}`}
               wide
             />
           )}

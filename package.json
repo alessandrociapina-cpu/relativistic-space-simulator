@@ -10,7 +10,8 @@
     "typecheck": "tsc -b",
     "test": "vitest run",
     "test:watch": "vitest",
-    "fetch:horizons": "node scripts/fetch-horizons.mjs"
+    "fetch:horizons": "node scripts/fetch-horizons.mjs",
+    "reconstruct": "node scripts/reconstruct.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^9.122.0",

@@ -8,6 +8,7 @@ import {
   Float32BufferAttribute,
   Line,
   LineBasicMaterial,
+  LineSegments,
   Points,
   PointsMaterial,
   Vector3,
@@ -33,10 +34,12 @@ import { muAu } from './ephemeris';
 import { conicPolyline } from './kepler';
 import { COMPANIONS, MISSION_LIST, type CraftId, type ProbeId } from './missions';
 import { PLANET_LIST, SUN_GM, orbitPolyline, planetPosition } from './planets';
-import { currentEncounter, probeState, type ProbeTrajectory } from './probes';
+import type { ProbeTrajectory } from './probes';
 import {
   bodyRadiusAu,
   craftPoint,
+  localPeriodDays,
+  trailPoints,
   focusDisplay,
   focusPosition,
   frameBody,
@@ -53,7 +56,7 @@ import {
   type TrailPoint,
 } from './sceneMath';
 import { useProbeStore } from './useProbeStore';
-import { cross, norm, sub, type Vec3 } from './vec3';
+import { norm, sub, type Vec3 } from './vec3';
 
 /** Tamanho mínimo na tela: planetas e sondas nunca somem, mesmo a 100 UA. */
 const MIN_BODY_PX = 3;
@@ -65,13 +68,49 @@ const MOON_MIN_SEPARATION_PX = 10;
 const STAR_SPHERE = 20_000;
 /** Em escala real, as órbitas dos planetas e dos corpos pequenos somem com a câmera mais perto que isto (UA). */
 const ORBIT_LINES_MIN_AU = 0.005;
-/** Passo angular dos rastros em torno do corpo central do momento. */
-const TRAIL_STEP_RAD = (3 * Math.PI) / 180;
+/** Pontos da volta recente desenhada a cada frame. */
+const RECENT_POINTS = 96;
 
 /** Linha simples (o JSX `<line>` colide com o do SVG; aqui é o objeto do three). */
 function makeLine(color: string, opacity: number): Line {
   const material = new LineBasicMaterial({ color, transparent: true, opacity, depthWrite: false });
   return new Line(new BufferGeometry(), material);
+}
+
+/** Segmentos soltos (pares de pontos): o rastro pode ter lacunas. */
+function makeSegments(color: string, opacity: number): LineSegments {
+  const material = new LineBasicMaterial({ color, transparent: true, opacity, depthWrite: false });
+  return new LineSegments(new BufferGeometry(), material);
+}
+
+/** Pontos do rastro como pares (k − 1, k), pulando as lacunas; `ends[k]` conta os segmentos que terminam até k. */
+function setTrailSegments(line: LineSegments, points: readonly Vec3[], gaps: readonly boolean[]): number[] {
+  const flat: number[] = [];
+  const ends: number[] = [0];
+  for (let k = 1; k < points.length; k++) {
+    if (!gaps[k]) {
+      const a = points[k - 1]!;
+      const b = points[k]!;
+      flat.push(a[0], a[1], a[2], b[0], b[1], b[2]);
+    }
+    ends.push(flat.length / 6);
+  }
+  line.geometry.setAttribute('position', new Float32BufferAttribute(flat, 3));
+  line.geometry.computeBoundingSphere();
+  return ends;
+}
+
+/** Polilinha de até `max` pontos, reaproveitando o buffer (atualizada a cada frame). */
+function setPolyline(line: Line, points: readonly Vec3[], max: number) {
+  let attr = line.geometry.getAttribute('position') as Float32BufferAttribute | undefined;
+  if (!attr || attr.count !== max) {
+    attr = new Float32BufferAttribute(new Float32Array(max * 3), 3);
+    line.geometry.setAttribute('position', attr);
+  }
+  points.forEach((p, i) => attr.setXYZ(i, p[0], p[1], p[2]));
+  attr.needsUpdate = true;
+  line.geometry.setDrawRange(0, points.length);
+  line.frustumCulled = false;
 }
 
 function setLinePoints(line: Line, points: readonly Vec3[]) {
@@ -89,6 +128,7 @@ function setSegment(line: Line, a: Vec3, b: Vec3) {
   attr.setXYZ(0, a[0], a[1], a[2]);
   attr.setXYZ(1, b[0], b[1], b[2]);
   attr.needsUpdate = true;
+  line.geometry.setDrawRange(0, 2);
   line.frustumCulled = false;
 }
 
@@ -104,33 +144,6 @@ function glowTexture(): CanvasTexture {
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, 64, 64);
   return new CanvasTexture(canvas);
-}
-
-/**
- * Pontos do rastro: o passo segue o giro da sonda em torno do corpo central
- * do momento (o Sol, ou o planeta/lua/cometa da janela), ~3° por ponto. Assim
- * um periélio da Parker ou uma passagem rente a Júpiter saem lisos sem
- * encher de pontos os anos de cruzeiro.
- */
-function trailPoints(trajectory: ProbeTrajectory): { times: number[]; points: TrailPoint[] } {
-  const times: number[] = [];
-  const points: TrailPoint[] = [];
-  for (let t = trajectory.launch; ; ) {
-    const point = craftPoint(trajectory, t);
-    const state = probeState(trajectory, t);
-    if (point && state) {
-      times.push(t);
-      points.push(point);
-    }
-    if (t >= trajectory.end || !state) break;
-    const e = currentEncounter(trajectory, t);
-    const center = e ? bodyState(e.body, t) : null;
-    const r = center ? sub(state.position, center.position) : state.position;
-    const v = center ? sub(state.velocity, center.velocity) : state.velocity;
-    const omega = norm(cross(r, v)) / Math.max(norm(r) ** 2, 1e-30);
-    t = Math.min(t + Math.min(Math.max(TRAIL_STEP_RAD / omega, 1 / 1440), 30), trajectory.end);
-  }
-  return { times, points };
 }
 
 /**
@@ -252,28 +265,49 @@ function SceneContent() {
     [],
   );
 
+  // Os pontos dos rastros são calculados aos poucos, um por vez, depois da primeira imagem
+  // (a missão escolhida primeiro): calcular todos de uma vez travaria a abertura por segundos.
   const trails = useMemo(
     () =>
       CRAFTS.map((c) => {
-        const { times, points } = trailPoints(c.trajectory);
         return {
-          times,
-          points,
+          times: [] as number[],
+          points: [] as TrailPoint[],
+          gaps: [] as boolean[],
+          /** Referencial e escala em que `local` foi montado (null: refazer). */
+          builtFor: null as { body: BodyId | null; mode: ScaleMode } | null,
           /** Pontos como estão na linha (no referencial do corpo em foco, se houver). */
           local: [] as Vec3[],
+          /** Segmentos que terminam até cada ponto (para o trecho desenhado). */
+          ends: [] as number[],
           /** Trecho desenhado no referencial de um corpo: as janelas de encontro com ele (null = nenhum). */
-          range: [0, times.length - 1] as [number, number] | null,
-          line: makeLine(c.color, 0.85),
+          range: null as [number, number] | null,
+          line: makeSegments(c.color, 0.85),
           tip: makeLine(c.color, 0.85),
           // A rota inteira, apagada: dá para ver para onde a sonda vai.
-          future: makeLine(c.color, 0.16),
+          future: makeSegments(c.color, 0.16),
         };
       }),
     [],
   );
-  /** Referencial em que os rastros estão desenhados (refeitos quando ele muda). */
-  const trailFrame = useRef<{ body: BodyId | null; mode: ScaleMode | '' }>({ body: null, mode: '' });
   const trailGroup = useRef<Group>(null);
+  useEffect(() => {
+    const first = useProbeStore.getState().selected;
+    const order = CRAFTS.map((c, i) => ({ c, i })).sort((a, b) => Number(b.c.mission === first) - Number(a.c.mission === first));
+    let cancelled = false;
+    let next = 0;
+    const work = () => {
+      if (cancelled || next >= order.length) return;
+      const { c, i } = order[next++]!;
+      Object.assign(trails[i]!, trailPoints(c.trajectory), { builtFor: null });
+      setTimeout(work, 0);
+    };
+    const id = setTimeout(work, 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(id);
+    };
+  }, [trails]);
   // A sonda escolhida (e as companheiras dela) em destaque; as demais, só o rastro, mais apagado.
   const selectedRef = useRef(selected);
   useEffect(() => {
@@ -387,19 +421,21 @@ function SceneContent() {
     // Rastros no referencial do corpo em foco (em escala real): a órbita em torno de Júpiter ou do cometa
     // aparece como órbita, não como a espiral que ela desenha em torno do Sol.
     const frame = frameBody(focus, t, mode);
-    if (frame !== trailFrame.current.body || mode !== trailFrame.current.mode) {
-      trails.forEach((trail, i) => {
-        trail.local = trail.points.map((point, k) => {
-          const d = pointDisplay(point, mode);
-          return frame ? sub(d, framePosition(frame, trail.times[k]!)) : d;
-        });
-        trail.range = frame ? windowRange(CRAFTS[i]!.trajectory, trail.times, frame) : [0, trail.times.length - 1];
-        setLinePoints(trail.line, trail.local);
-        setLinePoints(trail.future, trail.local);
-        if (trail.range) trail.future.geometry.setDrawRange(trail.range[0], trail.range[1] - trail.range[0] + 1);
+    trails.forEach((trail, i) => {
+      if (trail.times.length === 0 || (trail.builtFor && trail.builtFor.body === frame && trail.builtFor.mode === mode)) return;
+      trail.local = trail.points.map((point, k) => {
+        const d = pointDisplay(point, mode);
+        return frame ? sub(d, framePosition(frame, trail.times[k]!)) : d;
       });
-      trailFrame.current = { body: frame, mode };
-    }
+      trail.range = frame ? windowRange(CRAFTS[i]!.trajectory, trail.times, frame) : [0, trail.times.length - 1];
+      trail.ends = setTrailSegments(trail.line, trail.local, trail.gaps);
+      setTrailSegments(trail.future, trail.local, trail.gaps);
+      if (trail.range) {
+        const first = trail.ends[trail.range[0]]!;
+        trail.future.geometry.setDrawRange(2 * first, 2 * (trail.ends[trail.range[1]]! - first));
+      }
+      trail.builtFor = { body: frame, mode };
+    });
     const frameNow: Vec3 = frame ? framePosition(frame, t) : [0, 0, 0];
     trailGroup.current?.position.set(frameNow[0] - origin[0], frameNow[1] - origin[1], frameNow[2] - origin[2]);
 
@@ -412,7 +448,8 @@ function SceneContent() {
       setDisplay(craftLabels.current[i] ?? null, visible);
       const range = trail.range;
       const last = lastIndexAtOrBefore(trail.times, t);
-      const drawn = range ? Math.min(last, range[1]) - range[0] + 1 : 0;
+      const first = range ? trail.ends[range[0]]! : 0;
+      const drawn = range && last >= range[0] ? trail.ends[Math.min(last, range[1])]! - first : 0;
       trail.line.visible = visible && drawn > 0;
       trail.tip.visible = visible && range !== null && last >= range[0] && last < range[1];
       trail.future.visible = c.mission === selectedRef.current && range !== null;
@@ -422,8 +459,21 @@ function SceneContent() {
       const p = pointDisplay(point, mode);
       place(group, p);
       mesh.scale.setScalar(minRadius(group, MIN_PROBE_PX));
-      if (range && drawn > 0) trail.line.geometry.setDrawRange(range[0], drawn);
-      setSegment(trail.tip, trail.local[Math.max(last, 0)]!, sub(p, frameNow));
+      if (range && drawn > 0) trail.line.geometry.setDrawRange(2 * first, 2 * drawn);
+      if (!trail.tip.visible) return;
+      if (trail.gaps[last + 1]) {
+        // Numa lacuna do rastro (órbita rápida): desenha agora a última volta, ponto a ponto.
+        const period = Math.min(localPeriodDays(c.trajectory, t) ?? 0, t - trail.times[last]!);
+        const recent: Vec3[] = [];
+        for (let k = 0; k < RECENT_POINTS; k++) {
+          const tk = t - period + (period * k) / (RECENT_POINTS - 1);
+          const q = craftPoint(c.trajectory, tk);
+          if (q) recent.push(frame ? sub(pointDisplay(q, mode), framePosition(frame, tk)) : pointDisplay(q, mode));
+        }
+        setPolyline(trail.tip, recent, RECENT_POINTS);
+      } else {
+        setSegment(trail.tip, trail.local[Math.max(last, 0)]!, sub(p, frameNow));
+      }
     });
 
     lines.current?.position.set(-origin[0], -origin[1], -origin[2]);
@@ -458,7 +508,7 @@ function SceneContent() {
       {PLANET_LIST.map((planet, i) => (
         <group key={planet.id} ref={(g) => void (planetGroups.current[i] = g)}>
           <mesh ref={(m) => void (planetMeshes.current[i] = m)}>
-            <sphereGeometry args={[1, 32, 16]} />
+            <sphereGeometry args={[1, 64, 32]} />
             <meshStandardMaterial color={planet.color} roughness={0.85} />
           </mesh>
           <Label id={planet.id} name={planet.name} color={planet.color} />
@@ -467,7 +517,7 @@ function SceneContent() {
       {MOON_LIST.map((moon, i) => (
         <group key={moon.id} ref={(g) => void (moonGroups.current[i] = g)}>
           <mesh ref={(m) => void (moonMeshes.current[i] = m)}>
-            <sphereGeometry args={[1, 24, 12]} />
+            <sphereGeometry args={[1, 64, 32]} />
             <meshStandardMaterial color={moon.color} roughness={0.9} />
           </mesh>
           <Label ref={(el) => void (moonLabels.current[i] = el)} id={moon.id} name={moon.name} color={moon.color} />

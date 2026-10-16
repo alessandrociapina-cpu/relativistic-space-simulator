@@ -4,9 +4,10 @@
  * eclíptica J2000).
  *
  * - Luas: série de Fourier ajustada pelo script aos vetores do JPL Horizons de
- *   1970 a 2036, relativa ao centro do planeta (erro máximo de 3 a 130 km). Nos
+ *   1968 a 2036, relativa ao centro do planeta (erro máximo de 3 a 140 km). Nos
  *   sobrevoos de luas, a sonda é desenhada relativa à lua desenhada.
- * - Corpos pequenos (cometa 67P, Arrokoth e os asteroides visitados): tabelas
+ * - Corpos pequenos (cometa 67P, Arrokoth e os asteroides visitados, Vesta e
+ *   Ceres entre eles): tabelas
  *   do Horizons nos anos das missões; fora delas, o corpo não aparece.
  */
 import moonData from './data/moons.json';
@@ -18,7 +19,7 @@ import { add, scale, type Vec3 } from './vec3';
 const AU_KM = 149_597_870.7;
 
 export type MoonId = 'moon' | 'io' | 'europa' | 'ganymede' | 'callisto' | 'enceladus' | 'titan' | 'triton' | 'charon';
-export type SmallBodyId = 'comet67p' | 'arrokoth' | 'steins' | 'lutetia' | 'gaspra' | 'ida';
+export type SmallBodyId = 'comet67p' | 'arrokoth' | 'steins' | 'lutetia' | 'gaspra' | 'ida' | 'vesta' | 'ceres';
 export type BodyId = PlanetId | MoonId | SmallBodyId;
 
 export interface Body {
@@ -60,6 +61,8 @@ const SMALL_BODIES: Readonly<Record<SmallBodyId, Omit<Body, 'id'>>> = {
   lutetia: { name: 'Lutécia', color: '#a8a29e', radiusKm: 49, gm: 0, kind: 'asteroid' },
   gaspra: { name: 'Gaspra', color: '#d6d3d1', radiusKm: 6.1, gm: 0, kind: 'asteroid' },
   ida: { name: 'Ida', color: '#d6d3d1', radiusKm: 15.7, gm: 0, kind: 'asteroid' },
+  vesta: { name: 'Vesta', color: '#c8c0b2', radiusKm: 262.7, gm: 17.288, kind: 'asteroid' },
+  ceres: { name: 'Ceres', color: '#9a948c', radiusKm: 469.7, gm: 62.6284, kind: 'asteroid' },
 };
 
 const planetBody = ({ id, name, color, radiusKm, gm }: (typeof PLANETS)[PlanetId]): Body => ({ id, name, color, radiusKm, gm, kind: 'planet' });

@@ -8,8 +8,8 @@ import { DAYS_PER_YEAR, isoToDays } from './time';
 
 export type { FocusId, ScaleMode } from './sceneMath';
 
-/** Datas cobertas pelo simulador: da Venera 7 (1970) ao fim das tabelas do JPL (2036). */
-export const PROBE_TIME_RANGE = { start: isoToDays('1970-08-01'), end: isoToDays('2035-12-31') } as const;
+/** Datas cobertas pelo simulador: da Apollo 8 (dezembro de 1968) ao fim das tabelas do JPL (2036). */
+export const PROBE_TIME_RANGE = { start: isoToDays('1968-12-01'), end: isoToDays('2035-12-31') } as const;
 /** Abre pouco antes do lançamento da Voyager 2. */
 const INITIAL_T = isoToDays('1977-08-10');
 
@@ -20,6 +20,8 @@ export interface ProbeRate {
 }
 
 export const PROBE_RATES: readonly ProbeRate[] = [
+  { value: 1 / 1440, label: '1 min/s' },
+  { value: 1 / 144, label: '10 min/s' },
   { value: 1 / 24, label: '1 h/s' },
   { value: 0.25, label: '6 h/s' },
   { value: 1, label: '1 dia/s' },
@@ -30,6 +32,8 @@ export const PROBE_RATES: readonly ProbeRate[] = [
 
 /** Perto de cada encontro da sonda escolhida (±3 dias) o tempo desacelera para 6 h/s: o encontro dura ~24 s na tela. */
 export const FLYBY_SLOWDOWN = { windowDays: 3, rate: 0.25 } as const;
+/** Nas Apollo, os eventos são separados por horas: ±20 min a 1 min/s, ~40 s na tela. */
+export const APOLLO_SLOWDOWN = { windowDays: 20 / 1440, rate: 1 / 1440 } as const;
 const MAX_FRAME_DT_S = 0.25;
 /** Eventos em que vale desacelerar: os que acontecem perto de um corpo. */
 const SLOW_KINDS: ReadonlySet<MissionEvent['kind']> = new Set(['flyby', 'capture', 'arrival', 'entry', 'landing', 'end', 'perihelion']);
@@ -68,7 +72,9 @@ interface ProbeStore {
 }
 
 const clampT = (t: number) => Math.min(Math.max(t, PROBE_TIME_RANGE.start), PROBE_TIME_RANGE.end);
-const slowStart = (e: MissionEvent) => e.t - FLYBY_SLOWDOWN.windowDays;
+const slowdownFor = (id: ProbeId) => (MISSIONS[id].group === 'apollo' ? APOLLO_SLOWDOWN : FLYBY_SLOWDOWN);
+/** Nas Apollo todo evento desacelera; nas sondas, os que acontecem perto de um corpo. */
+const isSlow = (e: MissionEvent) => MISSIONS[e.probeId].group === 'apollo' || SLOW_KINDS.has(e.kind);
 
 /**
  * Onde a câmera fica num evento: perto do corpo, em escala real (a órbita de
@@ -79,11 +85,15 @@ export function eventView(event: MissionEvent): { focus: FocusId; scale: ScaleMo
   if (event.kind === 'perihelion') return { focus: 'sun', scale: 'linear', distance: 0.25 };
   if (event.capture) return { focus: event.capture.body, scale: 'linear', distance: (event.capture.apoapsisKm * 1.25) / AU_KM };
   if (event.body) {
-    // ~60 raios do corpo (40 numa lua), ou mais longe se a sonda estiver além disso (a Rosetta chega ao cometa a 120 km).
-    const p = probePosition(craft(event.craft ?? event.probeId).trajectory, event.t);
+    // ~60 raios do corpo (40 numa lua; 6 nas Apollo, para ver a órbita baixa e o pouso), ou mais longe se a
+    // sonda estiver além disso (a Rosetta chega ao cometa a 120 km).
+    const trajectory = craft(event.craft ?? event.probeId).trajectory;
+    const p = probePosition(trajectory, Math.min(Math.max(event.t, trajectory.launch), trajectory.end));
     const away = p ? (distanceTo(p, event.body, event.t) ?? 0) : 0;
-    const radii = (BODIES[event.body].radiusKm * (isMoon(event.body) ? 40 : 60)) / AU_KM;
-    return { focus: event.body, scale: 'linear', distance: Math.max(radii, 2.5 * away) };
+    // Pousos e separações de módulos de pouso: mais perto, para ver a descida.
+    const lander = event.craft !== undefined && (event.kind === 'landing' || event.kind === 'release' || event.kind === 'last-contact');
+    const radii = MISSIONS[event.probeId].group === 'apollo' ? 6 : lander ? 8 : isMoon(event.body) ? 40 : 60;
+    return { focus: event.body, scale: 'linear', distance: Math.max((BODIES[event.body].radiusKm * radii) / AU_KM, 2.5 * away) };
   }
   return { focus: event.craft ?? event.probeId, scale: null, distance: null };
 }
@@ -139,13 +149,14 @@ export const useProbeStore = create<ProbeStore>()((set, get) => ({
       rate = slowdown.resumeRate;
       slowdown = null;
     }
-    if (s.autoSlow && rate > FLYBY_SLOWDOWN.rate) {
+    const slow = slowdownFor(s.selected);
+    if (s.autoSlow && rate > slow.rate) {
       // Entrada na janela de um encontro, mesmo que um frame longo pule por cima dela.
-      const entered = events.find((e) => SLOW_KINDS.has(e.kind) && slowStart(e) > s.t && slowStart(e) <= t);
+      const entered = events.find((e) => isSlow(e) && e.t - slow.windowDays > s.t && e.t - slow.windowDays <= t);
       if (entered) {
-        t = slowStart(entered);
-        slowdown = { until: entered.t + FLYBY_SLOWDOWN.windowDays, resumeRate: rate };
-        rate = FLYBY_SLOWDOWN.rate;
+        t = entered.t - slow.windowDays;
+        slowdown = { until: entered.t + slow.windowDays, resumeRate: rate };
+        rate = slow.rate;
       }
     }
 

@@ -1,5 +1,5 @@
 import { MOON_LIST, SMALL_BODY_LIST } from './bodies';
-import { COMPANIONS, MISSION_LIST } from './missions';
+import { COMPANIONS, MISSIONS, MISSION_LIST } from './missions';
 import { PLANET_LIST } from './planets';
 import { formatDateTime, msToDays } from './time';
 import { PROBE_RATES, PROBE_TIME_RANGE, useProbeStore, type FocusId, type ScaleMode } from './useProbeStore';
@@ -110,18 +110,20 @@ export function ProbeControls({ className = '' }: { className?: string }) {
                 </option>
               ))}
             </optgroup>
-            <optgroup label="Sondas">
-              {MISSION_LIST.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                </option>
-              ))}
-              {COMPANIONS.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name} ({MISSION_LIST.find((m) => m.id === c.parent)!.name})
-                </option>
-              ))}
-            </optgroup>
+            {(['probe', 'apollo'] as const).map((group) => (
+              <optgroup key={group} label={group === 'probe' ? 'Sondas' : 'Apollo'}>
+                {MISSION_LIST.filter((m) => m.group === group).map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                  </option>
+                ))}
+                {COMPANIONS.filter((c) => MISSIONS[c.parent].group === group).map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name.includes(MISSIONS[c.parent].name) ? c.name : `${c.name} (${MISSIONS[c.parent].name})`}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
           </select>
         </label>
         <div className="flex items-center gap-1" role="radiogroup" aria-label="Escala das distâncias">
