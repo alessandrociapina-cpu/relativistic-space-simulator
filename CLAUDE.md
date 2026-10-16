@@ -603,7 +603,7 @@ relativistic-space-simulator/
 │   │   ├── RelativisticSky.tsx    # Esfera celeste + uniforms, compartilhada pelos monitores
 │   │   ├── CockpitMonitor.tsx     # Telas penduradas e suas teclas
 │   │   ├── MainViewport.tsx       # Cena 3D principal (para-brisa do cockpit)
-│   │   ├── RouteMonitor.tsx       # Monitor direito: "Rota · escala log" e o progresso
+│   │   ├── RouteMonitor.tsx       # Monitor direito: "Rota · escala log" e o progresso; no celular, a faixa da rota no painel
 │   │   ├── TelescopePIP.tsx       # Monitor esquerdo: telescópio TRÁS/FRENTE com auto-zoom, VIS / IV / UV / RX
 │   │   ├── CenterHologramProjector.tsx # Hologramas contextuais no centro inferior (§9)
 │   │   ├── ExplanationCard.tsx    # Cartão do modo Explicar: o efeito que acabou de começar (§10)
@@ -611,7 +611,7 @@ relativistic-space-simulator/
 │   │   ├── TeX.tsx                # Fórmula TeX renderizada pelo KaTeX
 │   │   ├── useLiveExplainContext.ts # Estado do voo para as explicações, a 4 Hz
 │   │   ├── InstrumentPanel.tsx    # Painel: missão, partida, linha do tempo, M_τ, mostrador de γ, motor, teclas
-│   │   ├── TelemetryHUD.tsx       # Console de teto: velocidade, γ, relógios, distâncias e avisos
+│   │   ├── TelemetryHUD.tsx       # Console de teto: velocidade, aceleração α, γ, relógios, distâncias e avisos
 │   │   └── SpectrumAnalyzer.tsx   # Gráfico Canvas 2D do pico de Planck da CMB vs. faixa visível
 │   ├── store/
 │   │   ├── useFlightStore.ts      # Estado global e loop de tempo próprio com Auto-Step Down + teste
@@ -624,7 +624,7 @@ relativistic-space-simulator/
 │   │   ├── explanations.ts        # Catálogo de efeitos: critérios físicos, textos e fórmulas (§10) + teste
 │   │   ├── explainSettings.ts     # Modo Explicar (persistido) e painel aberto ao pausar
 │   │   ├── appMode.ts             # Tela pela âncora da URL: abertura (#inicio), #viagem ou #sondas
-│   │   ├── cockpitUi.ts           # Estado da interface do cockpit: planejamento, telescópio, painel
+│   │   ├── cockpitUi.ts           # Estado da interface do cockpit: planejamento, telescópio, painel; tela larga ou celular
 │   │   ├── hologramMode.ts        # Seleção automática do holograma + teste
 │   │   └── routeScale.ts          # Escala logarítmica do mapa de rota
 │   ├── App.tsx
@@ -676,13 +676,13 @@ O arquivo `src/physics/RelativityEngine.test.ts` deve passar nos seguintes teste
    - "N× mais fraca": a mesma luz do instante espelho da ida ($E(\tau) = E(\tau_{\text{total}} - \tau)$), vista com o olho de agora: $2^{R_{\text{agora}} - R_{\text{espelho}}}\,(d_{\text{espelho}}/d_{\text{agora}})^2$.
    - Marcos para Proxima em τ = 449 s (espelho do white-out em 150 s): pupila 2,13 mm, retina −12,8 stops, ≈ 1 290× mais escuro (vídeo: 2,14 mm, −12,9 stops, 1 260×).
 3. **Cockpit** (estilo nave de ficção científica, tudo em português; fontes Orbitron e Share Tech Mono):
-   - **Console de teto** (`TelemetryHUD`): visores de velocidade (`formatRelativisticSpeedPercent`, "99.999 999 999 994 9 %", e c − v), γ e η, relógios da nave e da Terra, distância no referencial da Terra e contraída. Selos: fase, "🧑‍🚀 Piloto humano" ou "🤖 Sonda robótica · sem tripulação", destino, contagem da ignição, "⚠ Ofuscamento · luz forte à frente" (só com piloto; luz > 1 500 lux ou aceleração com $\gamma \in [200, 12\,000]$), "CMB no visível" e "Flip em". Com o véu percebido > 0,25 (`isWhiteoutHudActive`), o console e os hologramas ganham fundo fosco.
-   - **Telas penduradas** no console por duas hastes e inclinadas para o centro na tela larga: o telescópio à esquerda, a rota à direita. Na tela larga, colunas laterais (`CockpitFrame`) ligam o teto ao painel.
-   - **Painel de instrumentos** (`InstrumentPanel`, recolhível): placa da missão (destino, α, nave, veredito, "⚙ Planejar", 🛰 sondas, ⌂ abertura), botão redondo de partida (Partida / Pausar / Retomar / Repetir / Abortar), linha do tempo, M_τ com ◀ ▶ ⟲, "Desacelerar nos eventos", mostrador analógico de γ em escala log (1 a 10¹³, com a faixa da CMB visível em âmbar), lâmpada do motor (Empuxo / Flip / Inércia / Desligado) e as teclas Explicar, Efeitos e Som. No celular: partida, linha do tempo e M_τ em cima, teclas e planejamento embaixo.
-4. **Telescópio** (TRÁS, padrão, ou FRENTE; sensores VIS / IV / UV / RX):
+   - **Console de teto** (`TelemetryHUD`): visores de velocidade (`formatRelativisticSpeedPercent`, "99.999 999 999 994 9 %", e c − v), **aceleração α** (em âmbar, com a proteção do preset, como "Gravidade da Terra"; 0 g com o motor desligado, no cruzeiro e na chegada), γ e η, relógios da nave e da Terra, distância no referencial da Terra e contraída. Três colunas no celular, cinco na tela média e uma fileira só na larga (colunas proporcionais ao texto). Selos: fase (verbos, para não se confundir com α: Acelerando / Inércia / Freando / Chegada), "🧑‍🚀 Piloto humano" ou "🤖 Sonda robótica · sem tripulação", contagem da ignição, "⚠ Ofuscamento · luz forte à frente" (só com piloto; luz > 1 500 lux ou aceleração com $\gamma \in [200, 12\,000]$), "CMB no visível", "Flip em" (contagem com largura mínima e algarismos tabulares) e, por último, o destino. A fileira dos selos tem **altura fixa** (duas linhas no celular, uma na tela larga) e corta o que não cabe: um selo que muda de largura nunca muda a altura do console, o que fazia a tela inteira pular. Com o véu percebido > 0,25 (`isWhiteoutHudActive`), o console e os hologramas ganham fundo fosco.
+   - **Telas penduradas** no console por duas hastes e inclinadas para o centro na tela larga (≥ 1 024 px, `useIsWideCockpit`): o telescópio à esquerda, a rota à direita. Na tela larga, colunas laterais (`CockpitFrame`) ligam o teto ao painel. No celular não há telas penduradas: a rota vai para o painel e o telescópio abre por uma tecla; fechados, nem são montados (um contexto WebGL a menos).
+   - **Painel de instrumentos** (`InstrumentPanel`, recolhível): placa da missão (destino, α, nave, veredito, "⚙ Planejar", 🛰 sondas, ⌂ abertura), botão redondo de partida (Partida / Pausar / Retomar / Repetir / Abortar), linha do tempo, M_τ com ◀ ▶ ⟲, "Desacelerar nos eventos", mostrador analógico de γ em escala log (1 a 10¹³, com a faixa da CMB visível em âmbar), lâmpada do motor (Empuxo / Flip / Inércia / Desligado) e as teclas Explicar, Efeitos e Som. No celular: a faixa da rota no topo, partida, linha do tempo e M_τ, as teclas (com 🔭 Telescópio) e o planejamento embaixo.
+4. **Telescópio** (TRÁS, padrão, ou FRENTE; sensores VIS / IV / UV / RX). No celular começa desligado e abre pela tecla 🔭 do painel; aberto, esconde o holograma central, que ocupa o mesmo espaço.
    - À frente: zoom $\max(1,\ \min(\max(13,\ 0{,}253\,\gamma),\ \text{zoom que põe o alvo em 35\% da altura}))$, relativo ao FOV de 70° do para-brisa: acompanha o cone comprimido e abre abaixo de x 13 na reta final, quando o alvo cresce. Autoexposição.
    - Atrás: zoom que põe o Sol em 35% da altura, de x 13 a x 400 (atrás, a aberração amplia por $e^{\eta}$: $\tan(\theta'/2) = e^{\eta}\tan(\theta/2)$). Exposição fixa: o Sol avermelha e some do visível (no IV, continua).
-5. **Monitor direito:** "Rota · escala log" (log a partir do Sol até METADE, espelhado até o alvo), com os marcos (distância de Saturno, Nuvem de Oort), o estado do motor, as distâncias "DO SOL" e "ATÉ" o alvo e o progresso em percurso, tempo de bordo e tempo da Terra.
+5. **Monitor direito:** "Rota · escala log" (log a partir do Sol até METADE, espelhado até o alvo), com os marcos (distância de Saturno, Nuvem de Oort), o estado do motor, as distâncias "DO SOL" e "ATÉ" o alvo e o progresso em percurso, tempo de bordo e tempo da Terra. No celular, a mesma escala numa faixa no topo do painel (`RouteStrip`): Sol, marcos, METADE, a nave, o alvo, o estado do motor e as duas distâncias.
 6. **Hologramas** (`selectHologramMode`, por critérios físicos), em ordem de prioridade:
    1. "FRENAGEM EM" antes do início da frenagem; "CHEGADA EM" antes da chegada (10 s na demonstração, 1/60 da viagem nas longas, quando a contagem mostra o tempo de bordo restante, como "6,47 dias").
    2. Anéis do Sistema Solar ("DISTÂNCIA DO SOL"): aceleração, 5–32 UA do Sol.

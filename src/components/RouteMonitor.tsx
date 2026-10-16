@@ -10,20 +10,21 @@ const X1 = 296;
 const LINE_Y = 104;
 const xAt = (u: number) => X0 + (X1 - X0) * u;
 
-function RouteMap() {
+/** Estado da rota, comum ao monitor e à faixa do painel no celular. */
+function useRoute() {
   const flight = useFlightStore((s) => s.flight);
   const profile = useFlightStore((s) => s.profile);
   const destination = useFlightStore((s) => s.destination);
   const playing = useFlightStore((s) => s.playing);
 
-  const arrival = arrivalDistanceM(destination);
-  const geometry = routeGeometry(profile, arrival);
+  const geometry = routeGeometry(profile, arrivalDistanceM(destination));
   const halfwayAu = geometry.halfwaySunDistanceM / AU_M;
-  const shipX = xAt(routePosition(flight, profile, geometry));
   const markers = [
     { au: SATURN_AU, label: 'DISTÂNCIA DE SATURNO' },
     { au: OORT_CLOUD_AU, label: 'NUVEM DE OORT' },
-  ].filter((m) => m.au < halfwayAu);
+  ]
+    .filter((m) => m.au < halfwayAu)
+    .map((m) => ({ ...m, u: sunMarkerPosition(m.au, geometry) }));
 
   const status =
     flight.phase === 'coasting'
@@ -36,6 +37,20 @@ function RouteMap() {
             ? 'ACELERANDO ▸▸'
             : 'PRONTA';
 
+  return {
+    destination,
+    markers,
+    status,
+    shipU: routePosition(flight, profile, geometry),
+    fromSun: formatRouteDistance(AU_M + flight.positionM),
+    toTarget: formatRouteDistance(targetViewDistanceM(flight, destination)),
+  };
+}
+
+function RouteMap() {
+  const { destination, markers, status, shipU, fromSun, toTarget } = useRoute();
+  const shipX = xAt(shipU);
+
   return (
     <svg viewBox="0 0 320 240" className="font-readout absolute inset-0 h-full w-full" aria-label="Mapa da rota">
       <defs>
@@ -47,7 +62,7 @@ function RouteMap() {
       <line x1={X0} y1={LINE_Y} x2={X1} y2={LINE_Y} stroke="#38bdf8" strokeOpacity="0.55" strokeWidth="1.5" />
       {/* Marcos intermediários: tique na linha e rótulo na segunda fileira. */}
       {markers.map((m) => {
-        const x = xAt(sunMarkerPosition(m.au, geometry));
+        const x = xAt(m.u);
         return (
           <g key={m.label}>
             <line x1={x} y1={LINE_Y - 5} x2={x} y2={LINE_Y + 5} stroke="#94a3b8" />
@@ -90,15 +105,59 @@ function RouteMap() {
         DO SOL
       </text>
       <text x="24" y="214" fill="#e2e8f0" fontSize="14">
-        {formatRouteDistance(AU_M + flight.positionM)}
+        {fromSun}
       </text>
       <text x="296" y="196" fill="#94a3b8" fontSize="8.5" letterSpacing="1" textAnchor="end">
         ATÉ {destination.shortName}
       </text>
       <text x="296" y="214" fill="#e2e8f0" fontSize="14" textAnchor="end">
-        {formatRouteDistance(targetViewDistanceM(flight, destination))}
+        {toTarget}
       </text>
     </svg>
+  );
+}
+
+const STRIP_X0 = 8;
+const STRIP_X1 = 292;
+const STRIP_Y = 15;
+const stripX = (u: number) => STRIP_X0 + (STRIP_X1 - STRIP_X0) * u;
+
+/**
+ * A rota no painel do celular, onde não há telas penduradas: a mesma escala log
+ * do monitor numa faixa, com o estado do motor e as distâncias.
+ */
+export function RouteStrip({ className = '' }: { className?: string }) {
+  const { destination, markers, status, shipU, fromSun, toTarget } = useRoute();
+  const shipX = stripX(shipU);
+  return (
+    <div className={`instrument-well min-w-0 rounded-md px-2 py-1 ${className}`}>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="font-display text-[8px] tracking-[0.22em] text-slate-400 uppercase">Rota · escala log</span>
+        <span className="font-readout text-[10px] tracking-wider text-amber-400">{status}</span>
+      </div>
+      <svg viewBox="0 0 300 22" className="block w-full" aria-label="Mapa da rota">
+        <line x1={STRIP_X0} y1={STRIP_Y} x2={STRIP_X1} y2={STRIP_Y} stroke="#38bdf8" strokeOpacity="0.55" strokeWidth="1.2" />
+        {markers.map((m) => (
+          <line key={m.label} x1={stripX(m.u)} y1={STRIP_Y - 3} x2={stripX(m.u)} y2={STRIP_Y + 3} stroke="#94a3b8">
+            <title>{m.label}</title>
+          </line>
+        ))}
+        <line x1={stripX(0.5)} y1={STRIP_Y - 5} x2={stripX(0.5)} y2={STRIP_Y + 5} stroke="#e2e8f0" strokeOpacity="0.7" />
+        <circle cx={STRIP_X0} cy={STRIP_Y} r="4" fill="#fde047" />
+        <circle cx={STRIP_X1} cy={STRIP_Y} r="4" fill={blackbodyCssColor(destination.temperatureK)} />
+        <path d={`M ${shipX} ${STRIP_Y - 2} l -4.5 -8 h 9 z`} fill="#f59e0b" />
+      </svg>
+      {/* Colunas iguais nas pontas: METADE fica exatamente sob o tique do meio. */}
+      <div className="font-readout grid grid-cols-[1fr_auto_1fr] items-baseline gap-2 text-[10px] tabular-nums">
+        <span className="min-w-0 truncate">
+          <span className="text-yellow-300">SOL</span> <span className="text-slate-200">{fromSun}</span>
+        </span>
+        <span className="text-slate-400">METADE</span>
+        <span className="min-w-0 truncate text-right">
+          <span className="text-slate-200">{toTarget}</span> <span className="text-rose-300">{destination.shortName}</span>
+        </span>
+      </div>
+    </div>
   );
 }
 

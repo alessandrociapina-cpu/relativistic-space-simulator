@@ -1,7 +1,7 @@
 import { Suspense, lazy, useEffect } from 'react';
 import { useFlightAudio } from '../audio/useFlightAudio';
 import { useFlightLoop } from '../store/useFlightLoop';
-import { useCockpitUi } from '../ui/cockpitUi';
+import { useCockpitUi, useIsWideCockpit } from '../ui/cockpitUi';
 import { useEffectsPanelOnPause } from '../ui/explainSettings';
 import { CenterHologramProjector } from './CenterHologramProjector';
 import { CockpitFrame } from './CockpitFrame';
@@ -29,6 +29,10 @@ export function RelativisticCockpit() {
   // Cada entrada na viagem começa pelo planejamento da missão.
   const openPlanner = useCockpitUi((s) => s.openPlanner);
   useEffect(openPlanner, [openPlanner]);
+  // No celular não há telas penduradas: a rota vai para o painel e o telescópio abre por uma tecla.
+  // Fora da tela, nem são montadas (um contexto WebGL a menos).
+  const wide = useIsWideCockpit();
+  const telescopeOpen = useCockpitUi((s) => s.telescopeOpen);
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-black select-none">
@@ -40,10 +44,14 @@ export function RelativisticCockpit() {
         {/* Telas penduradas nos cantos; o cartão de explicação fica entre elas na tela larga
             e abaixo delas no celular. O painel de efeitos cobre esta faixa à direita. */}
         <div className="relative flex min-h-0 flex-1 flex-col gap-2 px-2 pt-3 sm:pt-4 lg:flex-row lg:items-start lg:justify-between lg:gap-4 lg:px-[max(1.5rem,6vw)]">
-          <div className="flex items-start justify-between gap-2 lg:contents">
-            <TelescopePIP className="pointer-events-auto w-[49%] max-w-[22rem] lg:w-[min(25vw,21rem)]" />
-            <RouteMonitor className="pointer-events-auto w-[49%] max-w-[22rem] lg:order-last lg:w-[min(25vw,21rem)]" />
-          </div>
+          {wide ? (
+            <>
+              <TelescopePIP className="pointer-events-auto w-[min(25vw,21rem)]" />
+              <RouteMonitor className="pointer-events-auto order-last w-[min(25vw,21rem)]" />
+            </>
+          ) : (
+            telescopeOpen && <TelescopePIP className="pointer-events-auto mx-auto w-full max-w-[20rem]" />
+          )}
           <Suspense fallback={null}>
             <ExplanationCard className="pointer-events-auto mx-auto w-full max-w-md select-text lg:mx-0 lg:mt-8 lg:min-w-0 lg:flex-1" />
             <ActiveEffectsPanel className="pointer-events-auto fixed inset-0 z-30 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] select-text lg:absolute lg:inset-y-0 lg:right-0 lg:left-auto lg:w-[30rem] lg:rounded-md lg:border lg:border-cyan-400/30 lg:p-0" />

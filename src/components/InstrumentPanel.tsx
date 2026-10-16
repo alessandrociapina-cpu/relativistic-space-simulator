@@ -9,6 +9,7 @@ import { APP_HASH } from '../ui/appMode';
 import { useCockpitUi } from '../ui/cockpitUi';
 import { useExplainSettings } from '../ui/explainSettings';
 import { formatAccelG, formatDuration, formatGamma, formatSpan } from '../ui/format';
+import { RouteStrip } from './RouteMonitor';
 
 /** Rótulo gravado na chapa do painel. */
 function Plate({ children, className = '' }: { children: ReactNode; className?: string }) {
@@ -309,8 +310,20 @@ function Switches() {
   const closePanel = useExplainSettings((s) => s.closePanel);
   const sound = useAudioSettings((s) => s.enabled);
   const toggleSound = useAudioSettings((s) => s.toggle);
+  const telescope = useCockpitUi((s) => s.telescopeOpen);
+  const toggleTelescope = useCockpitUi((s) => s.toggleTelescope);
   return (
-    <div className="grid grid-cols-3 gap-1">
+    <div className="grid grid-cols-4 gap-1 lg:grid-cols-3">
+      {/* Na tela larga o telescópio fica sempre pendurado; no celular, abre por esta tecla. */}
+      <div className="contents lg:hidden">
+        <KeySwitch
+          on={telescope}
+          label="Telescópio"
+          icon="🔭"
+          title={telescope ? 'Fechar o telescópio' : 'Abrir o telescópio (atrás: o Sol; à frente: o alvo)'}
+          onClick={toggleTelescope}
+        />
+      </div>
       <KeySwitch
         on={explain}
         label="Explicar"
@@ -368,6 +381,8 @@ export function InstrumentPanel({ className = '' }: { className?: string }) {
         </div>
       ) : (
         <div className="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2 lg:grid-cols-[minmax(11rem,1fr)_auto_minmax(16rem,2fr)_auto_auto_minmax(10rem,1fr)] lg:gap-x-4">
+          {/* No celular a rota vem para o painel, no topo (na tela larga é um monitor pendurado). */}
+          <RouteStrip className="col-span-2 lg:hidden" />
           <div className="col-span-2 max-lg:order-4 lg:col-span-1">
             <MissionPlate />
           </div>
