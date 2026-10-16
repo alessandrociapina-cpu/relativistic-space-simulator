@@ -56,6 +56,8 @@ export function formatDuration(seconds: number): string {
 
 /** Distâncias: anos-luz → UA → segundos-luz → km. */
 export function formatDistance(meters: number): string {
+  // Na chegada sobra só o ruído de arredondamento (~10⁻²³ m): é zero.
+  if (meters < 0.5) return '0 km';
   if (meters >= 0.01 * LIGHT_YEAR_M) return `${sig4.format(meters / LIGHT_YEAR_M)} anos-luz`;
   if (meters >= 0.1 * AU_M) return `${sig4.format(meters / AU_M)} UA`;
   if (meters >= LIGHT_SECOND_M) return `${sig4.format(meters / LIGHT_SECOND_M)} s-luz`;
@@ -139,15 +141,20 @@ export function formatSpaceNumber(n: number): string {
     .replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 }
 
-/** Distâncias do mapa de rota, no estilo das telas de referência: UA até 600 UA, depois anos-luz. */
+/** Distâncias do mapa de rota: UA até 600 UA, depois anos-luz ("a.l."). */
 export function formatRouteDistance(meters: number): string {
   const au = meters / AU_M;
-  if (au < 600) return `${au.toFixed(au < 10 ? 2 : au < 100 ? 1 : 0)} AU`;
+  if (au < 600) return `${fixed(au, au < 10 ? 2 : au < 100 ? 1 : 0)} UA`;
   const ly = meters / LIGHT_YEAR_M;
-  return ly < 1000 ? `${ly.toFixed(ly < 10 ? 2 : 1)} ly` : `${formatSpaceNumber(ly)} ly`;
+  return ly < 1000 ? `${fixed(ly, ly < 10 ? 2 : 1)} a.l.` : `${formatSpaceNumber(ly)} a.l.`;
 }
 
 /** v em frações de c até 0,99c; acima, quanto falta para c (c − v). */
 export function formatVelocity(beta: number, oneMinusBeta: number): string {
   return beta < 0.99 ? `${fixed(beta, 4)} c` : `c − ${formatSpeed(C * oneMinusBeta)}`;
+}
+
+/** Aceleração em g: "0,3 g", "1,5 g", "10 000 g", "1,61 × 10⁶ g". */
+export function formatAccelG(g: number): string {
+  return `${formatProse(g)} g`;
 }

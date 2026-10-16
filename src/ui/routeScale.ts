@@ -1,6 +1,6 @@
 /**
- * Escala do mapa "ROUTE · LOG SCALE": logarítmica a partir do Sol na primeira
- * metade e espelhada a partir do alvo na segunda, com HALFWAY no centro.
+ * Escala do mapa "Rota · escala log": logarítmica a partir do Sol na primeira
+ * metade e espelhada a partir do alvo na segunda, com METADE no centro.
  */
 import type { FlightState, MissionProfile } from '../physics/RelativityEngine';
 import { AU_M } from '../physics/sky';

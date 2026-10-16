@@ -1,6 +1,7 @@
 import katex from 'katex';
 import { describe, expect, it } from 'vitest';
-import { computeFlightState, rocketMassRatio, withRapidity } from '../physics/RelativityEngine';
+import { computeFlightState, rocketMassRatio } from '../physics/RelativityEngine';
+import type { CrewKind } from '../physics/accelerationPresets';
 import { DESTINATIONS, DESTINATION_LIST, destinationMissionProfile, type Destination } from '../physics/destinations';
 import { computeEyeTimeline, computePhotometryAndEyeState } from '../physics/EyeAndPhotometry';
 import { computeBodyAngularRadii } from '../physics/sky';
@@ -19,12 +20,11 @@ import { formatProse } from './format';
 function contextFactory(destination: Destination, accelG = destination.defaultAccelG, coastEta: number | null = null) {
   const profile = destinationMissionProfile(destination, accelG, coastEta);
   const timeline = computeEyeTimeline(profile);
-  return (tau: number, manualEta?: number): ExplainContext => {
-    const base = computeFlightState(profile, tau);
-    const flight = manualEta === undefined ? base : withRapidity(base, manualEta);
+  return (tau: number, crew: CrewKind = 'crewed'): ExplainContext => {
+    const flight = computeFlightState(profile, tau);
     const targetRadiusRad = computeBodyAngularRadii(flight, destination).targetRadiusRad;
     return {
-      mode: manualEta === undefined ? 'autopilot' : 'manual',
+      crew,
       destination,
       accelG,
       profile,
@@ -155,13 +155,12 @@ describe('efeitos ativos', () => {
     expect(headlineEffect(effects)).toBe('flip');
   });
 
-  it('no Cruzeiro Livre não há marcos de missão', () => {
-    const effects = activeEffects(proximaAt(100, 9));
-    expect(effects).toEqual(expect.arrayContaining(['kinematics', 'doppler', 'cmb-visible']));
-    for (const id of ['mission', 'flip', 'braking', 'solar-system', 'arrival'] as const) {
-      expect(effects).not.toContain(id);
-    }
-    expect(activeEffects(proximaAt(100, 0))).toEqual([]);
+  it('numa sonda robótica não há olhos para se adaptar', () => {
+    expect(activeEffects(proximaAt(449))).toContain('eye-adaptation');
+    expect(activeEffects(proximaAt(449, 'robotic'))).not.toContain('eye-adaptation');
+    const glare = explainEffect('illuminance', proximaAt(160, 'robotic'));
+    expect(glare.summary).toContain('câmera');
+    expect(glare.details.join(' ')).not.toContain('pupila');
   });
 
   it('o anúncio exige a transição: efeito já ativo ou já anunciado não volta', () => {
@@ -202,7 +201,7 @@ describe('textos e fórmulas com os valores do instante', () => {
         const total = destinationMissionProfile(destination, accelG, coastEta).tauTotal;
         for (let i = 0; i <= 12; i++) {
           const tau = (i / 12) * total;
-          for (const ctx of [at(tau), at(tau, i * 1.5)]) {
+          for (const ctx of [at(tau), at(tau, 'robotic')]) {
             for (const id of EFFECT_ORDER) {
               const { summary, details, formulas } = explainEffect(id, ctx);
               expect([summary, ...details, ...formulas.map((f) => f.tex)].join(' ')).not.toMatch(

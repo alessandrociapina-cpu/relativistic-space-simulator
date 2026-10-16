@@ -157,11 +157,8 @@ export function rocketMassRatio(profile: MissionProfile, exhaustBeta = 1): numbe
   return Math.exp((2 * profile.etaMax) / exhaustBeta);
 }
 
-/**
- * `coasting`: motor desligado na fase de inércia do perfil com cruzeiro.
- * `cruise`: Cruzeiro Livre, com rapidez imposta pelo usuário (ver `withRapidity`).
- */
-export type FlightPhase = 'accelerating' | 'coasting' | 'decelerating' | 'arrived' | 'cruise';
+/** `coasting`: motor desligado na fase de inércia do perfil com cruzeiro. */
+export type FlightPhase = 'accelerating' | 'coasting' | 'decelerating' | 'arrived';
 
 export interface FlightState {
   /** Tempo próprio de bordo τ (s), limitado a [0, τ_total]. */
@@ -230,23 +227,6 @@ export function computeFlightState(profile: MissionProfile, tau: number): Flight
     earthTimeS,
     restDistanceRemainingM,
     contractedDistanceRemainingM: restDistanceRemainingM / k.uGamma,
-  };
-}
-
-/**
- * Cruzeiro Livre (§7.1): mantém a posição e os relógios de `state` e impõe a
- * rapidez `eta`, recalculando a cinemática e a distância contraída.
- */
-export function withRapidity(state: FlightState, eta: number): FlightState {
-  const k = computeShaderKinematics(eta);
-  return {
-    ...state,
-    phase: 'cruise',
-    eta,
-    beta: k.uBeta,
-    gamma: k.uGamma,
-    oneMinusBeta: k.uOneMinusBeta,
-    contractedDistanceRemainingM: state.restDistanceRemainingM / k.uGamma,
   };
 }
 

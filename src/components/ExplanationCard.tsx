@@ -39,9 +39,8 @@ function useHeldInsight(insight: EffectId | null): EffectId | null {
 export function ExplanationCard({ className = '' }: { className?: string }) {
   const enabled = useExplainSettings((s) => s.enabled);
   const panelOpen = useExplainSettings((s) => s.panelOpen);
-  const autopilot = useFlightStore((s) => s.mode === 'autopilot');
   const shown = useHeldInsight(useFlightStore((s) => s.insight));
-  if (!enabled || !autopilot || panelOpen || shown === null) return null;
+  if (!enabled || panelOpen || shown === null) return null;
   return <InsightCard id={shown} className={className} />;
 }
 

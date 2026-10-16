@@ -1,7 +1,8 @@
 /**
- * Multiplicador de tempo próprio M_τ (§7.2) em degraus: de 0,1x a 1 ano de
- * bordo por segundo real. Cada missão mostra os 5 degraus em torno do que a
- * faz durar ~10 min na tela; a demonstração continua com 0,1x a 100x.
+ * Multiplicador de tempo próprio M_τ (§7.2) em degraus: de 0,01x a 25 anos de
+ * bordo por segundo real, para cobrir da aceleração mais alta (Proxima em
+ * segundos) à mais baixa (Andrômeda em séculos). O "natural" de cada missão é
+ * o degrau que a faz durar ~10 min na tela.
  */
 import { JULIAN_YEAR_S, type MissionProfile } from '../physics/RelativityEngine';
 import type { CriticalWindow } from '../physics/criticalEvents';
@@ -13,24 +14,34 @@ export interface TimeScaleStep {
   readonly title: string;
 }
 
+// Nenhum degrau entre 1x e 5x: na demonstração a janela da CMB (68 s) cai sempre para 1x.
 export const TIME_SCALE_LADDER: readonly TimeScaleStep[] = [
+  { value: 0.01, label: '0,01x', title: '0,01 s de bordo por segundo (câmera lenta)' },
+  { value: 0.03, label: '0,03x', title: '0,03 s de bordo por segundo (câmera lenta)' },
   { value: 0.1, label: '0,1x', title: '0,1 s de bordo por segundo' },
+  { value: 0.3, label: '0,3x', title: '0,3 s de bordo por segundo' },
   { value: 1, label: '1x', title: 'Tempo real' },
   { value: 5, label: '5x', title: '5 s de bordo por segundo' },
   { value: 20, label: '20x', title: '20 s de bordo por segundo' },
   { value: 100, label: '100x', title: '100 s de bordo por segundo' },
+  { value: 600, label: '10 min/s', title: '10 minutos de bordo por segundo' },
   { value: 3600, label: '1 h/s', title: '1 hora de bordo por segundo' },
+  { value: 21_600, label: '6 h/s', title: '6 horas de bordo por segundo' },
   { value: 86_400, label: '1 dia/s', title: '1 dia de bordo por segundo' },
   { value: 604_800, label: '1 sem/s', title: '1 semana de bordo por segundo' },
   { value: JULIAN_YEAR_S / 12, label: '1 mês/s', title: '1 mês de bordo por segundo' },
+  { value: JULIAN_YEAR_S / 4, label: '3 meses/s', title: '3 meses de bordo por segundo' },
   { value: JULIAN_YEAR_S, label: '1 ano/s', title: '1 ano de bordo por segundo' },
+  { value: 5 * JULIAN_YEAR_S, label: '5 anos/s', title: '5 anos de bordo por segundo' },
+  { value: 25 * JULIAN_YEAR_S, label: '25 anos/s', title: '25 anos de bordo por segundo' },
 ];
 
 /** Duração na tela de uma viagem no degrau "natural". */
 export const TARGET_TRIP_REAL_S = 600;
 /** Cada janela crítica deve durar pelo menos isto em tempo real depois do Auto-Step Down. */
 export const MIN_WINDOW_REAL_S = 20;
-const VISIBLE_STEPS = 5;
+/** Trocar de missão mantém o multiplicador se a nova viagem durar entre isto na tela. */
+const KEEP_TRIP_REAL_S = { min: 20, max: 3 * 3600 } as const;
 
 const ladderIndex = (value: number) => TIME_SCALE_LADDER.findIndex((s) => s.value === value);
 
@@ -46,15 +57,23 @@ function naturalIndex(profile: MissionProfile): number {
 
 export const naturalTimeScale = (profile: MissionProfile) => TIME_SCALE_LADDER[naturalIndex(profile)]!.value;
 
-/** Os 5 degraus da missão: um abaixo do natural e três acima. */
-export function timeScaleOptions(profile: MissionProfile): readonly TimeScaleStep[] {
-  const start = Math.min(Math.max(naturalIndex(profile) - 1, 0), TIME_SCALE_LADDER.length - VISIBLE_STEPS);
-  return TIME_SCALE_LADDER.slice(start, start + VISIBLE_STEPS);
+/** Mantém o multiplicador se a nova viagem ainda dura um tempo razoável na tela; senão, o natural. */
+export function timeScaleForMission(current: number, profile: MissionProfile): number {
+  const realS = profile.tauTotal / current;
+  return ladderIndex(current) >= 0 && realS >= KEEP_TRIP_REAL_S.min && realS <= KEEP_TRIP_REAL_S.max
+    ? current
+    : naturalTimeScale(profile);
 }
 
-/** Mantém o multiplicador se ele é um dos degraus da nova missão; senão, o natural. */
-export function timeScaleForMission(current: number, profile: MissionProfile): number {
-  return timeScaleOptions(profile).some((s) => s.value === current) ? current : naturalTimeScale(profile);
+/** Degrau vizinho (−1 mais lento, +1 mais rápido); fica no extremo da escada. */
+export function adjacentTimeScale(current: number, direction: -1 | 1): number {
+  const i = ladderIndex(current);
+  if (i < 0) {
+    // Fora da escada: o primeiro degrau na direção pedida.
+    const next = direction > 0 ? TIME_SCALE_LADDER.find((s) => s.value > current) : [...TIME_SCALE_LADDER].reverse().find((s) => s.value < current);
+    return (next ?? TIME_SCALE_LADDER[direction > 0 ? TIME_SCALE_LADDER.length - 1 : 0]!).value;
+  }
+  return TIME_SCALE_LADDER[Math.min(Math.max(i + direction, 0), TIME_SCALE_LADDER.length - 1)]!.value;
 }
 
 /**

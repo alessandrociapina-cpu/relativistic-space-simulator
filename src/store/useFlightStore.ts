@@ -1,11 +1,6 @@
 import { create } from 'zustand';
-import {
-  computeFlightState,
-  rapidityFromLog10Gamma,
-  withRapidity,
-  type FlightState,
-  type MissionProfile,
-} from '../physics/RelativityEngine';
+import { computeFlightState, type FlightState, type MissionProfile } from '../physics/RelativityEngine';
+import type { CrewKind } from '../physics/accelerationPresets';
 import {
   DESTINATIONS,
   destinationMissionProfile,
@@ -36,25 +31,24 @@ import {
 // `useFlightStore.getState()` dentro do useFrame, sem re-render do React; o
 // HUD e os controles assinam só os campos que exibem.
 
-export type FlightMode = 'autopilot' | 'manual';
-
-/** Faixa do slider logarítmico do Cruzeiro Livre: log₁₀γ ∈ [0, 7,5] (η ≈ 18). */
-export const MAX_LOG10_GAMMA = 7.5;
-export const MAX_MANUAL_ETA = rapidityFromLog10Gamma(MAX_LOG10_GAMMA);
-
-export interface FlightStore {
-  readonly mode: FlightMode;
+/** O que define uma missão no planejamento. */
+export interface MissionChoice {
   readonly destination: Destination;
   /** Aceleração própria em múltiplos de g₀. */
   readonly accelG: number;
   /** Rapidez de cruzeiro (acelerar, cruzar e frear); `null` no Flip-and-Burn. */
   readonly coastEta: number | null;
+  /** Piloto humano (olho do piloto no para-brisa) ou sonda robótica (câmeras). */
+  readonly crew: CrewKind;
+}
+
+export interface FlightStore extends MissionChoice {
   readonly profile: MissionProfile;
   readonly criticalWindows: readonly CriticalWindow[];
   readonly milestones: readonly Milestone[];
   /** Adaptação do olho pré-calculada para a missão inteira. */
   readonly eyeTimeline: EyeTimeline;
-  /** Tempo próprio do Autopilot (s). */
+  /** Tempo próprio de bordo (s). */
   readonly tau: number;
   readonly playing: boolean;
   /** Segundos reais até a ignição durante a contagem regressiva; `null` fora dela. */
@@ -63,8 +57,6 @@ export interface FlightStore {
   readonly timeScale: number;
   /** Desacelera M_τ ao entrar em um evento crítico (1x na demonstração). */
   readonly autoStepDown: boolean;
-  /** Rapidez imposta no Cruzeiro Livre. */
-  readonly manualEta: number;
   /** Snapshot cinemático lido pelos monitores e pelo HUD. */
   readonly flight: FlightState;
   /** Luz da CMB à frente, olho do piloto e auto-zoom, no mesmo instante de `flight`. */
@@ -74,27 +66,23 @@ export interface FlightStore {
   /** Efeitos já anunciados nesta missão: cada um ganha um cartão por voo. */
   readonly announcedEffects: readonly EffectId[];
 
-  setMode: (mode: FlightMode) => void;
+  /** Nova missão (planejamento): parada em τ = 0. */
+  configureMission: (choice: MissionChoice) => void;
   setDestination: (id: DestinationId) => void;
   setAccelG: (accelG: number) => void;
   setCoastEta: (coastEta: number | null) => void;
+  setCrew: (crew: CrewKind) => void;
   /** Partida (com contagem regressiva a partir de τ = 0), pausa, retomada ou aborto da contagem. */
   togglePlay: () => void;
   seek: (tau: number) => void;
   setTimeScale: (timeScale: number) => void;
   setAutoStepDown: (on: boolean) => void;
-  setManualEta: (eta: number) => void;
   showInsight: (id: EffectId | null) => void;
   /** Avança o relógio de bordo por `dtRealS` segundos reais (chamado a cada frame). */
   tick: (dtRealS: number) => void;
 }
 
 const clamp = (x: number, min: number, max: number) => Math.min(Math.max(x, min), max);
-
-function deriveFlight(profile: MissionProfile, tau: number, mode: FlightMode, manualEta: number): FlightState {
-  const state = computeFlightState(profile, tau);
-  return mode === 'manual' ? withRapidity(state, manualEta) : state;
-}
 
 function derivePhotometry(
   flight: FlightState,
@@ -110,13 +98,14 @@ function newFlightLog(): Pick<FlightStore, 'insight' | 'announcedEffects'> {
 }
 
 /** Nova missão parada no instante da partida. */
-function newMission(destination: Destination, accelG: number, coastEta: number | null) {
+function newMission({ destination, accelG, coastEta, crew }: MissionChoice) {
   const profile = destinationMissionProfile(destination, accelG, coastEta);
   const criticalWindows = computeCriticalWindows(profile);
   return {
     destination,
     accelG,
     coastEta,
+    crew,
     profile,
     criticalWindows,
     milestones: computeMilestones(profile, criticalWindows),
@@ -138,44 +127,37 @@ export const useFlightStore = create<FlightStore>()((set, get) => {
   /** Aplica `patch` e recalcula os snapshots `flight` e `photometry`. */
   const update = (patch: Partial<FlightStore>) => {
     const next = { ...get(), ...patch };
-    const flight = deriveFlight(next.profile, next.tau, next.mode, next.manualEta);
+    const flight = computeFlightState(next.profile, next.tau);
     set({ ...patch, flight, photometry: derivePhotometry(flight, next) });
   };
 
-  const initial = newMission(DESTINATIONS.proxima, DESTINATIONS.proxima.defaultAccelG, null);
+  // A demonstração clássica: Proxima a 1,61×10⁶ g, com o olho de um piloto (hipotético).
+  const initial = newMission({
+    destination: DESTINATIONS.proxima,
+    accelG: DESTINATIONS.proxima.defaultAccelG,
+    coastEta: null,
+    crew: 'crewed',
+  });
   /** Troca de missão: mantém o multiplicador se ele ainda faz sentido para a nova viagem. */
-  const remission = (destination: Destination, accelG: number, coastEta: number | null) => {
-    const mission = newMission(destination, accelG, coastEta);
+  const remission = (patch: Partial<MissionChoice>) => {
+    const { destination, accelG, coastEta, crew } = get();
+    const mission = newMission({ destination, accelG, coastEta, crew, ...patch });
     update({ ...mission, timeScale: timeScaleForMission(get().timeScale, mission.profile) });
   };
   const initialFlight = computeFlightState(initial.profile, 0);
 
   return {
     ...initial,
-    mode: 'autopilot',
     timeScale: 1,
     autoStepDown: true,
-    manualEta: 0,
     flight: initialFlight,
     photometry: derivePhotometry(initialFlight, initial),
 
-    setMode: (mode) => {
-      if (mode === get().mode) return;
-      // O Cruzeiro Livre começa na rapidez atual e congela posição e relógios.
-      update(
-        mode === 'manual'
-          ? {
-              mode,
-              playing: false,
-              ignitionCountdownS: null,
-              manualEta: Math.min(get().flight.eta, MAX_MANUAL_ETA),
-            }
-          : { mode },
-      );
-    },
-    setDestination: (id) => remission(DESTINATIONS[id], get().accelG, get().coastEta),
-    setAccelG: (accelG) => remission(get().destination, accelG, get().coastEta),
-    setCoastEta: (coastEta) => remission(get().destination, get().accelG, coastEta),
+    configureMission: (choice) => remission(choice),
+    setDestination: (id) => remission({ destination: DESTINATIONS[id] }),
+    setAccelG: (accelG) => remission({ accelG }),
+    setCoastEta: (coastEta) => remission({ coastEta }),
+    setCrew: (crew) => remission({ crew }),
     togglePlay: () => {
       const { playing, ignitionCountdownS, tau, profile } = get();
       if (ignitionCountdownS !== null) return update({ ignitionCountdownS: null });
@@ -189,13 +171,10 @@ export const useFlightStore = create<FlightStore>()((set, get) => {
     seek: (tau) => update({ tau: clamp(tau, 0, get().profile.tauTotal), insight: null }),
     setTimeScale: (timeScale) => set({ timeScale }),
     setAutoStepDown: (autoStepDown) => set({ autoStepDown }),
-    setManualEta: (eta) => update({ manualEta: clamp(eta, 0, MAX_MANUAL_ETA) }),
     showInsight: (insight) => set({ insight }),
 
     tick: (dtRealS) => {
       const s = get();
-      if (s.mode !== 'autopilot') return;
-
       if (s.ignitionCountdownS !== null) {
         // Contagem em segundos reais, independente de M_τ.
         const left = s.ignitionCountdownS - dtRealS;

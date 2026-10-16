@@ -45,7 +45,7 @@ export const useExplainSettings = create<ExplainSettings>()((set) => ({
 }));
 
 /**
- * No modo Explicar, pausar o Autopilot no meio do voo abre o painel de efeitos;
+ * No modo Explicar, pausar no meio do voo abre o painel de efeitos;
  * retomar o fecha. A chegada e a troca de modo, que também param o relógio,
  * não abrem. O scrub tira o destaque vindo do cartão, que era de outro instante.
  */
@@ -62,7 +62,7 @@ export function useEffectsPanelOnPause() {
           explain.closePanel();
           return;
         }
-        const midFlight = s.mode === 'autopilot' && s.tau > 0 && s.tau < s.profile.tauTotal;
+        const midFlight = s.tau > 0 && s.tau < s.profile.tauTotal;
         if (explain.enabled && midFlight && !explain.panelOpen) explain.openPanel();
       }),
     [],

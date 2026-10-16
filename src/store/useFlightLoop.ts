@@ -7,7 +7,7 @@ import { useFlightStore } from './useFlightStore';
  */
 const MAX_FRAME_DT_S = 0.25;
 
-/** Loop de tempo próprio: avança o Autopilot a cada frame do navegador. */
+/** Loop de tempo próprio: avança o voo a cada frame do navegador. */
 export function useFlightLoop() {
   useEffect(() => {
     let last = performance.now();

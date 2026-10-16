@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { DEFAULT_ACCEL_G } from '../physics/destinations';
 import { COUNTDOWN_FROM_S, onFlightEvent, type FlightEvent } from './flightEvents';
-import { MAX_MANUAL_ETA, useFlightStore } from './useFlightStore';
+import { useFlightStore } from './useFlightStore';
 
 const initialState = useFlightStore.getState();
 const store = () => useFlightStore.getState();
@@ -33,9 +33,9 @@ function captureEvents(fn: () => void): FlightEvent[] {
 }
 
 describe('estado inicial', () => {
-  it('Autopilot parado na partida para Proxima a 1,61×10⁶ G, 1x, Auto-Step Down ligado', () => {
+  it('parado na partida para Proxima a 1,61×10⁶ g com piloto (hipotético), 1x, Auto-Step Down ligado', () => {
     expect(store()).toMatchObject({
-      mode: 'autopilot',
+      crew: 'crewed',
       accelG: DEFAULT_ACCEL_G,
       tau: 0,
       playing: false,
@@ -252,35 +252,12 @@ describe('Auto-Step Down (§7.2)', () => {
 });
 
 describe('modos e missão', () => {
-  it('Cruzeiro Livre parte da rapidez atual, pausa e congela a posição', () => {
-    store().seek(100);
-    store().togglePlay();
-    const { eta, positionM } = store().flight;
-    store().setMode('manual');
-    expect(store()).toMatchObject({ mode: 'manual', playing: false, manualEta: eta });
-    expect(store().flight).toMatchObject({ phase: 'cruise', eta, positionM });
-
-    store().setManualEta(12);
-    expect(store().flight).toMatchObject({ eta: 12, positionM, gamma: Math.cosh(12) });
-    store().tick(1);
-    expect(store().tau).toBe(100);
-  });
-
-  it('a rapidez manual fica limitada a log₁₀γ ≤ 7,5', () => {
-    store().setMode('manual');
-    store().setManualEta(50);
-    expect(store().manualEta).toBe(MAX_MANUAL_ETA);
-    store().setManualEta(-1);
-    expect(store().manualEta).toBe(0);
-  });
-
-  it('voltar ao Autopilot restaura a cinemática do instante τ', () => {
-    store().seek(100);
-    const autopilot = store().flight;
-    store().setMode('manual');
-    store().setManualEta(3);
-    store().setMode('autopilot');
-    expect(store().flight).toEqual(autopilot);
+  it('o planejamento configura a missão inteira de uma vez, parada em τ = 0', () => {
+    store().seek(200);
+    store().configureMission({ ...store(), destination: store().destination, accelG: 30_000, crew: 'robotic' });
+    expect(store()).toMatchObject({ tau: 0, playing: false, accelG: 30_000, crew: 'robotic' });
+    store().setCrew('crewed');
+    expect(store().crew).toBe('crewed');
   });
 
   it('trocar destino ou aceleração reinicia a missão', () => {
