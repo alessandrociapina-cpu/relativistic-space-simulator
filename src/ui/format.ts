@@ -5,11 +5,30 @@ import { C, JULIAN_YEAR_S, LIGHT_SECOND_M, LIGHT_YEAR_M } from '../physics/Relat
 import { AU_M } from '../physics/sky';
 
 const LOCALE = 'pt-BR';
-const sig4 = new Intl.NumberFormat(LOCALE, { maximumSignificantDigits: 4 });
+
+/** Milhares com espaço na parte inteira ("2 537 000"): o ponto do pt-BR se confundiria com a vírgula. */
+const groupThousands = (s: string) => s.replace(/^-?\d{4,}/, (int) => int.replace(/\B(?=(\d{3})+(?!\d))/g, ' '));
+
+function significant(digits: number, keepZeros: boolean): (x: number) => string {
+  const f = new Intl.NumberFormat(LOCALE, {
+    maximumSignificantDigits: digits,
+    ...(keepZeros ? { minimumSignificantDigits: digits } : {}),
+    useGrouping: false,
+  });
+  return (x) => groupThousands(f.format(x));
+}
+
+// Texto corrido: sem zeros à direita ("4,4 s").
+const sig3 = significant(3, false);
+const sig4 = significant(4, false);
+// Visores que mudam a cada quadro: algarismos fixos, com os zeros ("4,40"), para o
+// número não encolher e empurrar o texto quando um algarismo some.
+const sig3Fixed = significant(3, true);
+const sig4Fixed = significant(4, true);
 
 /** Casas decimais fixas com vírgula: 6.685 → "6,685". */
 export function formatFixed(x: number, digits: number): string {
-  return x.toLocaleString(LOCALE, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  return groupThousands(x.toLocaleString(LOCALE, { minimumFractionDigits: digits, maximumFractionDigits: digits, useGrouping: false }));
 }
 const fixed = formatFixed;
 
@@ -27,7 +46,7 @@ export function formatScientific(x: number, significant = 3): string {
 
 /** Até 10⁴ com 4 algarismos significativos; acima, em notação científica. */
 export function formatCompact(x: number): string {
-  return Math.abs(x) < 1e4 ? sig4.format(x) : formatScientific(x);
+  return Math.abs(x) < 1e4 ? sig4(x) : formatScientific(x);
 }
 
 /** γ com 3 casas até 10⁴ (mostra o afastamento de 1), depois científico. */
@@ -37,7 +56,7 @@ export function formatGamma(gamma: number): string {
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
 
-/** Relógios: "12,3 s", "04:59,4", "05:12:08", "123,4 dias", "4,25 anos". Trunca, como um relógio. */
+/** Relógios: "12,3 s", "04:59,4", "05:12:08", "123,4 dias", "4,250 anos". Trunca, como um relógio. */
 export function formatDuration(seconds: number): string {
   if (seconds < 60) return `${fixed(Math.floor(seconds * 10) / 10, 1)} s`;
   if (seconds < 3600) {
@@ -50,18 +69,18 @@ export function formatDuration(seconds: number): string {
     const s = Math.floor(seconds);
     return `${pad2(Math.floor(s / 3600))}:${pad2(Math.floor((s % 3600) / 60))}:${pad2(s % 60)}`;
   }
-  if (seconds < JULIAN_YEAR_S) return `${sig4.format(seconds / 86_400)} dias`;
-  return `${sig4.format(seconds / JULIAN_YEAR_S)} anos`;
+  if (seconds < JULIAN_YEAR_S) return `${sig4Fixed(seconds / 86_400)} dias`;
+  return `${sig4Fixed(seconds / JULIAN_YEAR_S)} anos`;
 }
 
 /** Distâncias: anos-luz → UA → segundos-luz → km. */
 export function formatDistance(meters: number): string {
   // Na chegada sobra só o ruído de arredondamento (~10⁻²³ m): é zero.
   if (meters < 0.5) return '0 km';
-  if (meters >= 0.01 * LIGHT_YEAR_M) return `${sig4.format(meters / LIGHT_YEAR_M)} anos-luz`;
-  if (meters >= 0.1 * AU_M) return `${sig4.format(meters / AU_M)} UA`;
-  if (meters >= LIGHT_SECOND_M) return `${sig4.format(meters / LIGHT_SECOND_M)} s-luz`;
-  return `${sig4.format(meters / 1000)} km`;
+  if (meters >= 0.01 * LIGHT_YEAR_M) return `${sig4Fixed(meters / LIGHT_YEAR_M)} anos-luz`;
+  if (meters >= 0.1 * AU_M) return `${sig4Fixed(meters / AU_M)} UA`;
+  if (meters >= LIGHT_SECOND_M) return `${sig4Fixed(meters / LIGHT_SECOND_M)} s-luz`;
+  return `${sig4Fixed(meters / 1000)} km`;
 }
 
 const SPEED_UNITS: readonly (readonly [number, string])[] = [
@@ -76,12 +95,11 @@ const SPEED_UNITS: readonly (readonly [number, string])[] = [
 
 export function formatSpeed(metersPerSecond: number): string {
   for (const [scale, unit] of SPEED_UNITS) {
-    if (metersPerSecond >= scale) return `${sig4.format(metersPerSecond / scale)} ${unit}`;
+    if (metersPerSecond >= scale) return `${sig4Fixed(metersPerSecond / scale)} ${unit}`;
   }
   return `${formatScientific(metersPerSecond)} m/s`;
 }
 
-const sig3 = new Intl.NumberFormat(LOCALE, { maximumSignificantDigits: 3 });
 const RAD_TO_DEG = 180 / Math.PI;
 
 /**
@@ -92,10 +110,22 @@ export function formatProse(x: number): string {
   const a = Math.abs(x);
   if (a >= 1e6) return formatScientific(x);
   if (a >= 1000) return formatSpaceNumber(x);
-  return sig3.format(x);
+  return sig3(x);
 }
 
-/** Durações no texto corrido: "4,4 s", "22 min 28 s", "7 h 06 min", "32,3 dias", "4,25 anos". */
+/** Como `formatProse`, mas para visores ao vivo: mantém os zeros à direita ("4,40 UA", não "4,4 UA"). */
+export function formatReadout(x: number): string {
+  const a = Math.abs(x);
+  if (a >= 1e6) return formatScientific(x);
+  if (a >= 1000) return formatSpaceNumber(x);
+  return sig3Fixed(x);
+}
+
+/**
+ * Durações, no texto corrido e nas contagens: "4,4 s", "22 min 28 s", "7 h 06 min",
+ * "32,3 dias", "4,25 anos". Sempre com três algarismos ("12,0 dias"): uma contagem
+ * não muda de largura quando o último algarismo é zero.
+ */
 export function formatSpan(seconds: number): string {
   if (seconds < 59.95) return `${fixed(seconds, 1)} s`;
   if (seconds < 3599.5) {
@@ -106,24 +136,24 @@ export function formatSpan(seconds: number): string {
     const m = Math.round(seconds / 60);
     return `${Math.floor(m / 60)} h ${pad2(m % 60)} min`;
   }
-  if (seconds < JULIAN_YEAR_S) return `${sig3.format(seconds / 86_400)} dias`;
-  return `${sig3.format(seconds / JULIAN_YEAR_S)} anos`;
+  if (seconds < JULIAN_YEAR_S) return `${sig3Fixed(seconds / 86_400)} dias`;
+  return `${sig3Fixed(seconds / JULIAN_YEAR_S)} anos`;
 }
 
 /** Comprimentos de onda: "394 nm", "1,06 mm", "190 pm". */
 export function formatWavelengthNm(nm: number): string {
-  if (nm >= 1e6) return `${sig3.format(nm / 1e6)} mm`;
-  if (nm >= 1e3) return `${sig3.format(nm / 1e3)} µm`;
-  if (nm >= 1) return `${sig3.format(nm)} nm`;
-  return `${sig3.format(nm * 1e3)} pm`;
+  if (nm >= 1e6) return `${sig3Fixed(nm / 1e6)} mm`;
+  if (nm >= 1e3) return `${sig3Fixed(nm / 1e3)} µm`;
+  if (nm >= 1) return `${sig3Fixed(nm)} nm`;
+  return `${sig3Fixed(nm * 1e3)} pm`;
 }
 
 /** Ângulos pequenos: "30,0°", "5,73′", "0,0584″". */
 export function formatAngle(radians: number): string {
   const deg = radians * RAD_TO_DEG;
   if (deg >= 1) return `${fixed(deg, 1)}°`;
-  if (deg * 60 >= 1) return `${sig3.format(deg * 60)}′`;
-  return `${sig3.format(deg * 3600)}″`;
+  if (deg * 60 >= 1) return `${sig3Fixed(deg * 60)}′`;
+  return `${sig3Fixed(deg * 3600)}″`;
 }
 
 const ENERGY_PREFIXES = ['', 'k', 'M', 'G', 'T', 'P', 'E'] as const;
@@ -131,7 +161,7 @@ const ENERGY_PREFIXES = ['', 'k', 'M', 'G', 'T', 'P', 'E'] as const;
 /** Energias de partículas e fótons: "4,67 keV", "3,31 PeV". */
 export function formatEnergyEv(ev: number): string {
   const k = Math.min(Math.max(Math.floor(Math.log10(ev) / 3), 0), ENERGY_PREFIXES.length - 1);
-  return `${sig3.format(ev / 1000 ** k)} ${ENERGY_PREFIXES[k]}eV`;
+  return `${sig3Fixed(ev / 1000 ** k)} ${ENERGY_PREFIXES[k]}eV`;
 }
 
 /** Inteiros com espaço como separador de milhar, no estilo das telas de referência: "3 123 953". */

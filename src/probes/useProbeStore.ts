@@ -54,6 +54,8 @@ interface ProbeStore {
   readonly focus: FocusId;
   readonly selected: ProbeId;
   readonly scale: ScaleMode;
+  /** Rastros das outras sondas na cena (desligados, só a escolhida e as companheiras). */
+  readonly showOthers: boolean;
   /** Evento cujo cartão está aberto (alcançado na reprodução ou escolhido na lista). */
   readonly eventId: string | null;
   readonly view: ViewRequest;
@@ -65,6 +67,7 @@ interface ProbeStore {
   setFocus: (focus: FocusId) => void;
   setSelected: (id: ProbeId) => void;
   setScale: (scale: ScaleMode) => void;
+  setShowOthers: (on: boolean) => void;
   showEvent: (id: string | null) => void;
   /** Vai para o evento: pausa, foca o corpo certo e abre o cartão. */
   jumpToEvent: (id: string) => void;
@@ -98,6 +101,16 @@ export function eventView(event: MissionEvent): { focus: FocusId; scale: ScaleMo
   return { focus: event.craft ?? event.probeId, scale: null, distance: null };
 }
 
+const SHOW_OTHERS_KEY = 'relsim:probes-others';
+
+function loadShowOthers(): boolean {
+  try {
+    return localStorage.getItem(SHOW_OTHERS_KEY) !== 'off';
+  } catch {
+    return true;
+  }
+}
+
 export const useProbeStore = create<ProbeStore>()((set, get) => ({
   t: INITIAL_T,
   playing: false,
@@ -107,6 +120,7 @@ export const useProbeStore = create<ProbeStore>()((set, get) => ({
   focus: 'sun',
   selected: 'voyager2',
   scale: 'log',
+  showOthers: loadShowOthers(),
   eventId: null,
   view: { distance: null, nonce: 0 },
 
@@ -120,6 +134,14 @@ export const useProbeStore = create<ProbeStore>()((set, get) => ({
   setFocus: (focus) => set((s) => ({ focus, view: { distance: null, nonce: s.view.nonce + 1 } })),
   setSelected: (selected) => set({ selected, eventId: null }),
   setScale: (scale) => set((s) => ({ scale, view: { distance: null, nonce: s.view.nonce + 1 } })),
+  setShowOthers: (showOthers) => {
+    try {
+      localStorage.setItem(SHOW_OTHERS_KEY, showOthers ? 'on' : 'off');
+    } catch {
+      // sem armazenamento: a escolha vale só nesta sessão
+    }
+    set({ showOthers });
+  },
   showEvent: (eventId) => set({ eventId }),
   jumpToEvent: (id) => {
     const event = ALL_EVENTS.find((e) => e.id === id);

@@ -1,15 +1,19 @@
-import { useEffect, useRef, useState } from 'react';
-import { formatProse as num, formatSpan } from '../ui/format';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { formatReadout as num, formatSpaceNumber, formatSpan } from '../ui/format';
 import { BODIES, bodyState } from './bodies';
-import { distanceText } from './eventExplanations';
+import { MissionGallery } from './MissionGallery';
+import { MISSION_IMAGES } from './missionImages';
 import { MISSIONS, MISSION_LIST, ofBody, type ProbeMission } from './missions';
 import { AU_KM, DAY_S, currentEncounter, lightTimeS, probeState, relativeState, solarEscapeKms, speedKms } from './probes';
 import { daysToMs, formatDate, msToDays } from './time';
 import { useProbeStore } from './useProbeStore';
 import { dot, norm, sub } from './vec3';
 
-/** "302 milhões de km", "25,7 bilhões de km". */
-const kmText = (km: number) => (km < 1e9 ? `${num(km / 1e6)} milhões de km` : `${num(km / 1e9)} bilhões de km`);
+// Os visores mudam a cada quadro: números com algarismos fixos ("4,40 UA", não "4,4 UA"),
+// para o texto não pular quando um algarismo some.
+/** "880 km", "302 milhões de km", "25,7 bilhões de km". */
+const distanceText = (km: number) =>
+  km < 1e6 ? `${formatSpaceNumber(km)} km` : km < 1e9 ? `${num(km / 1e6)} milhões de km` : `${num(km / 1e9)} bilhões de km`;
 const year = (days: number) => new Date(daysToMs(days)).getUTCFullYear();
 
 /** "1977–", "1989–2003", "1970". */
@@ -60,7 +64,7 @@ function ProbePicker({ open, setOpen }: { open: boolean; setOpen: (open: boolean
   }, [open, setOpen]);
 
   return (
-    <div ref={root} className="relative mb-1.5">
+    <div ref={root} className="relative min-w-0 flex-1">
       <button
         type="button"
         aria-haspopup="listbox"
@@ -114,8 +118,8 @@ function ProbePicker({ open, setOpen }: { open: boolean; setOpen: (open: boolean
   );
 }
 
-/** "11 km/s", "850 m/s", "0 m/s". */
-const speedText = (kms: number) => (kms < 1 ? `${num(Math.round(kms * 1000))} m/s` : `${num(kms)} km/s`);
+/** "11,0 km/s", "850 m/s", "0 m/s". */
+const speedText = (kms: number) => (kms < 1 ? `${formatSpaceNumber(kms * 1000)} m/s` : `${num(kms)} km/s`);
 
 /** Fase do voo de uma Apollo, pelos eventos: órbita da Terra, ida, órbita da Lua, volta. */
 function apolloPhase(mission: ProbeMission, t: number): string {
@@ -179,6 +183,10 @@ export function ProbeHUD({ className = '' }: { className?: string }) {
   const { trajectory } = mission;
   // Com a lista aberta, o painel sobe acima do cartão do evento.
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  // Estável: o painel se redesenha a cada quadro e a galeria não precisa acompanhar.
+  const closeGallery = useCallback(() => setGalleryOpen(false), []);
+  const imageCount = MISSION_IMAGES[selected].length;
   const state = probeState(trajectory, t);
   const next = mission.events.find((e) => e.t > t);
   const crossedHeliopause = mission.events.some((e) => e.kind === 'heliopause' && e.t <= t);
@@ -241,7 +249,7 @@ export function ProbeHUD({ className = '' }: { className?: string }) {
               wide
             />
           )}
-          <Readout label="Distância do Sol" value={`${num(r)} UA`} detail={kmText(r * AU_KM)} />
+          <Readout label="Distância do Sol" value={`${num(r)} UA`} detail={distanceText(r * AU_KM)} />
           <Readout label="Distância da Terra" value={`${num(toEarth)} UA`} detail={`sinal leva ${formatSpan(lightTimeS(toEarth))}`} />
           <Readout label="Velocidade (Sol)" value={`${num(speed)} km/s`} detail={`escape aqui: ${num(escape)} km/s`} />
           <Readout label="Em voo há" value={formatSpan((t - trajectory.launch) * DAY_S)} />
@@ -255,7 +263,19 @@ export function ProbeHUD({ className = '' }: { className?: string }) {
       aria-label="Sonda"
       className={`relative rounded-md border border-cyan-400/30 bg-black/75 px-3 py-2 font-mono backdrop-blur-sm ${pickerOpen ? 'z-30' : ''} ${className}`}
     >
-      <ProbePicker open={pickerOpen} setOpen={setPickerOpen} />
+      <div className="mb-1.5 flex gap-1.5">
+        <ProbePicker open={pickerOpen} setOpen={setPickerOpen} />
+        <button
+          type="button"
+          aria-label={`Imagens da missão (${imageCount})`}
+          title="As imagens mais marcantes da missão (Wikimedia Commons)"
+          className="shrink-0 rounded-sm bg-slate-800/90 px-2 py-1 text-[12px] text-slate-100 hover:bg-slate-700"
+          onClick={() => setGalleryOpen(true)}
+        >
+          📷<span className="ml-1 text-[10px] text-slate-400 tabular-nums">{imageCount}</span>
+        </button>
+      </div>
+      {galleryOpen && <MissionGallery missionId={selected} onClose={closeGallery} />}
       {body}
       {next && (
         <button

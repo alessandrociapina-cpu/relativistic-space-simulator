@@ -4,10 +4,14 @@ import {
   formatCompact,
   formatDistance,
   formatDuration,
+  formatFixed,
   formatGamma,
+  formatProse,
+  formatReadout,
   formatRouteDistance,
   formatScientific,
   formatSpaceNumber,
+  formatSpan,
   formatVelocity,
 } from './format';
 
@@ -34,13 +38,14 @@ describe('formatação pt-BR', () => {
     expect(formatDuration(299.44)).toBe('04:59,4');
     expect(formatDuration(599.99)).toBe('09:59,9');
     expect(formatDuration(3 * 3600 + 62)).toBe('03:01:02');
-    expect(formatDuration(10 * 86_400)).toBe('10 dias');
-    expect(formatDuration(4.25 * JULIAN_YEAR_S)).toBe('4,25 anos');
-    expect(formatDuration(2.537e6 * JULIAN_YEAR_S)).toBe('2.537.000 anos');
+    expect(formatDuration(10 * 86_400)).toBe('10,00 dias');
+    expect(formatDuration(4.25 * JULIAN_YEAR_S)).toBe('4,250 anos');
+    expect(formatDuration(2.537e6 * JULIAN_YEAR_S)).toBe('2 537 000 anos');
   });
 
   it('distâncias em anos-luz, UA, segundos-luz e km', () => {
-    expect(formatDistance(4.25 * LIGHT_YEAR_M)).toBe('4,25 anos-luz');
+    expect(formatDistance(4.25 * LIGHT_YEAR_M)).toBe('4,250 anos-luz');
+    expect(formatDistance(26_700 * LIGHT_YEAR_M)).toBe('26 700 anos-luz');
     expect(formatDistance(1.5e12)).toBe('10,03 UA');
     expect(formatDistance(18.99 * LIGHT_SECOND_M)).toBe('18,99 s-luz');
     expect(formatDistance(1234)).toBe('1,234 km');
@@ -55,6 +60,22 @@ describe('formatação pt-BR', () => {
     expect(formatRouteDistance(1.495978707e11)).toBe('1,00 UA');
     expect(formatRouteDistance(4.25 * LIGHT_YEAR_M)).toBe('4,25 a.l.');
     expect(formatRouteDistance(2.537e6 * LIGHT_YEAR_M)).toBe('2 537 000 a.l.');
+  });
+
+  it('visores ao vivo mantêm a largura: zeros à direita e milhar com espaço', () => {
+    // 4,57 → 4,40 (não "4,4"): o número não encolhe e não empurra o texto.
+    expect(formatReadout(4.4)).toBe('4,40');
+    expect(formatReadout(4.57)).toBe('4,57');
+    expect(formatReadout(0.5)).toBe('0,500');
+    expect(formatReadout(12_345)).toBe('12 345');
+    expect(formatReadout(3.2e6)).toBe('3,20 × 10⁶');
+    expect(formatSpan(12 * 86_400)).toBe('12,0 dias');
+    expect(formatSpan(4.4)).toBe('4,4 s');
+    expect(formatFixed(6955.1234, 3)).toBe('6 955,123');
+    expect(formatGamma(6955.1234)).toBe('6 955,123');
+    // O texto corrido continua sem zeros à direita.
+    expect(formatProse(4.4)).toBe('4,4');
+    expect(formatProse(1)).toBe('1');
   });
 
   it('velocidade: fração de c até 0,99c, depois c − v', () => {

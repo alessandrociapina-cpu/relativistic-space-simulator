@@ -23,7 +23,8 @@ export function ProbeControls({ className = '' }: { className?: string }) {
   const slowed = useProbeStore((s) => s.slowdown !== null);
   const focus = useProbeStore((s) => s.focus);
   const scale = useProbeStore((s) => s.scale);
-  const { togglePlay, setT, setRate, setAutoSlow, setFocus, setScale } = useProbeStore.getState();
+  const showOthers = useProbeStore((s) => s.showOthers);
+  const { togglePlay, setT, setRate, setAutoSlow, setFocus, setScale, setShowOthers } = useProbeStore.getState();
   const today = msToDays(Date.now());
 
   return (
@@ -142,6 +143,10 @@ export function ProbeControls({ className = '' }: { className?: string }) {
             </button>
           ))}
         </div>
+        <label className="flex items-center gap-1.5 text-slate-300" title="Desligado: só a rota da missão escolhida, sem as das outras sondas">
+          <input type="checkbox" className="accent-cyan-400" checked={showOthers} onChange={(e) => setShowOthers(e.target.checked)} />
+          Rotas das outras sondas
+        </label>
       </div>
     </section>
   );
