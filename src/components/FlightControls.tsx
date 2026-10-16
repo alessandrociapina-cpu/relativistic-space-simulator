@@ -1,18 +1,24 @@
 import { useState } from 'react';
 import { useAudioSettings } from '../audio/audioSettings';
 import { useExplainSettings } from '../ui/explainSettings';
-import { log10GammaFromRapidity, rapidityFromLog10Gamma } from '../physics/RelativityEngine';
-import { DEFAULT_ACCEL_G, DESTINATION_LIST, type DestinationId } from '../physics/destinations';
 import {
-  MAX_LOG10_GAMMA,
-  TIME_SCALES,
-  useFlightStore,
-  type FlightMode,
-} from '../store/useFlightStore';
-import { formatCompact, formatDuration, formatFixed, formatGamma } from '../ui/format';
+  computeMissionProfile,
+  log10GammaFromRapidity,
+  rapidityFromLog10Gamma,
+  rocketMassRatio,
+} from '../physics/RelativityEngine';
+import { CREWED_ACCEL_G, DEFAULT_ACCEL_G, DESTINATION_LIST, type DestinationId } from '../physics/destinations';
+import { timeScaleOptions, timeScaleStep } from '../store/timeScales';
+import { MAX_LOG10_GAMMA, useFlightStore, type FlightMode } from '../store/useFlightStore';
+import { formatCompact, formatDuration, formatFixed, formatGamma, formatProse, formatVelocity } from '../ui/format';
 
-/** Faixa do slider de aceleração: 1 G a 10⁷ G (log₁₀). */
-const MAX_LOG10_ACCEL_G = 7;
+/** Faixa da aceleração personalizada: 0,1 g a 10⁷ g. */
+const MIN_ACCEL_G = 0.1;
+const MAX_ACCEL_G = 1e7;
+/** Velocidade de cruzeiro sugerida ao ligar o perfil com inércia (fração de c). */
+const DEFAULT_COAST_BETA = 0.9;
+/** Menor rapidez de cruzeiro do slider (β ≈ 0,05). */
+const MIN_COAST_ETA = 0.05;
 
 const MODES: readonly { mode: FlightMode; label: string }[] = [
   { mode: 'autopilot', label: 'Autopilot' },
@@ -45,56 +51,193 @@ function ModeToggle() {
   );
 }
 
+const presetClass = (active: boolean) =>
+  `rounded-sm px-2 py-0.5 text-[11px] transition-colors ${
+    active ? 'bg-cyan-400/80 text-black' : 'bg-slate-800/80 text-slate-300 hover:bg-slate-700'
+  }`;
+
+/** Aceleração própria: demonstração, viagem tripulada a 1 g ou um valor qualquer em g. */
+function AccelerationSettings() {
+  const accelG = useFlightStore((s) => s.accelG);
+  const setAccelG = useFlightStore((s) => s.setAccelG);
+  const [customOpen, setCustomOpen] = useState(false);
+  const [draft, setDraft] = useState<string | null>(null);
+  const preset = customOpen
+    ? 'custom'
+    : accelG === DEFAULT_ACCEL_G
+      ? 'demo'
+      : accelG === CREWED_ACCEL_G
+        ? 'crewed'
+        : 'custom';
+  const choose = (g: number) => {
+    setCustomOpen(false);
+    setDraft(null);
+    setAccelG(g);
+  };
+  const commit = (g: number) => {
+    if (g >= MIN_ACCEL_G && g <= MAX_ACCEL_G) setAccelG(g);
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+      <span className="text-slate-400">α</span>
+      <div className="flex gap-1" role="radiogroup" aria-label="Aceleração própria">
+        <button
+          type="button"
+          role="radio"
+          aria-checked={preset === 'demo'}
+          title="1,61 × 10⁶ g: Proxima em 10 min de bordo, com todos os efeitos em tempo real"
+          className={presetClass(preset === 'demo')}
+          onClick={() => choose(DEFAULT_ACCEL_G)}
+        >
+          Demonstração
+        </button>
+        <button
+          type="button"
+          role="radio"
+          aria-checked={preset === 'crewed'}
+          title="1 g: o peso de sempre a bordo, a viagem tripulada clássica"
+          className={presetClass(preset === 'crewed')}
+          onClick={() => choose(CREWED_ACCEL_G)}
+        >
+          1 g
+        </button>
+        <button
+          type="button"
+          role="radio"
+          aria-checked={preset === 'custom'}
+          title="Qualquer aceleração entre 0,1 g e 10⁷ g"
+          className={presetClass(preset === 'custom')}
+          onClick={() => setCustomOpen(true)}
+        >
+          Personalizada
+        </button>
+      </div>
+      {preset === 'custom' && (
+        <>
+          <label className="flex items-center gap-1">
+            <input
+              type="number"
+              inputMode="decimal"
+              aria-label="Aceleração própria em g"
+              className="w-24 rounded-sm border border-slate-700 bg-slate-900 px-1 py-0.5 text-right text-slate-100 tabular-nums"
+              min={MIN_ACCEL_G}
+              max={MAX_ACCEL_G}
+              step="0.1"
+              value={draft ?? String(accelG)}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                commit(Number(e.target.value));
+              }}
+              onBlur={() => setDraft(null)}
+            />
+            <span className="text-slate-400">g</span>
+          </label>
+          <input
+            type="range"
+            aria-label="Aceleração própria (log₁₀ g)"
+            className="min-w-32 flex-1 accent-cyan-400"
+            min={Math.log10(MIN_ACCEL_G)}
+            max={Math.log10(MAX_ACCEL_G)}
+            step="any"
+            value={Math.log10(accelG)}
+            onChange={(e) => {
+              setDraft(null);
+              commit(Number((10 ** Number(e.target.value)).toPrecision(3)));
+            }}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Perfil da viagem: Flip-and-Burn ou acelerar, cruzar por inércia e frear. */
+function ProfileSettings() {
+  const coastEta = useFlightStore((s) => s.coastEta);
+  const profile = useFlightStore((s) => s.profile);
+  const setCoastEta = useFlightStore((s) => s.setCoastEta);
+  // Rapidez do ponto médio: acima dela o cruzeiro nunca é atingido.
+  const flipEta = computeMissionProfile(profile.distanceM, profile.properAccel).etaMax;
+  const maxCoastEta = flipEta * 0.999;
+  const shownEta = coastEta === null ? null : Math.min(coastEta, maxCoastEta);
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+      <span className="text-slate-400">Perfil</span>
+      <div className="flex gap-1" role="radiogroup" aria-label="Perfil da viagem">
+        <button
+          type="button"
+          role="radio"
+          aria-checked={coastEta === null}
+          title="Acelera até o meio do caminho e freia no resto (Flip-and-Burn)"
+          className={presetClass(coastEta === null)}
+          onClick={() => setCoastEta(null)}
+        >
+          Acelerar e frear
+        </button>
+        <button
+          type="button"
+          role="radio"
+          aria-checked={coastEta !== null}
+          title="Acelera até a velocidade de cruzeiro, desliga o motor e freia no fim: gasta menos combustível"
+          className={presetClass(coastEta !== null)}
+          onClick={() => setCoastEta(Math.min(Math.atanh(DEFAULT_COAST_BETA), 0.8 * flipEta))}
+        >
+          Acelerar, cruzar e frear
+        </button>
+      </div>
+      {shownEta !== null && (
+        <label className="flex min-w-48 flex-1 items-center gap-2">
+          <span className="text-slate-400">v</span>
+          <input
+            type="range"
+            aria-label="Velocidade de cruzeiro (rapidez η)"
+            className="min-w-0 flex-1 accent-cyan-400"
+            min={Math.min(MIN_COAST_ETA, maxCoastEta)}
+            max={maxCoastEta}
+            step="any"
+            value={shownEta}
+            onChange={(e) => setCoastEta(Number(e.target.value))}
+          />
+          <span className="shrink-0 text-right text-slate-100 tabular-nums">
+            {formatVelocity(Math.tanh(shownEta), Math.exp(-shownEta) / Math.cosh(shownEta))}
+          </span>
+        </label>
+      )}
+    </div>
+  );
+}
+
 function MissionSettings() {
   const destination = useFlightStore((s) => s.destination);
-  const accelG = useFlightStore((s) => s.accelG);
   const profile = useFlightStore((s) => s.profile);
   const setDestination = useFlightStore((s) => s.setDestination);
-  const setAccelG = useFlightStore((s) => s.setAccelG);
 
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-        <label className="flex max-w-full min-w-0 items-center gap-2">
-          <span className="text-slate-400">Destino</span>
-          <select
-            className="min-w-0 flex-1 rounded-sm border border-slate-700 bg-slate-900 px-1 py-0.5 text-slate-100"
-            value={destination.id}
-            onChange={(e) => setDestination(e.target.value as DestinationId)}
-          >
-            {DESTINATION_LIST.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name} · {formatCompact(d.distanceLy)} ly
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex min-w-48 flex-1 items-center gap-2">
-          <span className="text-slate-400">α</span>
-          <input
-            type="range"
-            aria-label="Aceleração própria (log₁₀ G)"
-            className="min-w-0 flex-1 accent-cyan-400"
-            min={0}
-            max={MAX_LOG10_ACCEL_G}
-            step="any"
-            value={Math.log10(accelG)}
-            onChange={(e) => setAccelG(10 ** Number(e.target.value))}
-          />
-          <span className="w-24 text-right text-slate-100 tabular-nums">{formatCompact(accelG)} G</span>
-        </label>
-        <button
-          type="button"
-          className="rounded-sm bg-slate-800/80 px-2 py-0.5 text-slate-300 hover:bg-slate-700 disabled:opacity-40"
-          disabled={accelG === DEFAULT_ACCEL_G}
-          onClick={() => setAccelG(DEFAULT_ACCEL_G)}
+      <label className="flex max-w-full min-w-0 items-center gap-2">
+        <span className="text-slate-400">Destino</span>
+        <select
+          className="min-w-0 flex-1 rounded-sm border border-slate-700 bg-slate-900 px-1 py-0.5 text-slate-100 sm:flex-none"
+          value={destination.id}
+          onChange={(e) => setDestination(e.target.value as DestinationId)}
         >
-          Padrão
-        </button>
-      </div>
+          {DESTINATION_LIST.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.name} · {formatCompact(d.distanceLy)} ly
+            </option>
+          ))}
+        </select>
+      </label>
+      <AccelerationSettings />
+      <ProfileSettings />
       <div className="text-slate-500">
         {formatDuration(profile.tauTotal)} de bordo · {formatDuration(profile.tTotal)} na Terra · γ máx{' '}
-        {formatGamma(profile.gammaMax)}
+        {formatGamma(profile.gammaMax)} ·{' '}
+        <span title="Razão de massa inicial/final de um foguete de fótons ideal (o mais eficiente possível)">
+          foguete de fótons: m₀/m₁ = {formatProse(rocketMassRatio(profile))}
+        </span>
       </div>
     </div>
   );
@@ -110,7 +253,8 @@ function Timeline() {
   const arrived = tau >= tauTotal;
 
   return (
-    <div className="flex items-center gap-2">
+    // Em telas estreitas, relógios longos ("1,754 anos / 3,543 anos") descem para a linha de baixo.
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
       <button
         type="button"
         className="w-24 shrink-0 rounded-sm bg-cyan-400/80 px-2 py-1 text-[11px] tracking-wider text-black hover:bg-cyan-300"
@@ -130,14 +274,14 @@ function Timeline() {
       <input
         type="range"
         aria-label="Linha do tempo do voo (tempo próprio)"
-        className="min-w-0 flex-1 accent-cyan-400"
+        className="min-w-32 flex-1 accent-cyan-400"
         min={0}
         max={tauTotal}
         step="any"
         value={tau}
         onChange={(e) => seek(Number(e.target.value))}
       />
-      <span className="shrink-0 text-slate-400 tabular-nums">
+      <span className="ml-auto shrink-0 text-slate-400 tabular-nums">
         {formatDuration(tau)} / {formatDuration(tauTotal)}
       </span>
     </div>
@@ -146,25 +290,31 @@ function Timeline() {
 
 function TimeScaleControls() {
   const timeScale = useFlightStore((s) => s.timeScale);
+  const profile = useFlightStore((s) => s.profile);
   const autoStepDown = useFlightStore((s) => s.autoStepDown);
   const setTimeScale = useFlightStore((s) => s.setTimeScale);
   const setAutoStepDown = useFlightStore((s) => s.setAutoStepDown);
+  const options = timeScaleOptions(profile);
+  // Depois de um Auto-Step Down o multiplicador pode estar fora dos 5 degraus da missão.
+  const steps = options.some((o) => o.value === timeScale)
+    ? options
+    : [...options, timeScaleStep(timeScale)].sort((a, b) => a.value - b.value);
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-      <div className="flex items-center gap-1" role="radiogroup" aria-label="Multiplicador de tempo próprio">
+      <div className="flex flex-wrap items-center gap-1" role="radiogroup" aria-label="Multiplicador de tempo próprio">
         <span className="mr-1 text-slate-400">M<sub>τ</sub></span>
-        {TIME_SCALES.map((m) => (
+        {steps.map((step) => (
           <button
-            key={m}
+            key={step.value}
             type="button"
             role="radio"
-            aria-checked={m === timeScale}
-            title={m === 1 ? 'Tempo real' : undefined}
-            className={segmentClass(m === timeScale)}
-            onClick={() => setTimeScale(m)}
+            aria-checked={step.value === timeScale}
+            title={step.title}
+            className={`whitespace-nowrap ${segmentClass(step.value === timeScale)} max-sm:px-1.5`}
+            onClick={() => setTimeScale(step.value)}
           >
-            {m.toLocaleString('pt-BR')}x
+            {step.label}
           </button>
         ))}
       </div>
@@ -175,7 +325,7 @@ function TimeScaleControls() {
           checked={autoStepDown}
           onChange={(e) => setAutoStepDown(e.target.checked)}
         />
-        Reduzir para 1x em eventos críticos
+        Desacelerar nos eventos críticos
       </label>
     </div>
   );

@@ -88,9 +88,13 @@ export const DESTINATIONS: Readonly<Record<DestinationId, Destination>> = {
 /** Destinos na ordem de exibição (do mais próximo ao mais distante). */
 export const DESTINATION_LIST: readonly Destination[] = Object.values(DESTINATIONS);
 
+/** Aceleração da viagem tripulada: 1 g, o peso de sempre a bordo. */
+export const CREWED_ACCEL_G = 1;
+
 export function destinationMissionProfile(
   destination: Destination,
   accelG: number = destination.defaultAccelG,
+  coastEta: number | null = null,
 ): MissionProfile {
-  return computeMissionProfile(destination.distanceLy * LIGHT_YEAR_M, accelG * G0);
+  return computeMissionProfile(destination.distanceLy * LIGHT_YEAR_M, accelG * G0, coastEta);
 }

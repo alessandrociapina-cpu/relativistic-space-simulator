@@ -53,56 +53,115 @@ export function computeShaderKinematics(eta: number): ShaderKinematics {
   };
 }
 
-// ── §4.2 Perfil Flip-and-Burn ────────────────────────────────────────────────
+// ── §4.2 Perfil Flip-and-Burn (com cruzeiro opcional) ────────────────────────
 export interface MissionProfile {
   /** Distância total em repouso D_total (m). */
   readonly distanceM: number;
   /** Aceleração própria α (m/s²). */
   readonly properAccel: number;
-  /** Ponto de inversão d½ = D_total / 2 (m). */
+  /** Meio do caminho d½ = D_total / 2 (m). */
   readonly halfDistanceM: number;
+  /** γ e η de pico: os do ponto médio no Flip-and-Burn, os de cruzeiro com inércia. */
   readonly gammaMax: number;
   readonly etaMax: number;
-  /** Tempo próprio até o flip (s). */
+  /** Meio da missão em tempo próprio (s): o perfil é simétrico em torno dele. */
   readonly tauHalf: number;
   /** Tempo próprio total de bordo (s). */
   readonly tauTotal: number;
-  /** Tempo da Terra até o flip (s). */
+  /** Tempo da Terra no meio da missão (s). */
   readonly tHalf: number;
   /** Tempo da Terra total (s). */
   readonly tTotal: number;
+  /** Fim da aceleração e início da frenagem (s de bordo); os dois valem τ½ no Flip-and-Burn. */
+  readonly burnEndTau: number;
+  readonly brakeStartTau: number;
+  /** Rapidez de cruzeiro da fase de inércia; `null` no Flip-and-Burn puro. */
+  readonly coastEta: number | null;
 }
 
-export function computeMissionProfile(distanceM: number, properAccel: number): MissionProfile {
+/**
+ * Perfil da missão. Sem `coastEta`, é o Flip-and-Burn da §4.2: acelera até o
+ * meio do caminho e freia. Com `coastEta` menor que a rapidez do ponto médio,
+ * desliga o motor ao atingi-la, segue por inércia e freia no trecho final
+ * (acelerar, cruzar e frear). Acima dela, o cruzeiro nunca é atingido.
+ */
+export function computeMissionProfile(
+  distanceM: number,
+  properAccel: number,
+  coastEta: number | null = null,
+): MissionProfile {
   if (!(distanceM > 0 && Number.isFinite(distanceM))) {
     throw new RangeError(`Distância inválida: ${distanceM}`);
   }
   if (!(properAccel > 0 && Number.isFinite(properAccel))) {
     throw new RangeError(`Aceleração própria inválida: ${properAccel}`);
   }
+  if (coastEta !== null && !(coastEta > 0)) {
+    throw new RangeError(`Rapidez de cruzeiro inválida: ${coastEta}`);
+  }
 
+  const cOverA = C / properAccel;
   const halfDistanceM = distanceM / 2;
   // γ_max − 1, mantido separado para preservar precisão em missões curtas
   const gammaMaxMinus1 = (properAccel * halfDistanceM) / C2;
-  const etaMax = acosh1p(gammaMaxMinus1);
-  const tauHalf = (C / properAccel) * etaMax;
-  const tHalf = (C / properAccel) * Math.sinh(etaMax);
+  const flipEta = acosh1p(gammaMaxMinus1);
 
+  if (coastEta === null || coastEta >= flipEta) {
+    const tauHalf = cOverA * flipEta;
+    const tHalf = cOverA * Math.sinh(flipEta);
+    return {
+      distanceM,
+      properAccel,
+      halfDistanceM,
+      gammaMax: 1 + gammaMaxMinus1,
+      etaMax: flipEta,
+      tauHalf,
+      tauTotal: 2 * tauHalf,
+      tHalf,
+      tTotal: 2 * tHalf,
+      burnEndTau: tauHalf,
+      brakeStartTau: tauHalf,
+      coastEta: null,
+    };
+  }
+
+  // Inércia a β_c = tanh η_c: dx/dτ = c·sinh η_c e dt/dτ = cosh η_c.
+  const burnTau = cOverA * coastEta;
+  const burnTime = cOverA * Math.sinh(coastEta);
+  const coastDistance = distanceM - 2 * (C2 / properAccel) * coshm1(coastEta);
+  const coastTau = coastDistance / (C * Math.sinh(coastEta));
+  const tauTotal = 2 * burnTau + coastTau;
+  const tTotal = 2 * burnTime + coastTau * Math.cosh(coastEta);
   return {
     distanceM,
     properAccel,
     halfDistanceM,
-    gammaMax: 1 + gammaMaxMinus1,
-    etaMax,
-    tauHalf,
-    tauTotal: 2 * tauHalf,
-    tHalf,
-    tTotal: 2 * tHalf,
+    gammaMax: 1 + coshm1(coastEta),
+    etaMax: coastEta,
+    tauHalf: tauTotal / 2,
+    tauTotal,
+    tHalf: tTotal / 2,
+    tTotal,
+    burnEndTau: burnTau,
+    brakeStartTau: burnTau + coastTau,
+    coastEta,
   };
 }
 
-/** `cruise`: Cruzeiro Livre, com rapidez imposta pelo usuário (ver `withRapidity`). */
-export type FlightPhase = 'accelerating' | 'decelerating' | 'arrived' | 'cruise';
+/**
+ * Razão de massa m₀/m₁ do foguete relativístico ideal que ganha e depois perde
+ * a rapidez de pico: Δη = (v_e/c)·ln(m₀/m₁), com Δη = 2·η_max. O foguete de
+ * fótons (v_e = c) é o limite teórico.
+ */
+export function rocketMassRatio(profile: MissionProfile, exhaustBeta = 1): number {
+  return Math.exp((2 * profile.etaMax) / exhaustBeta);
+}
+
+/**
+ * `coasting`: motor desligado na fase de inércia do perfil com cruzeiro.
+ * `cruise`: Cruzeiro Livre, com rapidez imposta pelo usuário (ver `withRapidity`).
+ */
+export type FlightPhase = 'accelerating' | 'coasting' | 'decelerating' | 'arrived' | 'cruise';
 
 export interface FlightState {
   /** Tempo próprio de bordo τ (s), limitado a [0, τ_total]. */
@@ -124,7 +183,7 @@ export interface FlightState {
 }
 
 export function computeFlightState(profile: MissionProfile, tau: number): FlightState {
-  const { distanceM, properAccel, tauHalf, tauTotal, tTotal } = profile;
+  const { distanceM, properAccel, burnEndTau, brakeStartTau, tauTotal, tTotal } = profile;
   const t = Math.min(Math.max(tau, 0), tauTotal);
   const cOverA = C / properAccel;
   const c2OverA = C2 / properAccel;
@@ -134,12 +193,19 @@ export function computeFlightState(profile: MissionProfile, tau: number): Flight
   let restDistanceRemainingM: number;
   let earthTimeS: number;
 
-  if (t <= tauHalf) {
+  if (t <= burnEndTau) {
     // Fase 1 — aceleração
     eta = t / cOverA;
     positionM = c2OverA * coshm1(eta);
     restDistanceRemainingM = distanceM - positionM;
     earthTimeS = cOverA * Math.sinh(eta);
+  } else if (t < brakeStartTau) {
+    // Inércia (só no perfil com cruzeiro): rapidez constante η_c
+    eta = profile.etaMax;
+    const dt = t - burnEndTau;
+    positionM = c2OverA * coshm1(eta) + C * Math.sinh(eta) * dt;
+    restDistanceRemainingM = distanceM - positionM;
+    earthTimeS = cOverA * Math.sinh(eta) + Math.cosh(eta) * dt;
   } else {
     // Fase 2 — frenagem: tudo em função do tempo próprio restante. A distância
     // restante sai direto da fórmula, não de D − x, para não perder precisão
@@ -155,7 +221,7 @@ export function computeFlightState(profile: MissionProfile, tau: number): Flight
 
   return {
     tau: t,
-    phase: t <= tauHalf ? 'accelerating' : t < tauTotal ? 'decelerating' : 'arrived',
+    phase: t <= burnEndTau ? 'accelerating' : t < brakeStartTau ? 'coasting' : t < tauTotal ? 'decelerating' : 'arrived',
     eta,
     beta: k.uBeta,
     gamma: k.uGamma,
@@ -197,7 +263,7 @@ export function log10GammaFromRapidity(eta: number): number {
 /**
  * §4.2.5 — Tempo próprio que a nave levaria do ponto médio até o alvo se, em
  * vez de frear, continuasse acelerando: (c/α)·[acosh(1 + αD/c²) − η_max].
- * Para γ_max ≫ 1 tende a (c/α)·ln 2.
+ * Para γ_max ≫ 1 tende a (c/α)·ln 2. Só faz sentido no Flip-and-Burn puro.
  */
 export function computeNoBrakeProperTime(profile: MissionProfile): number {
   const etaFull = acosh1p((profile.properAccel * profile.distanceM) / C2);

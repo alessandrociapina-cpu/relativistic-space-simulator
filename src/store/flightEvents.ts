@@ -19,12 +19,12 @@ export type FlightEvent =
 /** A contagem regressiva começa 3 s (tempo real) antes de cada marco. */
 export const COUNTDOWN_FROM_S = 3;
 
-/** Marcos em voo, ordenados por τ: entradas da CMB no visível, flip e chegada. */
+/** Marcos em voo, ordenados por τ: entradas da CMB no visível, flip (início da frenagem) e chegada. */
 export function computeMilestones(profile: MissionProfile, windows: readonly CriticalWindow[]): Milestone[] {
   const milestones: Milestone[] = windows
     .filter((w) => w.kind === 'cmb-visible')
     .map((w) => ({ kind: 'cmb-entry', tau: w.startTau }));
-  milestones.push({ kind: 'flip', tau: profile.tauHalf }, { kind: 'arrival', tau: profile.tauTotal });
+  milestones.push({ kind: 'flip', tau: profile.brakeStartTau }, { kind: 'arrival', tau: profile.tauTotal });
   return milestones.sort((a, b) => a.tau - b.tau);
 }
 

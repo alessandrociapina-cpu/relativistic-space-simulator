@@ -6,6 +6,7 @@ import { formatDistance, formatDuration, formatFixed, formatGamma, formatVelocit
 
 const PHASE_LABEL: Readonly<Record<FlightPhase, string>> = {
   accelerating: 'Aceleração',
+  coasting: 'Inércia',
   decelerating: 'Frenagem',
   arrived: 'Chegada',
   cruise: 'Cruzeiro livre',
@@ -42,7 +43,7 @@ export function TelemetryHUD({ className = '' }: { className?: string }) {
   const flight = useFlightStore((s) => s.flight);
   const mode = useFlightStore((s) => s.mode);
   const windows = useFlightStore((s) => s.criticalWindows);
-  const tauHalf = useFlightStore((s) => s.profile.tauHalf);
+  const brakeStartTau = useFlightStore((s) => s.profile.brakeStartTau);
   const ignitionCountdownS = useFlightStore((s) => s.ignitionCountdownS);
   const isEyeHazard = useFlightStore((s) => s.photometry.isEyeHazard);
   const whiteout = useFlightStore((s) => s.photometry.isWhiteoutHudActive);
@@ -73,7 +74,7 @@ export function TelemetryHUD({ className = '' }: { className?: string }) {
         {cmbVisible && <span className="rounded-sm bg-amber-400/90 px-1.5 text-black">CMB no visível</span>}
         {preFlip && (
           <span className="rounded-sm bg-rose-500/90 px-1.5 text-black">
-            Flip em <span className="normal-case">{formatDuration(Math.max(0, tauHalf - flight.tau))}</span>
+            Flip em <span className="normal-case">{formatDuration(Math.max(0, brakeStartTau - flight.tau))}</span>
           </span>
         )}
       </div>

@@ -4,8 +4,8 @@ import { WIEN_NM_K, type EyeTimeline } from '../physics/EyeAndPhotometry';
 import { AU_M } from '../physics/sky';
 import { useFlightStore } from '../store/useFlightStore';
 import { useExplainSettings } from '../ui/explainSettings';
-import { formatSpaceNumber } from '../ui/format';
-import { HOLOGRAM_COUNTDOWN_S, selectHologramMode, type HologramMode } from '../ui/hologramMode';
+import { formatSpaceNumber, formatSpan } from '../ui/format';
+import { hologramCountdownS, selectHologramMode, type HologramMode } from '../ui/hologramMode';
 
 const CYAN = '#38bdf8';
 const AMBER = '#f59e0b';
@@ -100,6 +100,9 @@ const niceStep = (span: number) => {
   return [1, 2, 5, 10].map((m) => m * p).find((s) => s >= raw) ?? raw;
 };
 
+/** Rótulo do eixo de tempo de bordo: segundos na demonstração, dias ou anos nas viagens longas. */
+const tickLabel = (seconds: number) => (seconds < 3600 ? `${Math.round(seconds)} s` : formatSpan(seconds));
+
 function LuxCurveHologram({ timeline, tau, tauHalf, lux }: { timeline: EyeTimeline; tau: number; tauHalf: number; lux: number }) {
   const halfIndex = Math.round(tauHalf / timeline.dt);
   const threshold = timeline.peakLux * 0.01;
@@ -139,7 +142,8 @@ function LuxCurveHologram({ timeline, tau, tauHalf, lux }: { timeline: EyeTimeli
         <line x1="20" y1="86" x2="440" y2="86" stroke="#64748b" />
         {ticks.map((t, i) => (
           <text key={t} x={x(t)} y="99" fill="#cbd5e1" fontSize="9">
-            {Math.round(t)} s{i === 0 ? ' · SHIP TIME' : ''}
+            {tickLabel(t)}
+            {i === 0 ? ' · SHIP TIME' : ''}
           </text>
         ))}
         <text x="440" y="99" fill="#cbd5e1" fontSize="9" textAnchor="end">
@@ -161,16 +165,20 @@ function ellipseArc(fraction: number): string {
   return points.join(' ');
 }
 
-function CountdownHologram({ label, remaining }: { label: string; remaining: number }) {
+function CountdownHologram({ label, remaining, window }: { label: string; remaining: number; window: number }) {
+  // Segundos na demonstração; nas viagens longas, o tempo de bordo que falta ("12,3 dias").
+  const long = window > 99;
   return (
     <>
       <div className="mb-1 text-xs tracking-[0.2em] text-sky-200/90 uppercase">{label}</div>
-      <div className="mb-2 text-6xl font-light text-amber-400 drop-shadow-[0_0_18px_rgba(245,158,11,0.55)]">
-        {Math.max(1, Math.ceil(remaining))}
+      <div
+        className={`mb-2 font-light text-amber-400 drop-shadow-[0_0_18px_rgba(245,158,11,0.55)] ${long ? 'text-4xl' : 'text-6xl'}`}
+      >
+        {long ? formatSpan(remaining) : Math.max(1, Math.ceil(remaining))}
       </div>
       <svg viewBox="0 0 300 75" className="w-[min(300px,80vw)]">
         <ellipse cx="150" cy="32" rx="125" ry="22" fill="none" stroke={CYAN} strokeOpacity="0.25" strokeDasharray="2 6" strokeWidth="3" />
-        <polyline points={ellipseArc(Math.min(1, remaining / HOLOGRAM_COUNTDOWN_S))} fill="none" stroke={CYAN} strokeWidth="3" />
+        <polyline points={ellipseArc(Math.min(1, remaining / window))} fill="none" stroke={CYAN} strokeWidth="3" />
         <line x1="150" y1="74" x2="65" y2="42" stroke={CYAN} strokeOpacity="0.35" />
         <line x1="150" y1="74" x2="235" y2="42" stroke={CYAN} strokeOpacity="0.35" />
       </svg>
@@ -311,6 +319,7 @@ export function CenterHologramProjector() {
     sunDistanceAu,
     cmbTempK: p.cmbTempAheadK,
     cmbPeakNm: p.cmbWienPeakNm,
+    eyeDimmer: p.dimmerFactor,
   });
   if (hologram === 'none' || effectsPanelOpen) return null;
 
@@ -326,10 +335,22 @@ export function CenterHologramProjector() {
       content = <LuxCurveHologram timeline={timeline} tau={flight.tau} tauHalf={profile.tauHalf} lux={p.visibleLuxAhead} />;
       break;
     case 'countdown-flip':
-      content = <CountdownHologram label="DECELERATION IN" remaining={profile.tauHalf - flight.tau} />;
+      content = (
+        <CountdownHologram
+          label="DECELERATION IN"
+          remaining={profile.brakeStartTau - flight.tau}
+          window={hologramCountdownS(profile)}
+        />
+      );
       break;
     case 'countdown-arrival':
-      content = <CountdownHologram label="DECELERATION COMPLETE IN" remaining={profile.tauTotal - flight.tau} />;
+      content = (
+        <CountdownHologram
+          label="DECELERATION COMPLETE IN"
+          remaining={profile.tauTotal - flight.tau}
+          window={hologramCountdownS(profile)}
+        />
+      );
       break;
     case 'eye-adaptation':
       content = (

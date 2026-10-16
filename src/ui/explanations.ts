@@ -10,13 +10,15 @@ import {
   C,
   G0,
   T_CMB_0,
+  computeMissionProfile,
   computeNoBrakeProperTime,
   computeShaderKinematics,
+  rocketMassRatio,
   type FlightState,
   type MissionProfile,
 } from '../physics/RelativityEngine';
 import type { Destination } from '../physics/destinations';
-import { CMB_VISIBLE_GAMMA, PRE_FLIP_WINDOW_S } from '../physics/criticalEvents';
+import { CMB_VISIBLE_GAMMA, preFlipWindowS } from '../physics/criticalEvents';
 import {
   EYE,
   WIEN_NM_K,
@@ -64,6 +66,7 @@ export type EffectId =
   | 'arrival'
   | 'flip'
   | 'braking'
+  | 'coasting'
   | 'eye-adaptation'
   | 'target-blueshift'
   | 'solar-system'
@@ -76,7 +79,8 @@ export type EffectId =
   | 'length-contraction'
   | 'time-dilation'
   | 'kinematics'
-  | 'mission';
+  | 'mission'
+  | 'rocket';
 
 /**
  * Ordem do painel e prioridade do cartão: primeiro o que é próprio do
@@ -86,6 +90,7 @@ export const EFFECT_ORDER: readonly EffectId[] = [
   'arrival',
   'flip',
   'braking',
+  'coasting',
   'eye-adaptation',
   'target-blueshift',
   'solar-system',
@@ -99,6 +104,7 @@ export const EFFECT_ORDER: readonly EffectId[] = [
   'time-dilation',
   'kinematics',
   'mission',
+  'rocket',
 ];
 
 export interface Formula {
@@ -120,16 +126,20 @@ export interface Explanation {
 }
 
 /**
- * Limiares de "o efeito começou". Escolhidos para serem visíveis e para que,
- * a 1x na missão padrão, os cartões cheguem com ≥ 10 s de intervalo.
+ * Limiares de "o efeito começou". Escolhidos para serem visíveis, para que a
+ * viagem a 1 g até as estrelas próximas (γ_max ≈ 3) também os atravesse e para
+ * que, a 1x na demonstração, os cartões cheguem com ≥ 6 s de intervalo (o
+ * tempo mínimo de cada um na tela).
  */
 export const EFFECT_THRESHOLDS = {
   /** Aberração: estrelas a 90° aparecem a 60°. */
   aberrationBeta: 0.5,
   /** Doppler à frente D = e^η: o Sol, atrás, já parece uma anã vermelha. */
-  dopplerAhead: 3,
-  timeDilationGamma: 3,
-  contractionGamma: 10,
+  dopplerAhead: 2.5,
+  timeDilationGamma: 2,
+  contractionGamma: 3,
+  /** Fator "mais escuro" a partir do qual o olho adaptado merece explicação. */
+  eyeDimmer: 2,
   /** Da órbita de Júpiter à heliopausa. */
   solarSystemAu: { min: 5.2, max: 120 },
   /** Mesmo limiar de luz do aviso EYE HAZARD. */
@@ -142,6 +152,8 @@ const T_SUN_K = 5778;
 /** Abaixo disso um corpo negro some no visível (o shader corta em 250 K). */
 const SUN_VISIBLE_K = 1000;
 const SUN_CORE_K = 1.57e7;
+/** Exaustão de um foguete de fusão ideal (fração de c). */
+const FUSION_EXHAUST_BETA = 0.1;
 /** Constante de Boltzmann (eV/K) e energia de repouso do próton (eV). */
 const K_B_EV = 8.617333262e-5;
 const PROTON_REST_EV = 938.27208816e6;
@@ -189,34 +201,56 @@ const ORBITS = [
   { au: 5.2, label: 'da órbita de Júpiter' },
 ] as const;
 
-const missionTotalsFormulas = (p: MissionProfile): Formula[] => [
-  { tex: tex`\gamma_{\max} = 1 + \frac{\alpha\,d_{1/2}}{c^2} = ${n(p.gammaMax, 4)}` },
-  { tex: tex`\tau_{\text{total}} = \frac{2c}{\alpha}\operatorname{arccosh}\gamma_{\max} = ${texDuration(p.tauTotal)}` },
-  { tex: tex`t_{\text{total}} = \frac{2c}{\alpha}\sinh\eta_{\max} = ${texDuration(p.tTotal)}` },
-];
+const missionTotalsFormulas = (p: MissionProfile): Formula[] =>
+  p.coastEta === null
+    ? [
+        { tex: tex`\gamma_{\max} = 1 + \frac{\alpha\,d_{1/2}}{c^2} = ${n(p.gammaMax, 4)}` },
+        { tex: tex`\tau_{\text{total}} = \frac{2c}{\alpha}\operatorname{arccosh}\gamma_{\max} = ${texDuration(p.tauTotal)}` },
+        { tex: tex`t_{\text{total}} = \frac{2c}{\alpha}\sinh\eta_{\max} = ${texDuration(p.tTotal)}` },
+      ]
+    : [
+        { tex: tex`\gamma_{c} = \cosh\eta_c = ${n(p.gammaMax, 4)}` },
+        {
+          tex: tex`\tau_{\text{total}} = \frac{2c}{\alpha}\,\eta_c + \frac{L_{\text{cruzeiro}}}{c\,\sinh\eta_c} = ${texDuration(p.tauTotal)}`,
+        },
+        {
+          tex: tex`t_{\text{total}} = \frac{2c}{\alpha}\sinh\eta_c + \frac{L_{\text{cruzeiro}}}{c\,\tanh\eta_c} = ${texDuration(p.tTotal)}`,
+        },
+      ];
+
+/** Distância percorrida por inércia: D − 2·(c²/α)(γ_c − 1). */
+const coastDistanceM = (p: MissionProfile) => p.distanceM - (2 * C2 * (p.gammaMax - 1)) / p.properAccel;
+/** Distância (em repouso) que falta ao começar a frenagem: (c²/α)(γ_max − 1). */
+const brakingDistanceM = (p: MissionProfile) => (C2 * (p.gammaMax - 1)) / p.properAccel;
 
 const velocityOf = (f: FlightState) => formatVelocity(f.beta, f.oneMinusBeta);
+/** O olho ainda adaptado à ida faz a mesma luz parecer bem mais fraca (só em viagens rápidas). */
+const photometryDimmer = (p: PhotometryAndEyeState) => p.dimmerFactor >= EFFECT_THRESHOLDS.eyeDimmer;
 /** γ no texto: "1,67", "1 348", "3,53 × 10⁶". */
 const gammaText = (gamma: number) => (gamma < 100 ? formatFixed(gamma, 2) : num(gamma));
 
 const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
   mission: {
-    title: 'A missão Flip-and-Burn',
+    title: 'A missão',
     announce: false,
     isActive: (s) => s.autopilot,
     explain: ({ destination, accelG, alpha, profile }) => ({
       summary:
-        `Acelerar com α constante até o meio do caminho, girar a nave e frear com a mesma α até parar em ` +
+        (profile.coastEta === null
+          ? 'Acelerar com α constante até o meio do caminho, girar a nave e frear com a mesma α até parar em '
+          : `Acelerar com α constante até v = ${formatVelocity(Math.tanh(profile.etaMax), Math.exp(-profile.etaMax) / profile.gammaMax)}, ` +
+            'desligar o motor e seguir por inércia, depois girar a nave e frear com a mesma α até parar em ') +
         `${destination.name}: ${formatSpan(profile.tauTotal)} de bordo e ${formatSpan(profile.tTotal)} na Terra.`,
       details: [
         'A aceleração própria α é a que um acelerômetro a bordo mede, e ela é constante. A aceleração medida da ' +
           'Terra não é: cai como α/γ³ à medida que a nave se aproxima de c.',
-        ...(accelG > 20
-          ? [
-              `Nenhum corpo humano resistiria a ${num(accelG)} G: o limite fica em algumas dezenas de G, ` +
-                'por segundos. O valor alto encurta a viagem para minutos e deixa cada efeito óptico visível em tempo real.',
-            ]
-          : []),
+        accelG > 20
+          ? `Nenhum corpo humano resistiria a ${num(accelG)} G: o limite fica em algumas dezenas de G, ` +
+            'por segundos. O valor alto encurta a viagem para minutos e deixa cada efeito óptico visível em tempo real.'
+          : accelG <= 1.5
+            ? `A ${formatFixed(accelG, accelG < 1 ? 2 : 1)} g, a tripulação sente um peso parecido com o da Terra ` +
+              'durante todo o empuxo: é o perfil clássico de uma viagem tripulada.'
+            : `A ${num(accelG)} g, a tripulação pesa ${num(accelG)} vezes mais que na Terra durante o empuxo.`,
       ],
       formulas: [
         { tex: tex`\alpha = N_G\,g_0 = ${n(accelG)} \times ${n(G0, 6)}\ \mathrm{m/s^2} = ${n(alpha)}\ \mathrm{m/s^2}` },
@@ -235,13 +269,17 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
       const summary =
         phase === 'cruise'
           ? `No Cruzeiro Livre a rapidez é a do slider, η = ${etaText}, e a nave não acelera. A velocidade é β = tanh η: v = ${velocityOf(flight)}.`
-          : phase === 'decelerating'
+          : phase === 'coasting'
+            ? `Com o motor desligado a rapidez fica constante, η = ${etaText}, e a nave segue a v = ${velocityOf(flight)}.`
+            : phase === 'decelerating'
             ? `Na frenagem a rapidez cai no mesmo ritmo em que subiu: η = α(τ_total − τ)/c = ${etaText}. Agora v = ${velocityOf(flight)}.`
             : `Com aceleração própria constante, cada segundo de bordo soma a mesma rapidez: η = ατ/c = ${etaText}. ` +
               `A velocidade β = tanh η se aproxima de c sem nunca chegar a ela; agora v = ${velocityOf(flight)}.`;
       const etaTex = !autopilot
         ? tex`\eta = ${n(eta, 4)}\quad(\text{slider})`
-        : phase === 'decelerating'
+        : phase === 'coasting'
+          ? tex`\eta = \eta_c = \frac{\alpha\,\tau_1}{c} = ${n(eta, 4)}`
+          : phase === 'decelerating'
           ? tex`\eta = \frac{\alpha\,(\tau_{\text{total}} - \tau)}{c} = ${n(eta, 4)}`
           : tex`\eta = \frac{\alpha\,\tau}{c} = \frac{${n(alpha)}\ \mathrm{m/s^2} \times ${n(tau, 4)}\ \mathrm{s}}{${n(C, 4)}\ \mathrm{m/s}} = ${n(eta, 4)}`;
       return {
@@ -337,7 +375,9 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
           tex:
             phase === 'decelerating'
               ? tex`t = t_{\text{total}} - \frac{c}{\alpha}\sinh\eta = ${texDuration(earthTimeS)}`
-              : tex`t = \frac{c}{\alpha}\sinh\eta = ${texDuration(earthTimeS)}`,
+              : phase === 'coasting'
+                ? tex`t = \frac{c}{\alpha}\sinh\eta_c + \gamma_c\,(\tau - \tau_1) = ${texDuration(earthTimeS)}`
+                : tex`t = \frac{c}{\alpha}\sinh\eta = ${texDuration(earthTimeS)}`,
         });
         if (tau > 0) {
           formulas.push({ tex: tex`\frac{t}{\tau} = \frac{${texDuration(earthTimeS)}}{${texDuration(tau)}} = ${n(earthTimeS / tau)}` });
@@ -436,7 +476,7 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
             'em 1,06 mm. O Doppler desloca o espectro inteiro: à frente, a temperatura aparente é T₀·e^η.',
           `Entre γ ≈ ${num(CMB_VISIBLE_GAMMA.min)} e γ ≈ ${num(CMB_VISIBLE_GAMMA.max)} ` +
             'o pico atravessa o visível: primeiro um brilho vermelho-escuro à frente, depois branco e azulado. É uma ' +
-            'janela crítica, e o Auto-Step Down reduz o tempo para 1x ao entrar nela.',
+            'janela crítica, e o Auto-Step Down desacelera o tempo ao entrar nela.',
           'O holograma "CMB AHEAD" mostra o espectro de Planck e onde fica a faixa visível.',
         ],
         formulas: [
@@ -457,9 +497,11 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
     title: 'Ofuscamento: a luz à frente',
     announce: true,
     isActive: (s) => s.photometry.visibleLuxAhead >= EFFECT_THRESHOLDS.illuminanceLux,
-    explain: ({ photometry }) => {
+    explain: ({ photometry, profile }) => {
       const lux = photometry.visibleLuxAhead;
       const pupilNow = formatFixed(photometry.pupilDiameterMm, 2);
+      // Viagens que duram muitas vezes os 20 min da adaptação ao escuro: o olho acompanha a luz.
+      const eyeKeepsUp = profile.tauTotal > 100 * EYE.darkAdaptationS;
       const stopsNow = formatFixed(-photometry.retinaStops, 1);
       return {
         summary:
@@ -470,7 +512,10 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
             'à frente e pesada pela sensibilidade do olho V(λ). O máximo possível é ' +
             `${num(peakCmbLux())} lux, em γ ≈ ${num(Math.cosh(peakCmbLuxRapidity()))}.`,
           `O olho reage. A pupila se fecha em meio segundo (${pupilNow} mm agora) e a retina perde sensibilidade em ` +
-            `cerca de um minuto (já perdeu ${stopsNow} stops). Recuperar a sensibilidade no escuro leva uns 20 minutos.`,
+            `cerca de um minuto (já perdeu ${stopsNow} stops). Recuperar a sensibilidade no escuro leva uns 20 minutos.` +
+            (eyeKeepsUp
+              ? ' Nesta viagem a luz muda ao longo de meses, então o olho fica sempre em equilíbrio com ela.'
+              : ''),
           'No para-brisa, o véu claro simula a luz espalhada dentro do próprio olho.',
         ],
         formulas: [
@@ -561,34 +606,46 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
     title: 'Flip-and-burn: o ponto médio',
     announce: true,
     isActive: (s) =>
-      s.autopilot && s.flight.phase === 'accelerating' && s.flight.tau >= s.profile.tauHalf - PRE_FLIP_WINDOW_S,
+      s.autopilot &&
+      (s.flight.phase === 'accelerating' || s.flight.phase === 'coasting') &&
+      s.flight.tau >= s.profile.brakeStartTau - preFlipWindowS(s.profile),
     explain: ({ flight, profile }) => {
       const peak = computeShaderKinematics(profile.etaMax);
-      const contractedHalf = profile.halfDistanceM / profile.gammaMax;
+      const remaining = brakingDistanceM(profile);
+      const contracted = remaining / profile.gammaMax;
+      const toFlip = profile.brakeStartTau - flight.tau;
+      const flipAndBurn = profile.coastEta === null;
       const noBrake = computeNoBrakeProperTime(profile);
-      const toFlip = profile.tauHalf - flight.tau;
       return {
         summary:
           (toFlip > 0
-            ? `Em ${formatSpan(toFlip)} a nave gira 180° e passa a frear com a mesma aceleração. `
+            ? `Em ${formatSpan(toFlip)} a nave gira 180° e liga o motor para frear com a mesma aceleração. `
             : 'A nave girou 180° e passou a frear com a mesma aceleração. ') +
           `É o ponto de velocidade máxima: v = ${formatVelocity(peak.uBeta, peak.uOneMinusBeta)}, ` +
           `γ = ${gammaText(profile.gammaMax)}.`,
         details: [
-          `No ponto médio, a distância que falta, medida pela nave, é de só ${formatDistance(contractedHalf)}: são ` +
-            `${formatDistance(profile.halfDistanceM)} contraídos por γ.`,
-          `Se não freasse, a nave cruzaria esse trecho em cerca de ${formatSpan(noBrake)} de bordo ` +
-            '(≈ (c/α)·ln 2) e passaria pelo alvo a quase c.',
-          'É um marco crítico: o Auto-Step Down reduz o tempo para 1x nos 10 s finais, e o holograma ' +
+          `Ao começar a frenagem, a distância que falta, medida pela nave, é de só ${formatDistance(contracted)}: ` +
+            `são ${formatDistance(remaining)} contraídos por γ.`,
+          flipAndBurn
+            ? `Se não freasse, a nave cruzaria esse trecho em cerca de ${formatSpan(noBrake)} de bordo ` +
+              '(≈ (c/α)·ln 2) e passaria pelo alvo a quase c.'
+            : 'A frenagem leva o mesmo tempo de bordo que a aceleração, e começa a (c²/α)(γ_c − 1) do alvo para parar ' +
+              'exatamente nele.',
+          'É um marco crítico: o Auto-Step Down desacelera o tempo na reta final antes do flip, e o holograma ' +
             '"DECELERATION IN" faz a contagem.',
         ],
-        formulas: [
-          { tex: tex`\gamma_{\max} = 1 + \frac{\alpha\,d_{1/2}}{c^2} = ${n(profile.gammaMax, 4)}` },
-          { card: true, tex: tex`L_{\text{contraída}} = \frac{d_{1/2}}{\gamma_{\max}} = ${texDistance(contractedHalf)}` },
-          {
-            tex: tex`\Delta\tau_{\text{sem frenagem}} = \frac{c}{\alpha}\left[\operatorname{arccosh}\!\left(1 + \frac{\alpha D}{c^2}\right) - \eta_{\max}\right] = ${n(noBrake)}\ \mathrm{s}`,
-          },
-        ],
+        formulas: flipAndBurn
+          ? [
+              { tex: tex`\gamma_{\max} = 1 + \frac{\alpha\,d_{1/2}}{c^2} = ${n(profile.gammaMax, 4)}` },
+              { card: true, tex: tex`L_{\text{contraída}} = \frac{d_{1/2}}{\gamma_{\max}} = ${texDistance(contracted)}` },
+              {
+                tex: tex`\Delta\tau_{\text{sem frenagem}} = \frac{c}{\alpha}\left[\operatorname{arccosh}\!\left(1 + \frac{\alpha D}{c^2}\right) - \eta_{\max}\right] = ${n(noBrake)}\ \mathrm{s}`,
+              },
+            ]
+          : [
+              { tex: tex`L_{\text{frenagem}} = \frac{c^2}{\alpha}\,(\gamma_c - 1) = ${texDistance(remaining)}` },
+              { card: true, tex: tex`L_{\text{contraída}} = \frac{L_{\text{frenagem}}}{\gamma_c} = ${texDistance(contracted)}` },
+            ],
       };
     },
   },
@@ -597,7 +654,7 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
     title: 'Frenagem',
     announce: true,
     isActive: (s) => s.autopilot && s.flight.phase === 'decelerating',
-    explain: ({ flight, profile }) => {
+    explain: ({ flight, profile, photometry }) => {
       const mirror = profile.tauTotal - flight.tau;
       return {
         summary:
@@ -606,7 +663,9 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
         details: [
           'Aberração, Doppler e a cor da CMB dependem só da velocidade, não da aceleração. O instante τ da frenagem ' +
             `mostra o mesmo céu do instante espelho τ_total − τ da ida: agora, τ = ${formatSpan(mirror)}.`,
-          'O que muda é o seu olho, que chega da ida adaptado à luz forte: a mesma luz parece bem mais fraca na volta.',
+          photometryDimmer(photometry)
+            ? 'O que muda é o seu olho, que chega da ida adaptado à luz forte: a mesma luz parece bem mais fraca na volta.'
+            : 'Nesta viagem o olho tem tempo de sobra para se readaptar, e a mesma luz parece igual nos dois sentidos.',
         ],
         formulas: [
           { tex: tex`\eta = \frac{\alpha\,(\tau_{\text{total}} - \tau)}{c} = ${n(flight.eta, 4)}` },
@@ -624,7 +683,8 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
       s.autopilot &&
       s.flight.phase === 'decelerating' &&
       s.photometry.cmbTempAheadK > EYE_HOLOGRAM_CMB_K.min &&
-      s.photometry.cmbTempAheadK < EYE_HOLOGRAM_CMB_K.max,
+      s.photometry.cmbTempAheadK < EYE_HOLOGRAM_CMB_K.max &&
+      photometryDimmer(s.photometry),
     explain: ({ photometry: p }) => {
       const mirrorTau = p.whiteoutTau ?? 0;
       const stopsNow = -p.retinaStops;
@@ -678,6 +738,72 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
             card: true,
             tex: tex`T_{\text{vista}} = D\,T_\ast = ${n(dFront)} \times ${n(destination.temperatureK, 4)}\ \mathrm{K} = ${n(seenK)}\ \mathrm{K}`,
           },
+        ],
+      };
+    },
+  },
+
+  coasting: {
+    title: 'Motor desligado: inércia',
+    announce: true,
+    isActive: (s) => s.autopilot && s.flight.phase === 'coasting',
+    explain: ({ flight, profile }) => {
+      const coastTau = profile.brakeStartTau - profile.burnEndTau;
+      const toBrake = profile.brakeStartTau - flight.tau;
+      const flipAndBurnRatio = rocketMassRatio(computeMissionProfile(profile.distanceM, profile.properAccel));
+      return {
+        summary:
+          `O motor desligou a v = ${velocityOf(flight)} e a nave segue por inércia: ninguém sente peso a bordo, e o ` +
+          'céu congela, porque aberração, Doppler e a cor da CMB só mudam com a velocidade. A frenagem começa em ' +
+          `${formatSpan(toBrake)}.`,
+        details: [
+          'Sem empuxo não há gravidade artificial: a tripulação flutua durante os ' +
+            `${formatSpan(coastTau)} de bordo da travessia de ${formatDistance(coastDistanceM(profile))}.`,
+          'Cruzar sai mais barato: com o foguete de fótons ideal, a razão de massa cai para e^(2η_c) = ' +
+            `${num(rocketMassRatio(profile))}, contra ${num(flipAndBurnRatio)} acelerando até o meio do caminho.`,
+          'Medida pela nave, a travessia encolhe por γ_c, como qualquer distância na direção do movimento.',
+        ],
+        formulas: [
+          {
+            tex: tex`\eta = \eta_c = ${n(flight.eta, 4)}, \qquad \beta_c = \tanh\eta_c = ${flight.beta > 0.999 ? `1 - ${n(flight.oneMinusBeta)}` : n(flight.beta, 4)}`,
+          },
+          {
+            card: true,
+            tex: tex`\Delta\tau_{\text{cruzeiro}} = \frac{L_{\text{cruzeiro}}}{c\,\sinh\eta_c} = ${texDuration(coastTau)}`,
+          },
+          {
+            tex: tex`\Delta t_{\text{cruzeiro}} = \gamma_c\,\Delta\tau_{\text{cruzeiro}} = ${texDuration(coastTau * profile.gammaMax)}`,
+          },
+        ],
+      };
+    },
+  },
+
+  rocket: {
+    title: 'Combustível: a equação do foguete',
+    announce: false,
+    isActive: (s) => s.autopilot,
+    explain: ({ profile }) => {
+      const photon = rocketMassRatio(profile);
+      const fusion = rocketMassRatio(profile, FUSION_EXHAUST_BETA);
+      return {
+        summary:
+          `Para ganhar e depois perder a rapidez η = ${formatFixed(profile.etaMax, 2)}, mesmo o foguete mais ` +
+          `eficiente possível, que expele fótons, precisa partir com ${num(photon)} vezes a massa que chega.`,
+        details: [
+          'A rapidez que um foguete ganha é proporcional ao logaritmo da razão de massa: Δη = (v_e/c)·ln(m₀/m₁). ' +
+            'Como a viagem acelera e depois freia, Δη = 2·η_max, e a massa necessária cresce exponencialmente com a ' +
+            'rapidez de pico.',
+          `Um foguete de fusão ideal, com exaustão a 0,1c, precisaria de ${num(fusion)} vezes a massa final: a razão ` +
+            'do foguete de fótons elevada à 10ª potência.',
+          profile.coastEta === null
+            ? 'Cruzar a uma velocidade menor, com o perfil acelerar, cruzar e frear, reduz essa conta drasticamente.'
+            : 'O cruzeiro limita a rapidez de pico e, com ela, o combustível.',
+        ],
+        formulas: [
+          { tex: tex`\frac{m_0}{m_1} = e^{\,2\eta_{\max}\,c/v_e}` },
+          { card: true, tex: tex`v_e = c\colon\quad \frac{m_0}{m_1} = e^{2 \times ${n(profile.etaMax, 4)}} = ${n(photon)}` },
+          { tex: tex`v_e = 0{,}1\,c\colon\quad \frac{m_0}{m_1} = e^{20 \times ${n(profile.etaMax, 4)}} = ${n(fusion)}` },
         ],
       };
     },

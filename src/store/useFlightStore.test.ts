@@ -296,6 +296,42 @@ describe('modos e missão', () => {
     expect(store().criticalWindows.map((w) => w.kind)).toEqual(['pre-flip']);
   });
 
+  it('viagem a 1 g: o multiplicador vai para o degrau que encaixa a viagem em ~10 min', () => {
+    store().setTimeScale(20);
+    store().setAccelG(1);
+    expect(store().timeScale).toBe(86_400); // 1 dia/s: 3,5 anos em ~21 min
+    store().setDestination('andromeda');
+    expect(store().timeScale).toBe(86_400); // continua disponível para Andrômeda
+    store().setAccelG(DEFAULT_ACCEL_G);
+    expect(store().timeScale).toBe(1);
+  });
+
+  it('a 1 g, o Auto-Step Down desacelera para que a janela da CMB dure ≥ 20 s reais', () => {
+    store().setDestination('andromeda');
+    store().setAccelG(1);
+    const [cmb] = store().criticalWindows;
+    store().setTimeScale(31_557_600); // 1 ano/s
+    store().seek(cmb!.startTau - 1);
+    store().togglePlay();
+    store().tick(0.1);
+    expect(store().tau).toBe(cmb!.startTau);
+    expect((cmb!.endTau - cmb!.startTau) / store().timeScale).toBeGreaterThanOrEqual(20);
+    expect(store().timeScale).toBeGreaterThan(1);
+  });
+
+  it('acelerar, cruzar e frear: inércia no meio, e o cruzeiro sobrevive à troca de destino', () => {
+    store().setAccelG(1);
+    store().setCoastEta(Math.atanh(0.9));
+    expect(store().profile.coastEta).toBeCloseTo(Math.atanh(0.9), 12);
+    store().seek(store().profile.tauHalf);
+    expect(store().flight.phase).toBe('coasting');
+    store().setDestination('sirius');
+    expect(store()).toMatchObject({ tau: 0, coastEta: Math.atanh(0.9) });
+    expect(store().profile.brakeStartTau).toBeGreaterThan(store().profile.burnEndTau);
+    store().setCoastEta(null);
+    expect(store().profile.coastEta).toBeNull();
+  });
+
   it('seek limita τ a [0, τ_total]', () => {
     store().seek(-5);
     expect(store().tau).toBe(0);

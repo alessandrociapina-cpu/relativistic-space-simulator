@@ -11,6 +11,7 @@ import {
   computeShaderKinematics,
   log10GammaFromRapidity,
   rapidityFromLog10Gamma,
+  rocketMassRatio,
   withRapidity,
 } from './RelativityEngine';
 import { DESTINATIONS, DESTINATION_LIST, destinationMissionProfile } from './destinations';
@@ -160,6 +161,77 @@ describe('perfil Flip-and-Burn para Proxima', () => {
       if (s.tau <= proxima.tauHalf) expect(s.gamma).toBeGreaterThan(prev.gamma);
       prev = s;
     }
+  });
+});
+
+describe('perfil acelerar, cruzar e frear (1 g até Proxima, cruzeiro a 0,9c)', () => {
+  const coastEta = Math.atanh(0.9);
+  const coast = computeMissionProfile(4.25 * LIGHT_YEAR_M, G0, coastEta);
+  const flip = computeMissionProfile(4.25 * LIGHT_YEAR_M, G0);
+
+  it('fases: acelera até η_c, segue por inércia e freia simetricamente', () => {
+    expect(coast.coastEta).toBe(coastEta);
+    expect(coast.etaMax).toBe(coastEta);
+    expect(coast.burnEndTau).toBeCloseTo((C / G0) * coastEta, 3);
+    expect(coast.tauTotal - coast.brakeStartTau).toBeCloseTo(coast.burnEndTau, 3);
+    expect(computeFlightState(coast, coast.burnEndTau / 2).phase).toBe('accelerating');
+    expect(computeFlightState(coast, coast.tauHalf).phase).toBe('coasting');
+    expect(computeFlightState(coast, coast.tauTotal - coast.burnEndTau / 2).phase).toBe('decelerating');
+  });
+
+  it('na inércia: η constante, dx/dτ = c·sinh η_c e dt/dτ = γ_c', () => {
+    const a = computeFlightState(coast, coast.tauHalf - 1e5);
+    const b = computeFlightState(coast, coast.tauHalf + 1e5);
+    expect(a.eta).toBe(coastEta);
+    expect(b.eta).toBe(coastEta);
+    expect(relErr((b.positionM - a.positionM) / 2e5, C * Math.sinh(coastEta))).toBeLessThan(1e-9);
+    expect(relErr((b.earthTimeS - a.earthTimeS) / 2e5, Math.cosh(coastEta))).toBeLessThan(1e-9);
+  });
+
+  it('é contínuo ao desligar e ao religar o motor, e chega exatamente ao alvo', () => {
+    for (const edge of [coast.burnEndTau, coast.brakeStartTau]) {
+      const before = computeFlightState(coast, edge * (1 - 1e-12));
+      const after = computeFlightState(coast, edge * (1 + 1e-12));
+      expect(relErr(after.eta, before.eta)).toBeLessThan(1e-9);
+      expect(relErr(after.positionM, before.positionM)).toBeLessThan(1e-9);
+      expect(relErr(after.earthTimeS, before.earthTimeS)).toBeLessThan(1e-9);
+    }
+    const end = computeFlightState(coast, coast.tauTotal);
+    expect(end).toMatchObject({ phase: 'arrived', restDistanceRemainingM: 0, earthTimeS: coast.tTotal });
+  });
+
+  it('o meio da missão é o meio do caminho, e cruzar a 0,9c leva mais tempo que acelerar até 0,95c', () => {
+    const mid = computeFlightState(coast, coast.tauHalf);
+    expect(relErr(mid.positionM, coast.halfDistanceM)).toBeLessThan(1e-9);
+    expect(coast.tauTotal).toBeGreaterThan(flip.tauTotal);
+    expect(coast.tTotal).toBeGreaterThan(flip.tTotal);
+  });
+
+  it('cruzeiro acima da rapidez do ponto médio vira Flip-and-Burn', () => {
+    expect(computeMissionProfile(4.25 * LIGHT_YEAR_M, G0, 5)).toEqual(flip);
+    expect(flip).toMatchObject({ coastEta: null, burnEndTau: flip.tauHalf, brakeStartTau: flip.tauHalf });
+  });
+
+  it('rejeita cruzeiro sem velocidade', () => {
+    expect(() => computeMissionProfile(LIGHT_YEAR_M, G0, 0)).toThrow(RangeError);
+  });
+});
+
+describe('equação do foguete relativístico', () => {
+  it('foguete de fótons: m₀/m₁ = e^(2η_max); 1 g até Proxima ≈ 39', () => {
+    const p = computeMissionProfile(4.25 * LIGHT_YEAR_M, G0);
+    expect(rocketMassRatio(p)).toBeCloseTo(Math.exp(2 * p.etaMax), 9);
+    expect(rocketMassRatio(p)).toBeCloseTo(38.8, 1);
+  });
+
+  it('exaustão mais lenta exige muito mais massa: v_e = 0,1c eleva a razão à 10ª potência', () => {
+    const p = computeMissionProfile(4.25 * LIGHT_YEAR_M, G0);
+    expect(relErr(rocketMassRatio(p, 0.1), rocketMassRatio(p) ** 10)).toBeLessThan(1e-9);
+  });
+
+  it('cruzar mais devagar economiza combustível', () => {
+    const coast = computeMissionProfile(4.25 * LIGHT_YEAR_M, G0, Math.atanh(0.5));
+    expect(rocketMassRatio(coast)).toBeCloseTo(3, 9); // e^(2·atanh 0,5) = (1 + β)/(1 − β)
   });
 });
 
