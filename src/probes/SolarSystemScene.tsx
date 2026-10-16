@@ -348,7 +348,7 @@ function SceneContent() {
   }, [view, camera]);
 
   useFrame(({ size }) => {
-    const { t, focus, scale: mode } = useProbeStore.getState();
+    const { t, focus, scale: mode, showOthers } = useProbeStore.getState();
     const cam = camera as PerspectiveCamera;
     const origin = focusDisplay(focus, t, mode);
     const worldPerPixel = (2 * Math.tan((cam.fov * Math.PI) / 360)) / size.height;
@@ -446,12 +446,14 @@ function SceneContent() {
       const point = craftPoint(c.trajectory, t);
       const visible = point !== null;
       setDisplay(craftLabels.current[i] ?? null, visible);
+      // Com as outras sondas ocultas, só a escolhida (e as companheiras) e a que está em foco deixam rastro.
+      const traced = showOthers || c.mission === selectedRef.current || c.id === focus;
       const range = trail.range;
       const last = lastIndexAtOrBefore(trail.times, t);
       const first = range ? trail.ends[range[0]]! : 0;
       const drawn = range && last >= range[0] ? trail.ends[Math.min(last, range[1])]! - first : 0;
-      trail.line.visible = visible && drawn > 0;
-      trail.tip.visible = visible && range !== null && last >= range[0] && last < range[1];
+      trail.line.visible = traced && visible && drawn > 0;
+      trail.tip.visible = traced && visible && range !== null && last >= range[0] && last < range[1];
       trail.future.visible = c.mission === selectedRef.current && range !== null;
       if (!group || !mesh) return;
       group.visible = visible;
