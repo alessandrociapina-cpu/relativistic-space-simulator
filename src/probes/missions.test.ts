@@ -6,7 +6,7 @@ import { explainEvent } from './eventExplanations';
 import { ALL_EVENTS, LIGHT_DAY_AU, MISSIONS, MISSION_LIST } from './missions';
 import { AU_KM, probePosition } from './probes';
 import { LOG_K, LOG_R0_AU, frameBody, localScale, toDisplay, trailPoints, viewDistance } from './sceneMath';
-import { daysToMs, isoToDays } from './time';
+import { daysToMs, formatLiveDateTime, isoToDays } from './time';
 import { FLYBY_SLOWDOWN, PROBE_TIME_RANGE, useProbeStore } from './useProbeStore';
 import { norm, sub } from './vec3';
 
@@ -241,5 +241,14 @@ describe('rastros', () => {
     expect(magellan.gaps.some(Boolean)).toBe(true);
     // Pousado, o módulo não precisa de rastro: só a descida.
     expect(trailPoints(MISSIONS.viking1.companions[0]!.trajectory).times.length).toBeLessThan(300);
+  });
+});
+
+describe('visor da data nos controles', () => {
+  it('tem largura fixa: dia com dois dígitos e meses abreviados com quatro letras', () => {
+    expect(formatLiveDateTime(isoToDays('1988-02-01T14:55Z'))).toBe('01 de fev. de 1988, 14:55 UTC');
+    const lengths = new Set<number>();
+    for (let d = 0; d < 400; d += 0.7) lengths.add(formatLiveDateTime(isoToDays('1988-01-01') + d).length);
+    expect(lengths.size).toBe(1);
   });
 });

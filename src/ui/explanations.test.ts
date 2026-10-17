@@ -1,6 +1,7 @@
 import katex from 'katex';
 import { describe, expect, it } from 'vitest';
-import { computeFlightState, rocketMassRatio } from '../physics/RelativityEngine';
+import { computeFlightState, flipTauOf, rocketMassRatio, type MissionProfile } from '../physics/RelativityEngine';
+import { cutEngine, relightEngine } from '../physics/maneuvers';
 import type { CrewKind } from '../physics/accelerationPresets';
 import { DESTINATIONS, DESTINATION_LIST, destinationMissionProfile, type Destination } from '../physics/destinations';
 import { computeEyeTimeline, computePhotometryAndEyeState } from '../physics/EyeAndPhotometry';
@@ -18,7 +19,11 @@ import { formatProse } from './format';
 
 /** Contexto das explicações no instante τ, como o store o monta. */
 function contextFactory(destination: Destination, accelG = destination.defaultAccelG, coastEta: number | null = null) {
-  const profile = destinationMissionProfile(destination, accelG, coastEta);
+  return profileContext(destination, accelG, destinationMissionProfile(destination, accelG, coastEta));
+}
+
+/** O mesmo, num perfil qualquer (com as manobras do piloto). */
+function profileContext(destination: Destination, accelG: number, profile: MissionProfile) {
   const timeline = computeEyeTimeline(profile);
   return (tau: number, crew: CrewKind = 'crewed'): ExplainContext => {
     const flight = computeFlightState(profile, tau);
@@ -200,6 +205,39 @@ describe('textos e fórmulas com os valores do instante', () => {
               for (const { tex } of formulas) {
                 expect(() => katex.renderToString(tex, { throwOnError: true, strict: 'error' })).not.toThrow();
               }
+            }
+          }
+        }
+      }
+    }
+  }, 60_000);
+
+  it('com o motor desligado e religado: inércia até a frenagem automática, texto limpo e TeX válido', () => {
+    const demo = destinationMissionProfile(proxima);
+    const cut = cutEngine(demo, 100, 3);
+    const coasting = profileContext(proxima, proxima.defaultAccelG, cut)(200);
+    const { summary } = explainEffect('coasting', coasting);
+    expect(summary).toContain('religa o motor');
+    expect(summary).not.toMatch(/passa pelo alvo/);
+
+    for (const destination of DESTINATION_LIST) {
+      const plan = destinationMissionProfile(destination, 1);
+      const profiles = [
+        cutEngine(plan, 0.25 * plan.tauTotal, 0.01 * plan.tauTotal),
+        cutEngine(plan, 0.8 * plan.tauTotal, 0.01 * plan.tauTotal),
+        relightEngine(cutEngine(plan, 0.2 * plan.tauTotal, 0.01 * plan.tauTotal), 0.3 * plan.tauTotal),
+      ];
+      for (const profile of profiles) {
+        const at = profileContext(destination, 1, profile);
+        const flip = flipTauOf(profile);
+        const instants = [0.3, 0.6, 0.9, 1].map((f) => f * profile.tauTotal);
+        if (flip !== null) instants.push(flip - 1, flip + 1);
+        for (const tau of instants) {
+          for (const id of EFFECT_ORDER) {
+            const { summary: text, details, formulas } = explainEffect(id, at(tau));
+            expect([text, ...details, ...formulas.map((f) => f.tex)].join(' ')).not.toMatch(/NaN|undefined|Infinity|null/);
+            for (const { tex } of formulas) {
+              expect(() => katex.renderToString(tex, { throwOnError: true, strict: 'error' })).not.toThrow();
             }
           }
         }

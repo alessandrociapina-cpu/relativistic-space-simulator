@@ -328,8 +328,10 @@ function useEngine() {
     if (tau === 0 && !s.playing) return 'ready';
     if (phase === 'arrived' || phase === 'flyby') return 'off';
     if (engine === 'ramp') return 'ramp';
-    if (engine === 'off') return 'coast';
-    if (phase === 'accelerating' && activeWindowsAt(s.criticalWindows, tau).some((w) => w.kind === 'pre-flip')) return 'flip';
+    // Na reta final antes do flip (o do plano ou o da frenagem automática, depois da inércia).
+    const preFlip = activeWindowsAt(s.criticalWindows, tau).some((w) => w.kind === 'pre-flip');
+    if (engine === 'off') return preFlip ? 'flip' : 'coast';
+    if (phase === 'accelerating' && preFlip) return 'flip';
     return 'thrust';
   });
   const command = useFlightStore((s) => (s.ignitionCountdownS === null ? engineCommandAt(s.profile, s.tau) : null));

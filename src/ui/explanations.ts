@@ -699,26 +699,30 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
     explain: ({ flight, profile }) => {
       const m = profile.maneuvers;
       if (m && flight.tau >= m.firstTau) {
-        // Inércia depois de o piloto desligar o motor.
+        // Inércia depois de o piloto desligar o motor, até a frenagem automática.
         const speed = C * Math.sinh(flight.eta);
-        const toTarget = speed > 0 ? flight.restDistanceRemainingM / speed : Infinity;
+        const flip = flipTauOf(profile);
+        const brakes = m.end === 'arrival' && flip !== null && flip > flight.tau;
+        const brakingDistance = (C * C * 2 * Math.sinh(flight.eta / 2) ** 2) / profile.properAccel;
         return {
           summary:
             `O motor foi desligado e a nave segue por inércia a v = ${velocityOf(flight)}: ninguém sente peso a bordo ` +
             'e o céu congela, porque aberração, Doppler e a cor da CMB só mudam com a velocidade. ' +
-            (m.end === 'flyby'
-              ? `Sem frear, a nave passa pelo alvo em ${formatSpan(toTarget)} de bordo. `
-              : 'A nave está quase parada e não chega ao alvo. ') +
-            'Religue o motor para o piloto automático refazer a rota até o alvo.',
+            (brakes
+              ? `Em ${formatSpan(flip - flight.tau)} de bordo, o piloto automático gira a nave e religa o motor para ` +
+                'frear com a aceleração planejada e parar no alvo. Religar antes acelera de novo e chega mais cedo.'
+              : 'A nave está quase parada e não chega ao alvo. Religue o motor para o piloto automático refazer a rota.'),
           details: [
             'Sem empuxo, a rapidez η fica constante: dx/dτ = c·sinh η e dt/dτ = cosh η. O relógio da Terra continua ' +
               'correndo γ vezes mais depressa que o de bordo.',
-            'Ao religar, o piloto automático acelera e faz o flip no ponto certo para parar no alvo; se já não houver ' +
-              'distância para frear com a aceleração planejada, freia na hora com a aceleração que for preciso.',
+            'A frenagem começa quando a distância que falta é a que a aceleração planejada leva para parar a nave, ' +
+              'L = (c²/α)(γ − 1): por isso a frenagem dura o mesmo tempo de bordo que a subida até essa velocidade.',
+            'Ao religar antes, o piloto automático acelera mais e faz o flip no ponto certo para parar no alvo.',
           ],
           formulas: [
             { card: true, tex: tex`\eta = ${n(flight.eta, 4)}, \qquad \frac{dx}{d\tau} = c\,\sinh\eta = ${texSpeed(speed)}` },
             { tex: tex`\frac{dt}{d\tau} = \cosh\eta = \gamma = ${n(flight.gamma, 4)}` },
+            ...(brakes ? [{ tex: tex`L_{\text{frenagem}} = \frac{c^2}{\alpha}\,(\gamma - 1) = ${texDistance(brakingDistance)}` }] : []),
           ],
         };
       }

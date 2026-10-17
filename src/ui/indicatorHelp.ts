@@ -91,7 +91,8 @@ export const INDICATOR_HELP: Readonly<Record<IndicatorId, IndicatorHelp>> = {
     text:
       'Empuxo: o motor acelera ou freia a nave. Flip: a nave gira para frear. Inércia: o motor está desligado e a ' +
       'nave segue em velocidade constante. Toque no botão para desligar o motor (a aceleração cai aos poucos até ' +
-      'zero) e de novo para religar: o piloto automático refaz a rota para parar no alvo.',
+      'zero): a nave segue por inércia e o piloto automático religa o motor no ponto certo para frear e parar no ' +
+      'alvo. Tocar de novo na inércia religa antes: a nave acelera mais e chega mais cedo.',
   },
   route: {
     title: 'Rota',

@@ -3,7 +3,7 @@ import { BODIES, MOON_LIST, SMALL_BODY_LIST } from './bodies';
 import { COMPANIONS, MISSIONS, MISSION_LIST } from './missions';
 import { PLANET_LIST } from './planets';
 import { frameBody } from './sceneMath';
-import { formatDateTime, msToDays } from './time';
+import { formatLiveDateTime, msToDays } from './time';
 import { PROBE_RATES, PROBE_TIME_RANGE, useProbeStore, type FocusId, type FrameMode, type ScaleMode } from './useProbeStore';
 
 const segmentClass = (active: boolean) =>
@@ -79,7 +79,7 @@ export function ProbeControls({ className = '' }: { className?: string }) {
           value={t}
           onChange={(e) => setT(Number(e.target.value))}
         />
-        <span className="ml-auto shrink-0 text-slate-200 tabular-nums">{formatDateTime(t)}</span>
+        <span className="ml-auto shrink-0 text-slate-200 tabular-nums">{formatLiveDateTime(t)}</span>
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
         <div className="flex flex-wrap items-center gap-1" role="radiogroup" aria-label="Velocidade do tempo">

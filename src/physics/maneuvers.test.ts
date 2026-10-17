@@ -42,7 +42,7 @@ describe('segmentos do plano', () => {
 });
 
 describe('desligar o motor', () => {
-  it('na aceleração: rampa até 0, inércia com η constante e passagem pelo alvo sem frear', () => {
+  it('na aceleração: rampa até 0, inércia com η constante e frenagem automática que para no alvo', () => {
     const cut = cutEngine(demo, 100, 3);
     // Antes do comando, o plano; no comando, contínuo.
     expect(computeFlightState(cut, 50)).toEqual(computeFlightState(demo, 50));
@@ -57,14 +57,44 @@ describe('desligar o motor', () => {
     expect(coast1.phase).toBe('coasting');
     expect(coast2.eta).toBe(coast1.eta);
     expect(coast2.restDistanceRemainingM).toBeLessThan(coast1.restDistanceRemainingM);
-    expect(cut.maneuvers!.end).toBe('flyby');
+
+    // O piloto automático religa o motor quando a distância que falta é a de frear com α: o flip.
+    expect(cut.maneuvers!.end).toBe('arrival');
+    const flip = flipTauOf(cut)!;
+    expect(flip).toBeGreaterThan(400);
+    const atFlip = computeFlightState(cut, flip);
+    const coshm1 = 2 * Math.sinh(atFlip.eta / 2) ** 2;
+    expect(relErr(atFlip.restDistanceRemainingM, (C * C * coshm1) / demo.properAccel)).toBeLessThan(1e-9);
+    expect(computeFlightState(cut, flip - 1).phase).toBe('coasting');
+    const braking = computeFlightState(cut, flip + 1);
+    expect(braking.phase).toBe('decelerating');
+    expect(braking.engine).toBe('thrust');
+    expect(relErr(braking.thrustAccel, demo.properAccel)).toBeLessThan(1e-12);
+    // A frenagem desfaz a subida: dura cη/α, e a posição é contínua no flip (em ±1 ms a nave anda 2 ms a c·sinh η).
+    expect(cut.tauTotal - flip).toBeCloseTo((C / demo.properAccel) * coast1.eta, 6);
+    const before = computeFlightState(cut, flip - 1e-3);
+    const after = computeFlightState(cut, flip + 1e-3);
+    const travelled = 2e-3 * C * Math.sinh(coast1.eta);
+    expect(relErr(before.restDistanceRemainingM - after.restDistanceRemainingM, travelled)).toBeLessThan(1e-4);
     const end = computeFlightState(cut, cut.tauTotal);
-    expect(end.phase).toBe('flyby');
-    expect(end.restDistanceRemainingM).toBeLessThan(1e-6 * demo.distanceM);
-    expect(end.eta).toBeGreaterThan(0);
-    // Sem frenagem não há flip nem chegada.
-    expect(flipTauOf(cut)).toBeNull();
-    expect(computeCriticalWindows(cut).some((w) => w.kind === 'pre-flip')).toBe(false);
+    expect(end.phase).toBe('arrived');
+    expect(end.eta).toBe(0);
+    expect(end.restDistanceRemainingM).toBe(0);
+    // O flip entra nas janelas críticas (Auto-Step Down, contagem "FRENAGEM EM").
+    expect(computeCriticalWindows(cut).some((w) => w.kind === 'pre-flip' && w.endTau === flip)).toBe(true);
+  });
+
+  it('na frenagem: sem distância para frear com α, o piloto automático freia logo depois da rampa com mais força', () => {
+    const cut = cutEngine(demo, 0.75 * demo.tauTotal, 3);
+    expect(computeFlightState(cut, 0.75 * demo.tauTotal + 1.5).engine).toBe('ramp');
+    const braking = computeFlightState(cut, 0.75 * demo.tauTotal + 3.5);
+    expect(braking.phase).toBe('decelerating');
+    expect(braking.engine).toBe('thrust');
+    expect(braking.thrustAccel).toBeGreaterThan(demo.properAccel);
+    expect(cut.maneuvers!.end).toBe('arrival');
+    const end = computeFlightState(cut, cut.tauTotal);
+    expect(end.phase).toBe('arrived');
+    expect(end.restDistanceRemainingM).toBe(0);
   });
 
   it('o tempo da Terra e a distância percorrida só avançam', () => {
@@ -86,12 +116,13 @@ describe('desligar o motor', () => {
     expect(end.eta).toBeGreaterThanOrEqual(0);
   });
 
-  it('só há comando válido em voo: desligar no empuxo, religar na inércia', () => {
+  it('só há comando válido em voo: desligar no empuxo (também na frenagem automática), religar na inércia', () => {
     expect(engineCommandAt(demo, 0)).toBeNull();
     expect(engineCommandAt(demo, 100)).toBe('cut');
     const cut = cutEngine(demo, 100, 3);
     expect(engineCommandAt(cut, 101)).toBeNull();
     expect(engineCommandAt(cut, 200)).toBe('relight');
+    expect(engineCommandAt(cut, flipTauOf(cut)! + 1)).toBe('cut');
     expect(engineCommandAt(cut, cut.tauTotal)).toBeNull();
   });
 });
@@ -123,18 +154,11 @@ describe('religar o motor: o piloto automático para no alvo', () => {
     expect(relit.tauTotal).toBeGreaterThan(oneG.tauTotal);
   });
 
-  it('sem distância para frear com α: frenagem de emergência, mais forte que o plano', () => {
-    const cut = cutEngine(demo, 0.45 * demo.tauTotal, 3);
-    // Bem perto do alvo, a frenagem a α já não cabe.
-    const tau = cut.tauTotal - 0.5;
-    const relit = relightEngine(cut, tau);
-    const braking = computeFlightState(relit, tau + 1e-4);
-    expect(braking.phase).toBe('decelerating');
-    expect(braking.thrustAccel).toBeGreaterThan(demo.properAccel);
-    expect(flipTauOf(relit)).toBeNull();
-    const end = computeFlightState(relit, relit.tauTotal);
-    expect(end.phase).toBe('arrived');
-    expect(end.restDistanceRemainingM).toBe(0);
+  it('religar antes da frenagem automática chega mais cedo', () => {
+    const cut = cutEngine(oneG, 0.2 * oneG.tauTotal, 0.01 * oneG.tauTotal);
+    const relit = relightEngine(cut, 0.3 * oneG.tauTotal);
+    expect(relit.tauTotal).toBeLessThan(cut.tauTotal);
+    expect(flipTauOf(relit)!).toBeLessThan(flipTauOf(cut)!);
   });
 
   it('desligar de novo depois de religar volta à inércia', () => {

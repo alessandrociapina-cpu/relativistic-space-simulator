@@ -3,11 +3,13 @@
  * plano analítico e vira uma sequência de segmentos (empuxo, rampa, inércia),
  * deterministica em τ: a linha do tempo e o scrub continuam valendo.
  *
- * - Desligar: a aceleração cai linearmente até zero (rampa) e a nave segue por
- *   inércia até passar pelo alvo, ou fica à deriva se parar antes.
- * - Religar: o piloto automático refaz a rota para parar no alvo: acelera e
- *   freia com a aceleração do plano, ou, se já não há distância para isso,
- *   freia na hora com a aceleração que for preciso (frenagem de emergência).
+ * - Desligar: a aceleração cai linearmente até zero (rampa), a nave segue por
+ *   inércia e o piloto automático religa o motor no ponto certo para frear com
+ *   a aceleração do plano e parar no alvo (sem distância para isso, freia logo
+ *   depois da rampa com a aceleração necessária). Parada antes, fica à deriva.
+ * - Religar (na inércia): o piloto automático acelera de novo com a aceleração
+ *   do plano e faz o flip no ponto certo, chegando mais cedo; sem distância
+ *   para isso, freia na hora com a aceleração que for preciso (emergência).
  */
 import {
   C,
@@ -29,10 +31,13 @@ export const ENGINE_RAMP_REAL_S = 3;
 /** A rampa nunca passa desta fração da viagem planejada (multiplicadores muito altos). */
 const MAX_RAMP_FRACTION = 1 / 20;
 /**
- * À deriva: se a passagem pelo alvo demora mais que tantas vezes a viagem
+ * À deriva: se a inércia até a frenagem demora mais que tantas vezes a viagem
  * planejada (no relógio mais longo, o da Terra), a linha do tempo termina aí.
  */
 const DRIFT_LIMIT_FACTOR = 100;
+
+/** Estado no início de um trecho do voo. */
+type SegmentStart = Pick<FlightSegment, 'startTau' | 'eta0' | 'remaining0' | 'earth0'>;
 
 const planOf = (profile: MissionProfile) => profile.maneuvers?.plan ?? profile;
 
@@ -100,14 +105,46 @@ function buildProfile(
   };
 }
 
-/** Termina a inércia: até passar pelo alvo, ou à deriva se ela não acontece num tempo razoável. */
-function coastToEnd(seg: FlightSegment, plan: MissionProfile): { segment: FlightSegment; end: ManeuverEnd } {
+/** Frenagem até parar no alvo, com a aceleração `a` (> 0) que para a nave exatamente nele. */
+const brakeToArrival = (start: SegmentStart, a: number): FlightSegment => ({
+  kind: 'thrust',
+  ...start,
+  duration: (C / a) * start.eta0,
+  accel: -a,
+  toArrival: true,
+});
+
+/**
+ * Depois de desligar o motor: inércia até a distância que falta ser a de frear com
+ * a aceleração do plano, L = (c²/α)(cosh η − 1), e o piloto automático religa o
+ * motor ali (o flip). Sem essa distância, freia já com a aceleração necessária,
+ * aₑ = (c²/L)(cosh η − 1). Parada ou lenta demais para chegar num tempo
+ * razoável, a nave fica à deriva.
+ */
+function coastThenBrake(
+  start: SegmentStart,
+  plan: MissionProfile,
+): { segments: FlightSegment[]; end: ManeuverEnd; flipTau: number | null } {
+  const a = plan.properAccel;
+  const { eta0: eta, remaining0: remaining } = start;
+  const brakingDistance = (C2 / a) * coshm1(eta);
+  if (remaining < brakingDistance) {
+    return { segments: [brakeToArrival(start, (C2 / remaining) * coshm1(eta))], end: 'arrival', flipTau: null };
+  }
   const planSpan = Math.max(plan.tauTotal, plan.tTotal);
-  const speed = C * Math.sinh(seg.eta0);
-  const toFlyby = speed > 0 ? seg.remaining0 / speed : Infinity;
-  if (toFlyby <= DRIFT_LIMIT_FACTOR * planSpan) return { segment: { ...seg, duration: toFlyby }, end: 'flyby' };
-  // Parada (ou quase): a linha do tempo segue mais uma viagem planejada e termina.
-  return { segment: { ...seg, duration: speed > 0 ? DRIFT_LIMIT_FACTOR * planSpan : planSpan }, end: 'drift' };
+  const speed = C * Math.sinh(eta);
+  const coastTau = speed > 0 ? (remaining - brakingDistance) / speed : Infinity;
+  if (!(coastTau <= DRIFT_LIMIT_FACTOR * planSpan)) {
+    // A linha do tempo segue mais um trecho e termina.
+    const drift = speed > 0 ? DRIFT_LIMIT_FACTOR * planSpan : planSpan;
+    return { segments: [{ kind: 'coast', ...start, duration: drift, accel: 0 }], end: 'drift', flipTau: null };
+  }
+  if (coastTau === 0) return { segments: [brakeToArrival(start, a)], end: 'arrival', flipTau: start.startTau };
+  const coast: FlightSegment = { kind: 'coast', ...start, duration: coastTau, accel: 0 };
+  const atFlip = segmentState(coast, coastTau);
+  const flipTau = start.startTau + coastTau;
+  const brake = brakeToArrival({ startTau: flipTau, eta0: eta, remaining0: atFlip.remainingM, earth0: atFlip.earthTimeS }, a);
+  return { segments: [coast, brake], end: 'arrival', flipTau };
 }
 
 /** Bissecção em [0, s₁] para f(s) = 0, com f(0) > 0 ≥ f(s₁). */
@@ -133,7 +170,8 @@ export function engineCommandAt(profile: MissionProfile, tau: number): 'cut' | '
 
 /**
  * Desliga o motor em τ: a aceleração cai linearmente até zero em `rampTau`
- * segundos de bordo e a nave segue por inércia.
+ * segundos de bordo, a nave segue por inércia e o piloto automático religa o
+ * motor para frear e parar no alvo.
  */
 export function cutEngine(profile: MissionProfile, tau: number, rampTau: number): MissionProfile {
   const plan = planOf(profile);
@@ -169,17 +207,11 @@ export function cutEngine(profile: MissionProfile, tau: number, rampTau: number)
     return buildProfile(plan, firstTau, [...segments, { ...ramp, duration: sFlyby }], 'flyby', null);
   }
   const after = segmentState(ramp, duration);
-  const coast: FlightSegment = {
-    kind: 'coast',
-    startTau: tau + duration,
-    duration: 0,
-    accel: 0,
-    eta0: stops ? 0 : after.eta,
-    remaining0: after.remainingM,
-    earth0: after.earthTimeS,
-  };
-  const { segment, end } = coastToEnd(coast, plan);
-  return buildProfile(plan, firstTau, [...segments, ramp, segment], end, null);
+  const rest = coastThenBrake(
+    { startTau: tau + duration, eta0: stops ? 0 : after.eta, remaining0: after.remainingM, earth0: after.earthTimeS },
+    plan,
+  );
+  return buildProfile(plan, firstTau, [...segments, ramp, ...rest.segments], rest.end, rest.flipTau);
 }
 
 /**
