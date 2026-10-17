@@ -113,11 +113,12 @@ describe('olho do piloto na missão para Proxima', () => {
     expect(Math.abs(cut.tauTotal - lo - 150)).toBeGreaterThan(1); // τ_total − τ já não serve
     expect(s.dimmerFactor).toBeGreaterThan(100);
     // Desligado em 250 s (η ≈ 13) e religado: o piloto automático passa da η atingida antes do corte, e
-    // logo depois do flip não há instante da subida com a mesma luz.
+    // logo depois do flip a mesma luz é a da nova subida, 1 s antes do flip (α na subida e na frenagem).
     const relit = relightEngine(cutEngine(profile, 250, 3), 260);
-    const early = stateIn(relit)(flipTauOf(relit)! + 1);
-    expect(early.whiteoutTau).toBeNull();
-    expect(early.dimmerFactor).toBe(1);
+    const flip = flipTauOf(relit)!;
+    const early = stateIn(relit)(flip + 1);
+    expect(early.whiteoutTau).toBeCloseTo(flip - 1, 6);
+    expect(early.dimmerFactor).toBeGreaterThan(0);
   });
 });
 

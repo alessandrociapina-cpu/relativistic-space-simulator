@@ -4,6 +4,7 @@ import { formatRelativisticSpeedPercent } from '../physics/EyeAndPhotometry';
 import { findPreset } from '../physics/accelerationPresets';
 import { CMB_VISIBLE_GAMMA, activeWindowsAt } from '../physics/criticalEvents';
 import { useFlightStore } from '../store/useFlightStore';
+import { crewText, formatStrain, type CrewTone } from '../ui/crewStatus';
 import {
   formatAccelG,
   formatDistance,
@@ -71,6 +72,39 @@ function Readout({ label, symbol, help, value, sub, detail, className = '', prim
   );
 }
 
+const CREW_CHIP: Readonly<Record<CrewTone, string>> = {
+  ok: 'border border-sky-300/40 bg-sky-500/10 text-sky-100',
+  load: 'border border-amber-300/50 bg-amber-500/10 text-amber-100',
+  rest: 'border border-indigo-300/50 bg-indigo-500/15 text-indigo-100',
+  danger: 'border border-rose-400 bg-rose-950/80 text-rose-100',
+};
+
+/** O piloto humano: sob empuxo (com a carga), em descanso (até a próxima queima), além do limite. */
+function CrewChip() {
+  const status = useFlightStore((s) => s.crewStatus);
+  const accelG = useFlightStore((s) => s.accelG);
+  if (!status) return null;
+  const { label, tone } = crewText(status, accelG);
+  const extra =
+    status.condition === 'thrust' || status.condition === 'over-limit'
+      ? formatStrain(status.strain)
+      : status.condition === 'rest' && status.untilChangeS !== null
+        ? `queima em ${formatSpan(status.untilChangeS)}`
+        : null;
+  const quiet = status.condition === 'ready' || status.condition === 'easy' || status.condition === 'arrived';
+  return (
+    <Chip className={CREW_CHIP[tone]}>
+      {tone === 'danger' ? '⚠ ' : '🧑‍🚀 '}
+      {quiet ? 'Piloto humano' : status.condition === 'hypothetical' ? 'Piloto · não sobreviveria' : label}
+      {extra && (
+        <span className="font-readout ml-1 inline-block min-w-[3.2em] text-[10px] tracking-normal normal-case tabular-nums">
+          · {extra}
+        </span>
+      )}
+    </Chip>
+  );
+}
+
 function Chip({ className, children }: { className: string; children: ReactNode }) {
   return (
     <span className={`font-display shrink-0 rounded-sm px-1.5 py-px text-[9px] whitespace-nowrap tracking-[0.15em] uppercase ${className}`}>
@@ -106,7 +140,9 @@ export function TelemetryHUD({ className = '' }: { className?: string }) {
       : flight.engine === 'off'
         ? flight.phase === 'arrived'
           ? 'motor parado'
-          : `motor desligado · ${formatAccelG(accelG)} nas queimas`
+          : flight.crewRest
+            ? `descanso · ${formatAccelG(accelG)} nas queimas`
+            : `motor desligado · ${formatAccelG(accelG)} nas queimas`
         : flight.thrustAccel > properAccel * 1.000001
           ? 'frenagem de emergência'
           : (findPreset(crew, accelG)?.title ?? 'personalizada');
@@ -123,15 +159,11 @@ export function TelemetryHUD({ className = '' }: { className?: string }) {
           como a contagem do flip, não empurra o resto do cockpit a cada segundo. */}
       <div className="mb-1.5 flex h-[2.6rem] flex-wrap content-start items-center gap-1 overflow-hidden sm:h-5 sm:gap-1.5">
         <Chip className="border border-cyan-300/50 text-cyan-200">{PHASE_LABEL[flight.phase]}</Chip>
-        <Chip
-          className={
-            crew === 'crewed'
-              ? 'border border-sky-300/40 bg-sky-500/10 text-sky-100'
-              : 'border border-violet-300/40 bg-violet-500/10 text-violet-100'
-          }
-        >
-          {crew === 'crewed' ? '🧑‍🚀 Piloto humano' : '🤖 Sonda robótica · sem tripulação'}
-        </Chip>
+        {crew === 'crewed' ? (
+          <CrewChip />
+        ) : (
+          <Chip className="border border-violet-300/40 bg-violet-500/10 text-violet-100">🤖 Sonda robótica · sem tripulação</Chip>
+        )}
         {ignitionCountdownS !== null && (
           <Chip className="animate-beacon bg-cyan-300 text-black">Ignição em {Math.ceil(ignitionCountdownS)}</Chip>
         )}

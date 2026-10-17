@@ -10,10 +10,25 @@
  * - Religar (na inércia): o piloto automático acelera de novo com a aceleração
  *   do plano e faz o flip no ponto certo, chegando mais cedo; sem distância
  *   para isso, freia na hora com a aceleração que for preciso (emergência).
+ * - Com descansos da tripulação no plano (§4.2.9), a frenagem e a nova subida
+ *   também alternam queimas e descansos, e o motor não aceita comandos num
+ *   descanso (a tripulação se recupera; o piloto automático religa o motor).
  */
+import {
+  brakeSegments,
+  brakeWithRests,
+  burnEndAt,
+  brakingDistance as restBrakingDistance,
+  crewStrainAt,
+  restPlanTolerance,
+  restRoute,
+  type RestCycle,
+  type SegmentStart,
+} from './crewRest';
 import {
   C,
   computeFlightState,
+  planSegments,
   segmentState,
   type FlightSegment,
   type ManeuverEnd,
@@ -36,26 +51,9 @@ const MAX_RAMP_FRACTION = 1 / 20;
  */
 const DRIFT_LIMIT_FACTOR = 100;
 
-/** Estado no início de um trecho do voo. */
-type SegmentStart = Pick<FlightSegment, 'startTau' | 'eta0' | 'remaining0' | 'earth0'>;
-
 const planOf = (profile: MissionProfile) => profile.maneuvers?.plan ?? profile;
 
-function segmentAt(profile: MissionProfile, kind: FlightSegment['kind'], startTau: number, duration: number, accel: number, extra: Partial<FlightSegment> = {}): FlightSegment {
-  const s = computeFlightState(profile, startTau);
-  return { kind, startTau, duration, accel, eta0: s.eta, remaining0: s.restDistanceRemainingM, earth0: s.earthTimeS, ...extra };
-}
-
-/** Os segmentos do plano analítico: acelerar, cruzar (se houver) e frear até o alvo. */
-export function planSegments(plan: MissionProfile): FlightSegment[] {
-  const a = plan.properAccel;
-  const segments = [segmentAt(plan, 'thrust', 0, plan.burnEndTau, a)];
-  if (plan.brakeStartTau > plan.burnEndTau) {
-    segments.push(segmentAt(plan, 'coast', plan.burnEndTau, plan.brakeStartTau - plan.burnEndTau, 0));
-  }
-  segments.push(segmentAt(plan, 'thrust', plan.brakeStartTau, plan.tauTotal - plan.brakeStartTau, -a, { toArrival: true }));
-  return segments;
-}
+export { planSegments };
 
 /** Os segmentos do voo atual até τ (o último cortado em τ). */
 function segmentsUntil(profile: MissionProfile, tau: number): FlightSegment[] {
@@ -72,6 +70,7 @@ function buildProfile(
   segments: FlightSegment[],
   end: ManeuverEnd,
   flipTau: number | null,
+  brakeTau: number | null = flipTau,
 ): MissionProfile {
   const last = segments.at(-1)!;
   const tauTotal = last.startTau + last.duration;
@@ -85,9 +84,9 @@ function buildProfile(
     if (seg.eta0 > etaMax) [etaMax, peakTau, peakEarth] = [seg.eta0, seg.startTau, seg.earth0];
     if (e.eta > etaMax) [etaMax, peakTau, peakEarth] = [e.eta, seg.startTau + seg.duration, e.earthTimeS];
   }
-  const firstOff = segments.find((seg) => seg.kind !== 'thrust' || seg.accel < 0);
-  const brake = end === 'arrival' ? last : null;
-  const coast = segments.find((seg) => seg.kind === 'coast');
+  // A subida (queimas e descansos) termina no primeiro trecho que não acelera.
+  const firstOff = segments.find((seg) => !((seg.kind === 'thrust' || seg.kind === 'cycles') && seg.accel > 0));
+  const coast = segments.find((seg) => seg.kind === 'coast' && !seg.rest);
   return {
     distanceM: plan.distanceM,
     properAccel: plan.properAccel,
@@ -99,8 +98,9 @@ function buildProfile(
     tHalf: peakEarth,
     tTotal: endState.earthTimeS,
     burnEndTau: firstOff?.startTau ?? tauTotal,
-    brakeStartTau: brake ? brake.startTau : tauTotal,
+    brakeStartTau: end === 'arrival' && brakeTau !== null ? brakeTau : tauTotal,
     coastEta: coast ? coast.eta0 : null,
+    ...(plan.crewRest && { crewRest: plan.crewRest }),
     maneuvers: { plan, firstTau, segments, end, flipTau },
   };
 }
@@ -114,22 +114,35 @@ const brakeToArrival = (start: SegmentStart, a: number): FlightSegment => ({
   toArrival: true,
 });
 
+/** Frenagem de emergência: a aceleração contínua que para a nave exatamente no alvo. */
+const emergencyBrake = (start: SegmentStart) => brakeToArrival(start, (C2 / start.remaining0) * coshm1(start.eta0));
+
+/** Início da primeira queima de uma frenagem (depois da inércia que a antecede, se houver). */
+const firstBurnTau = (segments: readonly FlightSegment[]) => segments.find((seg) => seg.kind !== 'coast')!.startTau;
+
+/** Frenagem a partir de `start` até parar no alvo com `a`: contínua, ou com descansos se houver ciclo. */
+const brakeFrom = (start: SegmentStart, a: number, cycle: RestCycle | null): FlightSegment[] =>
+  cycle ? brakeSegments(start, a, cycle) : [brakeToArrival(start, a)];
+
 /**
  * Depois de desligar o motor: inércia até a distância que falta ser a de frear com
- * a aceleração do plano, L = (c²/α)(cosh η − 1), e o piloto automático religa o
- * motor ali (o flip). Sem essa distância, freia já com a aceleração necessária,
- * aₑ = (c²/L)(cosh η − 1). Parada ou lenta demais para chegar num tempo
- * razoável, a nave fica à deriva.
+ * a aceleração do plano, L = (c²/α)(cosh η − 1) (com descansos, mais a distância
+ * percorrida neles), e o piloto automático religa o motor ali (o flip). Sem essa
+ * distância, freia já com a aceleração necessária, aₑ = (c²/L)(cosh η − 1) (com
+ * descansos, a menor que para a nave no alvo). Parada ou lenta demais para chegar
+ * num tempo razoável, a nave fica à deriva.
  */
 function coastThenBrake(
   start: SegmentStart,
   plan: MissionProfile,
-): { segments: FlightSegment[]; end: ManeuverEnd; flipTau: number | null } {
+): { segments: FlightSegment[]; end: ManeuverEnd; flipTau: number | null; brakeTau: number | null } {
   const a = plan.properAccel;
+  const cycle = plan.crewRest ?? null;
   const { eta0: eta, remaining0: remaining } = start;
-  const brakingDistance = (C2 / a) * coshm1(eta);
+  const brakingDistance = cycle ? restBrakingDistance(eta, a, cycle) : (C2 / a) * coshm1(eta);
   if (remaining < brakingDistance) {
-    return { segments: [brakeToArrival(start, (C2 / remaining) * coshm1(eta))], end: 'arrival', flipTau: null };
+    const segments = cycle ? brakeWithRests(start, cycle, a).segments : [emergencyBrake(start)];
+    return { segments, end: 'arrival', flipTau: null, brakeTau: firstBurnTau(segments) };
   }
   const planSpan = Math.max(plan.tauTotal, plan.tTotal);
   const speed = C * Math.sinh(eta);
@@ -137,14 +150,14 @@ function coastThenBrake(
   if (!(coastTau <= DRIFT_LIMIT_FACTOR * planSpan)) {
     // A linha do tempo segue mais um trecho e termina.
     const drift = speed > 0 ? DRIFT_LIMIT_FACTOR * planSpan : planSpan;
-    return { segments: [{ kind: 'coast', ...start, duration: drift, accel: 0 }], end: 'drift', flipTau: null };
+    return { segments: [{ kind: 'coast', ...start, duration: drift, accel: 0 }], end: 'drift', flipTau: null, brakeTau: null };
   }
-  if (coastTau === 0) return { segments: [brakeToArrival(start, a)], end: 'arrival', flipTau: start.startTau };
+  if (coastTau === 0) return { segments: brakeFrom(start, a, cycle), end: 'arrival', flipTau: start.startTau, brakeTau: start.startTau };
   const coast: FlightSegment = { kind: 'coast', ...start, duration: coastTau, accel: 0 };
   const atFlip = segmentState(coast, coastTau);
   const flipTau = start.startTau + coastTau;
-  const brake = brakeToArrival({ startTau: flipTau, eta0: eta, remaining0: atFlip.remainingM, earth0: atFlip.earthTimeS }, a);
-  return { segments: [coast, brake], end: 'arrival', flipTau };
+  const brake = brakeFrom({ startTau: flipTau, eta0: eta, remaining0: atFlip.remainingM, earth0: atFlip.earthTimeS }, a, cycle);
+  return { segments: [coast, ...brake], end: 'arrival', flipTau, brakeTau: flipTau };
 }
 
 /** Bissecção em [0, s₁] para f(s) = 0, com f(0) > 0 ≥ f(s₁). */
@@ -159,12 +172,12 @@ function bisect(f: (s: number) => number, s1: number): number {
   return hi;
 }
 
-/** O motor pode ser desligado (empuxo) ou religado (inércia, antes do fim do voo)? */
+/** O motor pode ser desligado (empuxo) ou religado (inércia, antes do fim do voo e fora dos descansos)? */
 export function engineCommandAt(profile: MissionProfile, tau: number): 'cut' | 'relight' | null {
   if (!(tau > 0 && tau < profile.tauTotal)) return null;
   const s = computeFlightState(profile, tau);
   if (s.engine === 'thrust') return 'cut';
-  if (s.engine === 'off' && s.phase === 'coasting') return 'relight';
+  if (s.engine === 'off' && s.phase === 'coasting' && !s.crewRest) return 'relight';
   return null;
 }
 
@@ -181,6 +194,8 @@ export function cutEngine(profile: MissionProfile, tau: number, rampTau: number)
   const segments = segmentsUntil(profile, tau);
   const firstTau = Math.min(profile.maneuvers?.firstTau ?? tau, tau);
   let duration = Math.min(Math.max(rampTau, 1e-6), plan.tauTotal * MAX_RAMP_FRACTION);
+  // Com descansos, a rampa não estica a queima em curso além do fim planejado (a tripulação está no limite).
+  if (plan.crewRest) duration = Math.min(duration, Math.max(burnEndAt(profile, tau) - tau, 1e-6));
 
   // Freando, a nave pode parar durante a rampa: η(u) = η₀ + (a₀/c)(u − u²/2d) chega a 0 antes de d.
   let stops = false;
@@ -211,7 +226,7 @@ export function cutEngine(profile: MissionProfile, tau: number, rampTau: number)
     { startTau: tau + duration, eta0: stops ? 0 : after.eta, remaining0: after.remainingM, earth0: after.earthTimeS },
     plan,
   );
-  return buildProfile(plan, firstTau, [...segments, ramp, ...rest.segments], rest.end, rest.flipTau);
+  return buildProfile(plan, firstTau, [...segments, ramp, ...rest.segments], rest.end, rest.flipTau, rest.brakeTau);
 }
 
 /**
@@ -229,6 +244,10 @@ export function relightEngine(profile: MissionProfile, tau: number): MissionProf
   const segments = segmentsUntil(profile, tau);
   const firstTau = Math.min(profile.maneuvers?.firstTau ?? tau, tau);
   const start = { eta0: eta, remaining0: remaining, earth0: now.earthTimeS };
+  if (plan.crewRest) {
+    const strain = crewStrainAt(profile, tau, restPlanTolerance({ ...plan, crewRest: plan.crewRest }));
+    return relightWithRests(plan, firstTau, segments, { startTau: tau, ...start }, plan.crewRest, strain);
+  }
   const brakingDistance = (C2 / a) * coshm1(eta);
 
   if (remaining >= brakingDistance) {
@@ -250,20 +269,42 @@ export function relightEngine(profile: MissionProfile, tau: number): MissionProf
       toArrival: true,
     };
     const added = accelTau > 0 ? [boost, brake] : [brake];
-    return buildProfile(plan, firstTau, [...segments, ...added], 'arrival', accelTau > 0 ? flipTau : null);
+    return buildProfile(plan, firstTau, [...segments, ...added], 'arrival', accelTau > 0 ? flipTau : null, flipTau);
   }
+  return buildProfile(plan, firstTau, [...segments, emergencyBrake({ startTau: tau, ...start })], 'arrival', null, tau);
+}
 
-  // Frenagem de emergência: a aceleração que para a nave exatamente no alvo.
-  const emergency = (C2 / remaining) * coshm1(eta);
-  const brake: FlightSegment = {
-    kind: 'thrust',
-    startTau: tau,
-    duration: (C / emergency) * eta,
-    accel: -emergency,
-    ...start,
-    toArrival: true,
-  };
-  return buildProfile(plan, firstTau, [...segments, brake], 'arrival', null);
+/**
+ * Religar com descansos da tripulação: se a tripulação ainda não se recuperou da última
+ * queima (carga `strain`), o piloto automático espera o descanso terminar; depois, a nova
+ * subida em queimas e descansos, um descanso no topo e a frenagem ao contrário. Sem
+ * distância para isso, freia com descansos e a aceleração que para a nave no alvo (menor
+ * que α, ou maior numa emergência).
+ */
+function relightWithRests(
+  plan: MissionProfile,
+  firstTau: number,
+  segments: FlightSegment[],
+  start: SegmentStart,
+  cycle: RestCycle,
+  strain: number,
+): MissionProfile {
+  const a = plan.properAccel;
+  const added: FlightSegment[] = [];
+  let from = start;
+  if (strain > 0 && start.eta0 > 0) {
+    const wait: FlightSegment = { kind: 'coast', ...start, duration: strain * cycle.restTau, accel: 0, rest: true };
+    const after = segmentState(wait, wait.duration);
+    if (after.remainingM > 0) {
+      added.push(wait);
+      from = { startTau: start.startTau + wait.duration, eta0: start.eta0, remaining0: after.remainingM, earth0: after.earthTimeS };
+    }
+  }
+  const route = restRoute(from, a, cycle);
+  if (route) return buildProfile(plan, firstTau, [...segments, ...added, ...route.segments], 'arrival', route.flipTau);
+  if (!(from.eta0 > 0)) return buildProfile(plan, firstTau, [...segments, emergencyBrake(start)], 'arrival', null, start.startTau);
+  const brake = brakeWithRests(from, cycle, a).segments;
+  return buildProfile(plan, firstTau, [...segments, ...added, ...brake], 'arrival', null, firstBurnTau(brake));
 }
 
 /** Rampa de desligamento em tempo de bordo: alguns segundos reais no multiplicador do momento. */

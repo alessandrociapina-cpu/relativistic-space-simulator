@@ -28,6 +28,7 @@ export interface AccelerationPreset {
   readonly detail: string;
   /** Por quanto tempo seguido a aceleração é suportável (s); `Infinity` = indefinidamente. */
   readonly enduranceS: number;
+  /** A tolerância numa frase: "suportável por até ~3 dias, no limite", "suporta empuxo contínuo". */
   readonly enduranceText: string;
   /** Além de qualquer limite conhecido: só para ver os efeitos. */
   readonly hypothetical?: boolean;
@@ -45,7 +46,7 @@ export const ACCELERATION_PRESETS: readonly AccelerationPreset[] = [
     protection: 'Nenhuma: o peso de sempre',
     detail: 'O ponto ótimo do corpo humano: dá para viver anos a bordo.',
     enduranceS: Infinity,
-    enduranceText: 'anos',
+    enduranceText: 'suportável por anos',
   },
   {
     id: 'crew-1.5g',
@@ -56,7 +57,7 @@ export const ACCELERATION_PRESETS: readonly AccelerationPreset[] = [
     protection: 'Nenhuma',
     detail: 'Limite para manter a locomoção, a circulação e o coração sem colapso progressivo.',
     enduranceS: 21 * DAY,
-    enduranceText: 'dias a semanas',
+    enduranceText: 'suportável por dias a semanas',
   },
   {
     id: 'crew-3g',
@@ -67,7 +68,7 @@ export const ACCELERATION_PRESETS: readonly AccelerationPreset[] = [
     protection: 'Assento reclinado contra o empuxo',
     detail: 'Acima de 2 g por horas, os alvéolos colapsam e o coração entra em fadiga.',
     enduranceS: 4 * HOUR,
-    enduranceText: 'horas',
+    enduranceText: 'suportável por algumas horas',
   },
   {
     id: 'crew-6g',
@@ -78,7 +79,7 @@ export const ACCELERATION_PRESETS: readonly AccelerationPreset[] = [
     protection: 'Traje pressurizado e manobra de esforço, deitado',
     detail: 'Em centrífuga, pessoas treinadas aguentam 8 g por ~3 min ou 6 g por ~10 min.',
     enduranceS: 10 * MINUTE,
-    enduranceText: '~10 min',
+    enduranceText: 'suportável por ~10 min',
   },
   {
     id: 'crew-10g',
@@ -89,7 +90,7 @@ export const ACCELERATION_PRESETS: readonly AccelerationPreset[] = [
     protection: 'Tanque com fluido da densidade do corpo',
     detail: 'O fluido equilibra a pressão sobre órgãos e vasos; os pulmões, cheios de ar, ainda limitam.',
     enduranceS: 3 * DAY,
-    enduranceText: 'até ~3 dias, no limite',
+    enduranceText: 'suportável por até ~3 dias, no limite',
   },
   {
     id: 'crew-30g',
@@ -100,7 +101,7 @@ export const ACCELERATION_PRESETS: readonly AccelerationPreset[] = [
     protection: 'Pulmões cheios de perfluorocarbono oxigenado',
     detail: 'Sem ar no tórax, o limite teórico sobe para 24 a 50 g; restam ossos, cérebro e ouvido interno.',
     enduranceS: 3 * HOUR,
-    enduranceText: 'minutos a horas',
+    enduranceText: 'suportável por minutos a horas',
   },
   {
     id: 'crew-demo',
@@ -123,7 +124,7 @@ export const ACCELERATION_PRESETS: readonly AccelerationPreset[] = [
     protection: 'Antenas e painéis solares abertos',
     detail: 'Como a Voyager e a Cassini em trânsito: 0,1 a 0,5 g contínuos.',
     enduranceS: Infinity,
-    enduranceText: 'contínua',
+    enduranceText: 'suporta empuxo contínuo',
   },
   {
     id: 'robot-100g',
@@ -134,7 +135,7 @@ export const ACCELERATION_PRESETS: readonly AccelerationPreset[] = [
     protection: 'Estrutura rígida, antenas e painéis recolhidos',
     detail: 'Máquinas não desmaiam: a aceleração contínua só esbarra na resistência dos materiais.',
     enduranceS: Infinity,
-    enduranceText: 'contínua',
+    enduranceText: 'suporta empuxo contínuo',
   },
   {
     id: 'robot-10000g',
@@ -145,7 +146,7 @@ export const ACCELERATION_PRESETS: readonly AccelerationPreset[] = [
     protection: 'Sem peças móveis, circuitos em resina epóxi',
     detail: 'Projéteis guiados funcionam depois de 10 000 a 15 500 g.',
     enduranceS: Infinity,
-    enduranceText: 'contínua',
+    enduranceText: 'suporta empuxo contínuo',
   },
   {
     id: 'robot-30000g',
@@ -156,7 +157,7 @@ export const ACCELERATION_PRESETS: readonly AccelerationPreset[] = [
     protection: 'Um único wafer de silício com vela de luz',
     detail: 'Empurrada por laser, aguenta 10 000 a 60 000 g por minutos.',
     enduranceS: Infinity,
-    enduranceText: 'contínua',
+    enduranceText: 'suporta empuxo contínuo',
   },
   {
     id: 'robot-demo',
@@ -179,10 +180,10 @@ export const findPreset = (crew: CrewKind, accelG: number) =>
 
 /** Faixas de tolerância para uma aceleração qualquer (a melhor proteção disponível em cada faixa). */
 const CREW_BANDS: readonly { maxG: number; enduranceS: number; text: string; protection: string }[] = [
-  { maxG: 1.2, enduranceS: Infinity, text: 'anos', protection: 'nenhuma' },
-  { maxG: 1.5, enduranceS: 21 * DAY, text: 'dias a semanas', protection: 'nenhuma' },
-  { maxG: 10, enduranceS: 3 * DAY, text: 'até ~3 dias', protection: 'imersão em líquido' },
-  { maxG: 50, enduranceS: 3 * HOUR, text: 'minutos a horas', protection: 'imersão e ventilação líquida' },
+  { maxG: 1.2, enduranceS: Infinity, text: 'suportável por anos', protection: 'nenhuma' },
+  { maxG: 1.5, enduranceS: 21 * DAY, text: 'suportável por dias a semanas', protection: 'nenhuma' },
+  { maxG: 10, enduranceS: 3 * DAY, text: 'suportável por até ~3 dias', protection: 'imersão em líquido' },
+  { maxG: 50, enduranceS: 3 * HOUR, text: 'suportável por minutos a horas', protection: 'imersão e ventilação líquida' },
 ];
 const ROBOT_BANDS: readonly { maxG: number; protection: string }[] = [
   { maxG: 0.5, protection: 'sonda convencional' },
@@ -209,13 +210,16 @@ export function enduranceFor(crew: CrewKind, accelG: number): Endurance {
   }
   const band = ROBOT_BANDS.find((b) => accelG <= b.maxG);
   return band
-    ? { enduranceS: Infinity, text: 'contínua', protection: band.protection }
+    ? { enduranceS: Infinity, text: 'suporta empuxo contínuo', protection: band.protection }
     : { enduranceS: 0, text: 'nenhum material aguenta', protection: 'além de qualquer material conhecido' };
 }
 
-/** Maior trecho de empuxo contínuo: a viagem inteira no Flip-and-Burn, cada queima no perfil com cruzeiro. */
+/**
+ * Maior trecho de empuxo contínuo: a viagem inteira no Flip-and-Burn, cada queima no perfil com
+ * cruzeiro, a queima entre dois descansos no plano com descansos da tripulação (§4.2.9).
+ */
 export const longestBurnS = (profile: MissionProfile) =>
-  profile.coastEta === null ? profile.tauTotal : profile.burnEndTau;
+  profile.crewRest ? profile.crewRest.burnTau : profile.coastEta === null ? profile.tauTotal : profile.burnEndTau;
 
 export type MissionViability = 'ok' | 'over-limit' | 'hypothetical';
 
@@ -223,6 +227,8 @@ export interface MissionAssessment {
   readonly viability: MissionViability;
   readonly endurance: Endurance;
   readonly burnS: number;
+  /** O plano alterna queimas e descansos para a tripulação se recuperar. */
+  readonly rests: boolean;
 }
 
 /** A nave aguenta o empuxo desta missão? */
@@ -231,5 +237,5 @@ export function assessMission(crew: CrewKind, accelG: number, profile: MissionPr
   const burnS = longestBurnS(profile);
   const viability: MissionViability =
     endurance.enduranceS === 0 ? 'hypothetical' : burnS <= endurance.enduranceS ? 'ok' : 'over-limit';
-  return { viability, endurance, burnS };
+  return { viability, endurance, burnS, rests: profile.crewRest !== undefined };
 }

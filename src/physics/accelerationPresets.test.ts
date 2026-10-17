@@ -25,11 +25,18 @@ describe('acelerações por tipo de nave', () => {
     expect(enduranceFor('crewed', 80).enduranceS).toBe(0);
   });
 
-  it('a 1 g a viagem tripulada a Proxima é suportável; a 30 g o empuxo dura meses e passa do limite', () => {
+  it('a 1 g a viagem tripulada a Proxima é suportável; a 30 g o empuxo contínuo dura meses e passa do limite', () => {
     expect(assess('crewed', 1).viability).toBe('ok');
     const fast = assess('crewed', 30);
     expect(fast.viability).toBe('over-limit');
+    expect(fast.rests).toBe(false);
     expect(fast.burnS / 86_400).toBeGreaterThan(100);
+  });
+
+  it('as tolerâncias são frases completas, sem "aguenta" solto', () => {
+    for (const p of ACCELERATION_PRESETS) expect(p.enduranceText).toMatch(/^(suportável por|suporta|nenhum)/);
+    expect(enduranceFor('crewed', 4).text).toBe('suportável por até ~3 dias');
+    expect(enduranceFor('robotic', 500).text).toBe('suporta empuxo contínuo');
   });
 
   it('a demonstração é hipotética para tripulantes e para sondas', () => {

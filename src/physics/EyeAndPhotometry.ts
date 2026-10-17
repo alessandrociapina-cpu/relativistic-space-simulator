@@ -8,8 +8,8 @@
  * γ = 9 356, os marcos do vídeo de referência (11 065 e 10 796 lux).
  */
 import {
-  C,
   T_CMB_0,
+  ascentTauAt,
   computeFlightState,
   computeShaderKinematics,
   type FlightState,
@@ -269,10 +269,10 @@ export function computePhotometryAndEyeState(
   let whiteoutRetinaStops: number | null = null;
   let whiteoutPupilMm: number | null = null;
   // O instante da ida com a mesma luz de agora: no plano, simétrico, E(τ) = E(τ_total − τ). Depois de
-  // um comando do piloto a simetria acaba (a frenagem de emergência usa a > α): vale o instante da subida
-  // inicial com a mesma rapidez, η = ατ/c, se ele existiu (até `burnEndTau`, que já para no primeiro comando).
-  const mirrorTau = profile.maneuvers ? (C / profile.properAccel) * flight.eta : profile.tauTotal - flight.tau;
-  if (flight.phase === 'decelerating' && mirrorTau <= profile.burnEndTau) {
+  // um comando do piloto a simetria acaba (a frenagem de emergência usa a > α): vale o primeiro instante
+  // da subida com a mesma rapidez, se ele existiu.
+  const mirrorTau = profile.maneuvers ? ascentTauAt(profile, flight.eta, flight.tau) : profile.tauTotal - flight.tau;
+  if (flight.phase === 'decelerating' && mirrorTau !== null && mirrorTau < flight.tau) {
     whiteoutTau = mirrorTau;
     const mirrorStops = sample(timeline.stops, timeline, whiteoutTau);
     whiteoutPupilMm = sample(timeline.pupilMm, timeline, whiteoutTau);

@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { computeMissionProfile, rocketMassRatio, type MissionProfile } from '../physics/RelativityEngine';
+import { rocketMassRatio, type MissionProfile } from '../physics/RelativityEngine';
 import {
   assessMission,
+  longestBurnS,
   presetsFor,
   type AccelerationPreset,
   type CrewKind,
   type MissionAssessment,
 } from '../physics/accelerationPresets';
-import { DESTINATION_LIST, MAX_COAST_FRACTION, destinationMissionProfile, effectiveCoastEta, type Destination } from '../physics/destinations';
+import { missionProfileFor, plannedCoastEta } from '../physics/crewRest';
+import { DESTINATION_LIST, MAX_COAST_FRACTION, destinationMissionProfile, type Destination } from '../physics/destinations';
 import { useFlightStore, type MissionChoice } from '../store/useFlightStore';
 import { APP_HASH } from '../ui/appMode';
 import { useCockpitUi } from '../ui/cockpitUi';
@@ -92,17 +94,25 @@ function PresetCard({
   active: boolean;
   onSelect: () => void;
 }) {
-  const profile = destinationMissionProfile(destination, preset.accelG, effectiveCoastEta(destination, preset.accelG, coastEta));
-  const { viability } = assessMission(preset.crew, preset.accelG, profile);
+  const profile = missionProfileFor(
+    destination,
+    preset.accelG,
+    plannedCoastEta(destination, preset.accelG, coastEta, preset.crew),
+    preset.crew,
+  );
+  const { viability, rests } = assessMission(preset.crew, preset.accelG, profile);
   return (
     <button type="button" role="radio" aria-checked={active} className={optionClass(active)} onClick={onSelect}>
       <div className="flex items-baseline justify-between gap-2">
         <span className="font-readout text-lg whitespace-nowrap text-slate-50">{preset.label}</span>
-        <ViabilityMark viability={viability} />
+        <span className="flex items-baseline gap-1">
+          {rests && <span className="text-[10px] text-emerald-300/80">com descansos</span>}
+          <ViabilityMark viability={viability} />
+        </span>
       </div>
       <div className="text-[13px] font-semibold text-cyan-100">{preset.title}</div>
       <div className="text-[11px] leading-snug text-slate-400">
-        {preset.protection} · aguenta {preset.enduranceText}
+        {preset.protection} · {preset.enduranceText}
       </div>
       <div className="font-readout mt-0.5 text-[11px] text-slate-200 tabular-nums">
         {formatSpan(profile.tauTotal)} a bordo · {formatSpan(profile.tTotal)} na Terra
@@ -170,16 +180,15 @@ function CustomAcceleration({
 }
 
 function ProfileChoice({
-  profile,
+  flipEta,
   coastEta,
   onChange,
 }: {
-  profile: MissionProfile;
+  /** Rapidez de pico sem cruzeiro (com os descansos, se houver): acima dela o cruzeiro nunca é atingido. */
+  flipEta: number;
   coastEta: number | null;
   onChange: (eta: number | null) => void;
 }) {
-  // Rapidez do ponto médio: acima dela o cruzeiro nunca é atingido.
-  const flipEta = computeMissionProfile(profile.distanceM, profile.properAccel).etaMax;
   const maxCoastEta = flipEta * MAX_COAST_FRACTION;
   const shownEta = coastEta === null ? null : Math.min(coastEta, maxCoastEta);
   return (
@@ -231,8 +240,17 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function viabilityText(choice: MissionChoice, a: MissionAssessment): { tone: string; text: string } {
+const lowerFirst = (text: string) => text.charAt(0).toLowerCase() + text.slice(1);
+
+/** O veredito do planejamento; `continuousBurnS` é a maior queima contínua sem os descansos. */
+function viabilityText(
+  choice: MissionChoice,
+  a: MissionAssessment,
+  profile: MissionProfile,
+  continuousBurnS: number,
+): { tone: string; text: string } {
   const g = formatAccelG(choice.accelG);
+  const protection = lowerFirst(a.endurance.protection);
   if (a.viability === 'hypothetical') {
     return {
       tone: 'border-rose-400/50 bg-rose-950/40 text-rose-100',
@@ -245,15 +263,27 @@ function viabilityText(choice: MissionChoice, a: MissionAssessment): { tone: str
   if (a.viability === 'over-limit') {
     return {
       tone: 'border-amber-400/50 bg-amber-950/40 text-amber-100',
-      text: `Além do limite: são ${formatSpan(a.burnS)} de empuxo contínuo a ${g}, e o corpo aguenta ${a.endurance.text} (${a.endurance.protection}). A tripulação não chegaria viva.`,
+      text: `Além do limite: são ${formatSpan(a.burnS)} de empuxo contínuo a ${g}, e o limite do corpo (${protection}) é de ${formatSpan(a.endurance.enduranceS)}. A tripulação não chegaria viva.`,
+    };
+  }
+  const tone = 'border-emerald-400/40 bg-emerald-950/30 text-emerald-100';
+  const rest = profile.crewRest;
+  if (rest) {
+    return {
+      tone,
+      text:
+        `Suportável com descansos: sem eles, seriam ${formatSpan(continuousBurnS)} de empuxo contínuo a ${g}, e o limite ` +
+        `do corpo (${protection}) é de ${formatSpan(rest.enduranceS)}. O piloto automático divide a aceleração e a ` +
+        `frenagem em ${formatProse(rest.burns)} queimas de até ${formatSpan(rest.burnTau)} (90 % do limite), separadas por ` +
+        `${formatSpan(rest.restTau)} de inércia, sem peso, para a tripulação se recuperar.`,
     };
   }
   return {
-    tone: 'border-emerald-400/40 bg-emerald-950/30 text-emerald-100',
+    tone,
     text:
       choice.crew === 'crewed'
-        ? `Suportável: ${formatSpan(a.burnS)} de empuxo contínuo a ${g} (${a.endurance.protection}; aguenta ${a.endurance.text}).`
-        : `Suportável: a sonda aguenta ${g} contínuos (${a.endurance.protection}).`,
+        ? `Suportável: ${formatSpan(a.burnS)} de empuxo contínuo a ${g}, dentro do limite do corpo (${protection}).`
+        : `Suportável: a sonda aguenta ${g} contínuos (${protection}).`,
   };
 }
 
@@ -279,13 +309,18 @@ function Planner() {
   const midFlight = useFlightStore((s) => s.tau > 0 && s.tau < s.profile.tauTotal);
   const closePlanner = useCockpitUi((s) => s.closePlanner);
   // O cruzeiro do slider fica guardado no rascunho; o que vale é o limitado à aceleração escolhida.
-  const coastEta = effectiveCoastEta(draft.destination, draft.accelG, draft.coastEta);
+  const coastEta = plannedCoastEta(draft.destination, draft.accelG, draft.coastEta, draft.crew);
   const profile = useMemo(
-    () => destinationMissionProfile(draft.destination, draft.accelG, coastEta),
-    [draft.destination, draft.accelG, coastEta],
+    () => missionProfileFor(draft.destination, draft.accelG, coastEta, draft.crew),
+    [draft.destination, draft.accelG, coastEta, draft.crew],
+  );
+  const flipEta = useMemo(
+    () => missionProfileFor(draft.destination, draft.accelG, null, draft.crew).etaMax,
+    [draft.destination, draft.accelG, draft.crew],
   );
   const assessment = assessMission(draft.crew, draft.accelG, profile);
-  const verdict = viabilityText(draft, assessment);
+  const continuousBurnS = longestBurnS(destinationMissionProfile(draft.destination, draft.accelG, coastEta));
+  const verdict = viabilityText(draft, assessment, profile, continuousBurnS);
   const presets = presetsFor(draft.crew);
   const presetActive = presets.some((p) => p.accelG === draft.accelG);
   const [customOpen, setCustomOpen] = useState(!presetActive);
@@ -387,7 +422,8 @@ function Planner() {
               ))}
             </div>
             <div className="mt-1 text-[11px] text-slate-400">
-              Aceleração própria contínua α: quanto o corpo (ou a máquina) aguenta depende de por quanto tempo.
+              Aceleração própria α: quanto o corpo (ou a máquina) aguenta depende de por quanto tempo. Com piloto
+              humano, quando o empuxo contínuo passaria do limite, a rota alterna queimas e descansos sem peso.
             </div>
             <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Aceleração própria">
               {presets.map((p) => (
@@ -415,13 +451,19 @@ function Planner() {
           </Section>
 
           <Section step={3} title="Perfil e resumo">
-            <ProfileChoice profile={profile} coastEta={draft.coastEta} onChange={(coastEta) => update({ coastEta })} />
+            <ProfileChoice flipEta={flipEta} coastEta={draft.coastEta} onChange={(coastEta) => update({ coastEta })} />
             <div className="hull-panel mt-1 rounded-lg px-3 py-2">
               <SummaryRow label="Destino" value={draft.destination.name} />
               <SummaryRow label="A bordo" value={draft.crew === 'crewed' ? 'Piloto humano' : 'Sonda robótica'} />
               <SummaryRow label="Aceleração α" value={formatAccelG(draft.accelG)} />
               <SummaryRow label="Tempo de bordo" value={formatSpan(profile.tauTotal)} />
               <SummaryRow label="Tempo na Terra" value={formatSpan(profile.tTotal)} />
+              {profile.crewRest && (
+                <>
+                  <SummaryRow label="Queimas" value={`${formatProse(profile.crewRest.burns)} × até ${formatSpan(profile.crewRest.burnTau)}`} />
+                  <SummaryRow label="Descanso entre queimas" value={formatSpan(profile.crewRest.restTau)} />
+                </>
+              )}
               <SummaryRow label="γ máximo" value={formatGamma(profile.gammaMax)} />
               <SummaryRow
                 label="Velocidade máxima"
