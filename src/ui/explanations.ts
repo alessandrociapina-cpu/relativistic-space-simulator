@@ -20,6 +20,7 @@ import {
   type MissionProfile,
 } from '../physics/RelativityEngine';
 import type { CrewKind } from '../physics/accelerationPresets';
+import { brakingDistance as restBrakingDistance, nextBurnAt } from '../physics/crewRest';
 import type { Destination } from '../physics/destinations';
 import { CMB_VISIBLE_GAMMA, preFlipWindowS } from '../physics/criticalEvents';
 import { WIEN_NM_K, peakCmbLux, peakCmbLuxRapidity, type PhotometryAndEyeState } from '../physics/EyeAndPhotometry';
@@ -60,6 +61,7 @@ export type EffectId =
   | 'arrival'
   | 'flip'
   | 'braking'
+  | 'crew-rest'
   | 'coasting'
   | 'target-blueshift'
   | 'solar-system'
@@ -83,6 +85,7 @@ export const EFFECT_ORDER: readonly EffectId[] = [
   'arrival',
   'flip',
   'braking',
+  'crew-rest',
   'coasting',
   'target-blueshift',
   'solar-system',
@@ -192,7 +195,15 @@ const ORBITS = [
 ] as const;
 
 const missionTotalsFormulas = (p: MissionProfile): Formula[] =>
-  p.coastEta === null
+  p.crewRest
+    ? [
+        { tex: tex`\gamma_{\max} = \cosh\eta_{\max} = ${n(p.gammaMax, 4)}` },
+        {
+          tex: tex`\tau_{\text{total}} = \frac{2c}{\alpha}\,\eta_{\max} + \tau_{\text{inércia}} = ${texDuration((2 * C * p.etaMax) / p.properAccel)} + ${texDuration(p.tauTotal - (2 * C * p.etaMax) / p.properAccel)} = ${texDuration(p.tauTotal)}`,
+        },
+        { tex: tex`t_{\text{total}} = ${texDuration(p.tTotal)}` },
+      ]
+    : p.coastEta === null
     ? [
         { tex: tex`\gamma_{\max} = 1 + \frac{\alpha\,d_{1/2}}{c^2} = ${n(p.gammaMax, 4)}` },
         { tex: tex`\tau_{\text{total}} = \frac{2c}{\alpha}\operatorname{arccosh}\gamma_{\max} = ${texDuration(p.tauTotal)}` },
@@ -208,8 +219,19 @@ const missionTotalsFormulas = (p: MissionProfile): Formula[] =>
         },
       ];
 
-/** Distância percorrida por inércia: D − 2·(c²/α)(γ_c − 1). */
-const coastDistanceM = (p: MissionProfile) => p.distanceM - (2 * C2 * (p.gammaMax - 1)) / p.properAccel;
+/** Distância percorrida por inércia no cruzeiro do plano (com descansos, a subida também os inclui). */
+const coastDistanceM = (p: MissionProfile) =>
+  computeFlightState(p, p.burnEndTau).restDistanceRemainingM - computeFlightState(p, p.brakeStartTau).restDistanceRemainingM;
+
+/** Distância para frear de η até parar com a aceleração do plano: com descansos, mais a percorrida neles. */
+const brakingDistanceOf = (p: MissionProfile, eta: number) =>
+  p.crewRest ? restBrakingDistance(eta, p.properAccel, p.crewRest) : (C2 * 2 * Math.sinh(eta / 2) ** 2) / p.properAccel;
+
+/** L_frenagem em TeX, com a soma dos descansos quando há. */
+const brakingTex = (p: MissionProfile, gammaSymbol: string, distanceM: number) =>
+  p.crewRest
+    ? tex`L_{\text{frenagem}} = \frac{c^2}{\alpha}\,(${gammaSymbol} - 1) + c\,\Delta\tau_{\text{descanso}} \sum_j \sinh(j\,\Delta\eta) = ${texDistance(distanceM)}`
+    : tex`L_{\text{frenagem}} = \frac{c^2}{\alpha}\,(${gammaSymbol} - 1) = ${texDistance(distanceM)}`;
 
 const velocityOf = (f: FlightState) => formatVelocity(f.beta, f.oneMinusBeta);
 /** γ no texto: "1,67", "1 348", "3,53 × 10⁶". */
@@ -222,7 +244,14 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
     isActive: () => true,
     explain: ({ destination, accelG, alpha, profile, crewed }) => ({
       summary:
-        (profile.coastEta === null
+        (profile.crewRest
+          ? `Acelerar com α constante em queimas de até ${formatSpan(profile.crewRest.burnTau)}, separadas por ` +
+            `descansos de ${formatSpan(profile.crewRest.restTau)} sem peso, ` +
+            (profile.coastEta === null
+              ? 'girar a nave no meio do caminho'
+              : `seguir por inércia a v = ${formatVelocity(Math.tanh(profile.etaMax), Math.exp(-profile.etaMax) / profile.gammaMax)}, girar a nave`) +
+            ' e frear do mesmo jeito até parar em '
+          : profile.coastEta === null
           ? 'Acelerar com α constante até o meio do caminho, girar a nave e frear com a mesma α até parar em '
           : `Acelerar com α constante até v = ${formatVelocity(Math.tanh(profile.etaMax), Math.exp(-profile.etaMax) / profile.gammaMax)}, ` +
             'desligar o motor e seguir por inércia, depois girar a nave e frear com a mesma α até parar em ') +
@@ -244,7 +273,10 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
               ? `A ${formatFixed(accelG, accelG < 1 ? 2 : 1)} g, a tripulação sente um peso parecido com o da Terra ` +
                 'durante todo o empuxo: é o perfil clássico de uma viagem tripulada.'
               : `A ${num(accelG)} g, a tripulação pesa ${num(accelG)} vezes mais que na Terra durante o empuxo, e o ` +
-                'corpo só aguenta isso por tempo limitado.',
+                'corpo só aguenta isso por tempo limitado' +
+                (profile.crewRest
+                  ? `: por isso o plano divide o empuxo em ${num(profile.crewRest.burns)} queimas, com descansos entre elas.`
+                  : '.'),
       ],
       formulas: [
         { tex: tex`\alpha = N_G\,g_0 = ${n(accelG)} \times ${n(G0, 6)}\ \mathrm{m/s^2} = ${n(alpha)}\ \mathrm{m/s^2}` },
@@ -257,18 +289,25 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
     title: 'Rapidez η: o movimento hiperbólico',
     announce: true,
     isActive: (s) => s.flight.eta > 0,
-    explain: ({ flight, alpha }) => {
+    explain: ({ flight, alpha, profile }) => {
       const { eta, beta, gamma, oneMinusBeta, tau, phase } = flight;
       const etaText = formatFixed(eta, 3);
-      const summary =
-        phase === 'coasting'
+      // Com descansos, η só muda nas queimas: conta o tempo de empuxo, não o de bordo.
+      const thrustTau = (C * eta) / alpha;
+      const summary = profile.crewRest
+        ? phase === 'coasting'
+          ? `No descanso a rapidez fica constante, η = ${etaText}, e a nave segue a v = ${velocityOf(flight)}.`
+          : `Cada segundo de empuxo soma (ou, na frenagem, tira) a mesma rapidez; nos descansos ela fica constante. ` +
+            `Agora η = ${etaText} e v = ${velocityOf(flight)}.`
+        : phase === 'coasting'
           ? `Com o motor desligado a rapidez fica constante, η = ${etaText}, e a nave segue a v = ${velocityOf(flight)}.`
           : phase === 'decelerating'
             ? `Na frenagem a rapidez cai no mesmo ritmo em que subiu: η = α(τ_total − τ)/c = ${etaText}. Agora v = ${velocityOf(flight)}.`
             : `Com aceleração própria constante, cada segundo de bordo soma a mesma rapidez: η = ατ/c = ${etaText}. ` +
               `A velocidade β = tanh η se aproxima de c sem nunca chegar a ela; agora v = ${velocityOf(flight)}.`;
-      const etaTex =
-        phase === 'coasting'
+      const etaTex = profile.crewRest
+        ? tex`\eta = \frac{\alpha\,\tau_{\text{empuxo}}}{c} = \frac{${n(alpha)}\ \mathrm{m/s^2} \times ${n(thrustTau, 4)}\ \mathrm{s}}{${n(C, 4)}\ \mathrm{m/s}} = ${n(eta, 4)}`
+        : phase === 'coasting'
           ? tex`\eta = \eta_c = \frac{\alpha\,\tau_1}{c} = ${n(eta, 4)}`
           : phase === 'decelerating'
           ? tex`\eta = \frac{\alpha\,(\tau_{\text{total}} - \tau)}{c} = ${n(eta, 4)}`
@@ -605,7 +644,7 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
       const remaining = atFlip.restDistanceRemainingM;
       const contracted = atFlip.contractedDistanceRemainingM;
       const toFlip = flip - flight.tau;
-      const flipAndBurn = profile.coastEta === null && !profile.maneuvers;
+      const flipAndBurn = profile.coastEta === null && !profile.maneuvers && !profile.crewRest;
       const noBrake = computeNoBrakeProperTime(profile);
       return {
         summary:
@@ -620,8 +659,11 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
           flipAndBurn
             ? `Se não freasse, a nave cruzaria esse trecho em cerca de ${formatSpan(noBrake)} de bordo ` +
               '(≈ (c/α)·ln 2) e passaria pelo alvo a quase c.'
-            : 'A frenagem leva o mesmo tempo de bordo que a aceleração, e começa a (c²/α)(γ_c − 1) do alvo para parar ' +
-              'exatamente nele.',
+            : profile.crewRest
+              ? 'A frenagem repete a subida ao contrário, com as mesmas queimas e descansos, e começa a L_frenagem do ' +
+                'alvo: a distância das queimas, (c²/α)(γ − 1), mais a percorrida nos descansos.'
+              : 'A frenagem leva o mesmo tempo de bordo que a aceleração, e começa a (c²/α)(γ_c − 1) do alvo para parar ' +
+                'exatamente nele.',
           'É um marco crítico: o Auto-Step Down desacelera o tempo na reta final antes do flip, e o holograma ' +
             '"FRENAGEM EM" faz a contagem.',
         ],
@@ -634,7 +676,7 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
               },
             ]
           : [
-              { tex: tex`L_{\text{frenagem}} = \frac{c^2}{\alpha}\,(\gamma_c - 1) = ${texDistance(remaining)}` },
+              { tex: brakingTex(profile, '\gamma_c', remaining) },
               { card: true, tex: tex`L_{\text{contraída}} = \frac{L_{\text{frenagem}}}{\gamma_c} = ${texDistance(contracted)}` },
             ],
       };
@@ -655,11 +697,17 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
           'Aberração, Doppler e a cor da CMB dependem só da velocidade, não da aceleração. O instante τ da frenagem ' +
             `mostra o mesmo céu do instante espelho τ_total − τ da ida: agora, τ = ${formatSpan(mirror)}.`,
         ],
-        formulas: [
-          { tex: tex`\eta = \frac{\alpha\,(\tau_{\text{total}} - \tau)}{c} = ${n(flight.eta, 4)}` },
-          { tex: tex`L_0 = D - x = \frac{c^2}{\alpha}\,(\gamma - 1) = ${texDistance(flight.restDistanceRemainingM)}` },
-          { card: true, tex: tex`\tau_{\text{espelho}} = \tau_{\text{total}} - \tau = ${texDuration(mirror)}` },
-        ],
+        formulas: profile.crewRest
+          ? [
+              { tex: tex`\eta(\tau) = \eta(\tau_{\text{total}} - \tau) = ${n(flight.eta, 4)}` },
+              { tex: tex`L_0 = D - x = ${texDistance(flight.restDistanceRemainingM)}` },
+              { card: true, tex: tex`\tau_{\text{espelho}} = \tau_{\text{total}} - \tau = ${texDuration(mirror)}` },
+            ]
+          : [
+              { tex: tex`\eta = \frac{\alpha\,(\tau_{\text{total}} - \tau)}{c} = ${n(flight.eta, 4)}` },
+              { tex: tex`L_0 = D - x = \frac{c^2}{\alpha}\,(\gamma - 1) = ${texDistance(flight.restDistanceRemainingM)}` },
+              { card: true, tex: tex`\tau_{\text{espelho}} = \tau_{\text{total}} - \tau = ${texDuration(mirror)}` },
+            ],
       };
     },
   },
@@ -692,33 +740,88 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
     },
   },
 
+  'crew-rest': {
+    title: 'Descanso da tripulação',
+    announce: true,
+    isActive: (s) => s.flight.crewRest,
+    explain: ({ flight, profile, accelG }) => {
+      const rest = profile.crewRest;
+      if (!rest) {
+        return {
+          summary:
+            'Quando o empuxo contínuo passaria do que o corpo do piloto aguenta, o plano alterna queimas e descansos ' +
+            'por inércia, sem peso, para a tripulação se recuperar. Esta viagem não precisa deles.',
+          details: [],
+          formulas: [],
+        };
+      }
+      const toBurn = Math.max(0, nextBurnAt(profile, flight.tau) - flight.tau);
+      const dEta = (profile.properAccel * rest.burnTau) / C;
+      const continuous = computeMissionProfile(profile.distanceM, profile.properAccel, profile.coastEta);
+      return {
+        summary:
+          `O motor desligou para a tripulação se recuperar: a nave segue por inércia, sem peso a bordo, e a próxima ` +
+          `queima a ${num(accelG)} g começa em ${formatSpan(toBurn)}. As queimas duram até ${formatSpan(rest.burnTau)}, ` +
+          `90 % do que o corpo aguenta seguido.`,
+        details: [
+          'A tolerância humana a uma aceleração contínua cai com o tempo de exposição: as curvas da NASA para a ' +
+            'aceleração peito–costas (+Gx) vão de dezenas de g por segundos a poucos g por horas, e voluntários ' +
+            `imersos em água chegaram a ~31 g por segundos (Johnsville, 1958). A ${num(accelG)} g, o simulador adota ` +
+            `${formatSpan(rest.enduranceS)} de limite contínuo.`,
+          'Não há medidas de recuperação depois de horas ou dias perto do limite. A estimativa: cada queima usa 90 % ' +
+            'da tolerância, a carga cai sem peso no mesmo ritmo em que sobe sob empuxo, e cada descanso dura a ' +
+            `tolerância inteira (no mínimo 1 h): ${formatSpan(rest.restTau)}. Assim a carga volta a zero antes da ` +
+            'próxima queima.',
+          `Os descansos custam tempo: com ${num(rest.burns)} queimas, a viagem leva ${formatSpan(profile.tauTotal)} de ` +
+            `bordo, contra ${formatSpan(continuous.tauTotal)} com empuxo contínuo, que a tripulação não aguentaria. A ` +
+            'velocidade de pico também é menor, porque boa parte do tempo passa sem empuxo.',
+        ],
+        formulas: [
+          {
+            card: true,
+            tex: tex`\Delta\tau_{\text{queima}} \le 0{,}9\,T_{\text{lim}} = ${texDuration(rest.burnTau)}, \qquad \Delta\tau_{\text{descanso}} = ${texDuration(rest.restTau)}`,
+          },
+          { tex: tex`\Delta\eta_{\text{queima}} = \frac{\alpha\,\Delta\tau_{\text{queima}}}{c} = ${n(dEta, 4)}` },
+          { tex: tex`\eta = ${n(flight.eta, 4)}, \qquad \frac{dx}{d\tau} = c\,\sinh\eta = ${texSpeed(C * Math.sinh(flight.eta))}` },
+        ],
+      };
+    },
+  },
+
   coasting: {
     title: 'Motor desligado: inércia',
     announce: true,
-    isActive: (s) => s.flight.phase === 'coasting',
+    isActive: (s) => s.flight.phase === 'coasting' && !s.flight.crewRest,
     explain: ({ flight, profile }) => {
       const m = profile.maneuvers;
       if (m && flight.tau >= m.firstTau) {
-        // Inércia depois de o piloto desligar o motor.
+        // Inércia depois de o piloto desligar o motor, até a frenagem automática.
         const speed = C * Math.sinh(flight.eta);
-        const toTarget = speed > 0 ? flight.restDistanceRemainingM / speed : Infinity;
+        const flip = flipTauOf(profile);
+        const brakes = m.end === 'arrival' && flip !== null && flip > flight.tau;
+        const brakingDistance = brakingDistanceOf(profile, flight.eta);
         return {
           summary:
             `O motor foi desligado e a nave segue por inércia a v = ${velocityOf(flight)}: ninguém sente peso a bordo ` +
             'e o céu congela, porque aberração, Doppler e a cor da CMB só mudam com a velocidade. ' +
-            (m.end === 'flyby'
-              ? `Sem frear, a nave passa pelo alvo em ${formatSpan(toTarget)} de bordo. `
-              : 'A nave está quase parada e não chega ao alvo. ') +
-            'Religue o motor para o piloto automático refazer a rota até o alvo.',
+            (brakes
+              ? `Em ${formatSpan(flip - flight.tau)} de bordo, o piloto automático gira a nave e religa o motor para ` +
+                'frear com a aceleração planejada e parar no alvo. Religar antes acelera de novo e chega mais cedo.'
+              : 'A nave está quase parada e não chega ao alvo. Religue o motor para o piloto automático refazer a rota.'),
           details: [
             'Sem empuxo, a rapidez η fica constante: dx/dτ = c·sinh η e dt/dτ = cosh η. O relógio da Terra continua ' +
               'correndo γ vezes mais depressa que o de bordo.',
-            'Ao religar, o piloto automático acelera e faz o flip no ponto certo para parar no alvo; se já não houver ' +
-              'distância para frear com a aceleração planejada, freia na hora com a aceleração que for preciso.',
+            profile.crewRest
+              ? 'A frenagem começa quando a distância que falta é a que a aceleração planejada leva para parar a nave, ' +
+                'com as queimas e os descansos da tripulação: (c²/α)(γ − 1) mais a distância percorrida nos descansos.'
+              : 'A frenagem começa quando a distância que falta é a que a aceleração planejada leva para parar a nave, ' +
+                'L = (c²/α)(γ − 1): por isso a frenagem dura o mesmo tempo de bordo que a subida até essa velocidade.',
+            'Ao religar antes, o piloto automático acelera mais e faz o flip no ponto certo para parar no alvo.',
           ],
           formulas: [
             { card: true, tex: tex`\eta = ${n(flight.eta, 4)}, \qquad \frac{dx}{d\tau} = c\,\sinh\eta = ${texSpeed(speed)}` },
             { tex: tex`\frac{dt}{d\tau} = \cosh\eta = \gamma = ${n(flight.gamma, 4)}` },
+            ...(brakes ? [{ tex: brakingTex(profile, '\gamma', brakingDistance) }] : []),
           ],
         };
       }

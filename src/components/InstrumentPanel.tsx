@@ -8,6 +8,7 @@ import { adjacentTimeScale, naturalTimeScale, timeScaleStep } from '../store/tim
 import { useFlightStore } from '../store/useFlightStore';
 import { APP_HASH } from '../ui/appMode';
 import { useCockpitUi } from '../ui/cockpitUi';
+import { crewText, formatStrain, type CrewTone } from '../ui/crewStatus';
 import { useExplainSettings } from '../ui/explainSettings';
 import { formatAccelG, formatDuration, formatGamma, formatSpan } from '../ui/format';
 import type { IndicatorId } from '../ui/indicatorHelp';
@@ -68,7 +69,7 @@ function MissionPlate() {
   const profile = useFlightStore((s) => s.plannedProfile);
   const manual = useFlightStore((s) => s.profile.maneuvers !== undefined);
   const openPlanner = useCockpitUi((s) => s.openPlanner);
-  const viability = assessMission(crew, accelG, profile).viability;
+  const { viability, rests } = assessMission(crew, accelG, profile);
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
       <Plate className="max-lg:hidden">Missão</Plate>
@@ -81,6 +82,7 @@ function MissionPlate() {
           {crew === 'crewed' ? '🧑‍🚀 Piloto humano' : '🤖 Sonda robótica'}
           {viability === 'hypothetical' && <span className="text-rose-300"> · hipotética</span>}
           {viability === 'over-limit' && <span className="text-amber-300"> · além do limite humano</span>}
+          {rests && <span className="text-emerald-300/90"> · com descansos</span>}
         </div>
         <div className="font-readout truncate text-[10px] text-slate-500">
           {manual ? (
@@ -307,7 +309,7 @@ function GammaDial() {
   );
 }
 
-type LampState = 'ready' | 'thrust' | 'flip' | 'ramp' | 'coast' | 'off';
+type LampState = 'ready' | 'thrust' | 'flip' | 'ramp' | 'coast' | 'rest' | 'off';
 
 const ENGINE: Readonly<Record<LampState, { label: string; lamp: string }>> = {
   ready: { label: 'Pronto', lamp: 'bg-slate-500' },
@@ -315,6 +317,7 @@ const ENGINE: Readonly<Record<LampState, { label: string; lamp: string }>> = {
   flip: { label: 'Flip', lamp: 'bg-rose-400 shadow-[0_0_12px_rgba(251,113,133,0.9)] animate-beacon' },
   ramp: { label: 'Desligando', lamp: 'bg-amber-300 shadow-[0_0_12px_rgba(252,211,77,0.9)] animate-beacon' },
   coast: { label: 'Inércia', lamp: 'bg-sky-400 shadow-[0_0_10px_rgba(56,189,248,0.8)]' },
+  rest: { label: 'Descanso', lamp: 'bg-indigo-400 shadow-[0_0_10px_rgba(129,140,248,0.8)]' },
   off: { label: 'Desligado', lamp: 'bg-slate-600' },
 };
 
@@ -328,8 +331,10 @@ function useEngine() {
     if (tau === 0 && !s.playing) return 'ready';
     if (phase === 'arrived' || phase === 'flyby') return 'off';
     if (engine === 'ramp') return 'ramp';
-    if (engine === 'off') return 'coast';
-    if (phase === 'accelerating' && activeWindowsAt(s.criticalWindows, tau).some((w) => w.kind === 'pre-flip')) return 'flip';
+    // Na reta final antes do flip (o do plano ou o da frenagem automática, depois da inércia).
+    const preFlip = activeWindowsAt(s.criticalWindows, tau).some((w) => w.kind === 'pre-flip');
+    if (engine === 'off') return preFlip ? 'flip' : s.flight.crewRest ? 'rest' : 'coast';
+    if (phase === 'accelerating' && preFlip) return 'flip';
     return 'thrust';
   });
   const command = useFlightStore((s) => (s.ignitionCountdownS === null ? engineCommandAt(s.profile, s.tau) : null));
@@ -343,7 +348,10 @@ const COMMAND_HINT = { cut: 'toque para desligar', relight: 'toque para religar'
 function EngineControl() {
   const { state, command, toggleEngine } = useEngine();
   const thrustG = useFlightStore((s) => s.flight.thrustAccel / G0);
+  // Num descanso da tripulação o motor não aceita comandos: o piloto automático o religa.
+  const relightIn = useFlightStore((s) => (s.flight.crewRest ? s.crewStatus?.untilChangeS ?? null : null));
   const { label, lamp } = ENGINE[state];
+  const hint = command ? COMMAND_HINT[command] : relightIn !== null ? `religa em ${formatSpan(relightIn)}` : '\u00a0';
   return (
     <div className="flex flex-col items-center gap-1">
       <Plate help="engine">Motor</Plate>
@@ -352,14 +360,61 @@ function EngineControl() {
         disabled={!command}
         onClick={toggleEngine}
         aria-label={command === 'cut' ? 'Desligar o motor' : command === 'relight' ? 'Religar o motor' : `Motor: ${label}`}
-        title={command ? COMMAND_HINT[command] : undefined}
+        title={command ? COMMAND_HINT[command] : relightIn !== null ? 'A tripulação descansa: o piloto automático religa o motor' : undefined}
         className="instrument-well flex w-[6.5rem] min-w-0 flex-col items-center gap-1 rounded-md px-2 py-1.5 enabled:cursor-pointer enabled:hover:border-cyan-300/60"
       >
         <span aria-hidden className={`h-3 w-3 rounded-full ${lamp}`} />
         <span className="font-display text-[9px] tracking-[0.15em] text-slate-100 uppercase">{label}</span>
         <span className="font-readout truncate text-[10px] text-cyan-200 tabular-nums">α {formatAccelG(thrustG)}</span>
-        <span className="text-[9px] leading-none text-slate-400">{command ? COMMAND_HINT[command] : '\u00a0'}</span>
+        <span className="truncate text-[9px] leading-none text-slate-400">{hint}</span>
       </button>
+    </div>
+  );
+}
+
+const CREW_TONE: Readonly<Record<CrewTone, { lamp: string; text: string; bar: string }>> = {
+  ok: { lamp: 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]', text: 'text-emerald-100', bar: 'bg-emerald-400' },
+  load: { lamp: 'bg-amber-300 shadow-[0_0_8px_rgba(252,211,77,0.8)]', text: 'text-amber-100', bar: 'bg-amber-300' },
+  rest: { lamp: 'bg-indigo-400 shadow-[0_0_8px_rgba(129,140,248,0.8)]', text: 'text-indigo-100', bar: 'bg-indigo-300' },
+  danger: { lamp: 'bg-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.9)] animate-beacon', text: 'text-rose-100', bar: 'bg-rose-500' },
+};
+
+/**
+ * Estado do piloto humano (§4.2.9): sob empuxo, em descanso, sem peso, além do
+ * limite ou hipotético, com a carga acumulada (100 % = o limite do corpo; as
+ * queimas planejadas param em 90 %) e o que vem a seguir.
+ */
+function CrewGauge() {
+  const status = useFlightStore((s) => s.crewStatus);
+  const accelG = useFlightStore((s) => s.accelG);
+  if (!status) return null;
+  const { label, detail, tone } = crewText(status, accelG);
+  const style = CREW_TONE[tone];
+  const shownStrain = status.condition === 'hypothetical' ? null : status.strain;
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5" role="status" aria-label={`Tripulação: ${label}, ${detail}`}>
+      <Plate help="crew" className="max-lg:hidden">
+        Tripulação
+      </Plate>
+      <div className="instrument-well flex min-w-0 flex-col gap-1 rounded-md px-2 py-1">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${style.lamp}`} />
+          <span className="font-display text-[8px] tracking-[0.15em] text-slate-400 uppercase lg:hidden">Tripulação</span>
+          <InfoTip id="crew" className="lg:hidden" />
+          <span className={`font-display min-w-0 truncate text-[9px] tracking-[0.12em] uppercase ${style.text}`}>{label}</span>
+          {shownStrain !== null && (
+            <span className="font-readout ml-auto w-[3.2em] shrink-0 text-right text-[10px] text-slate-300 tabular-nums">
+              {formatStrain(shownStrain)}
+            </span>
+          )}
+        </div>
+        <div className="relative h-1 overflow-hidden rounded-full bg-slate-800" aria-hidden>
+          <div className={`h-full rounded-full ${style.bar}`} style={{ width: `${Math.min(shownStrain ?? 1, 1) * 100}%` }} />
+          {/* As queimas planejadas param em 90 % do limite. */}
+          <div className="absolute inset-y-0 left-[90%] w-px bg-slate-300/60" />
+        </div>
+        <div className="font-readout truncate text-[10px] text-slate-400 tabular-nums">{detail}</div>
+      </div>
     </div>
   );
 }
@@ -470,8 +525,9 @@ export function InstrumentPanel({ className = '' }: { className?: string }) {
           <div className="max-lg:hidden">
             <EngineControl />
           </div>
-          <div className="col-span-2 max-lg:order-3 lg:col-span-1">
+          <div className="col-span-2 flex min-w-0 flex-col gap-2 max-lg:order-3 lg:col-span-1">
             <Switches />
+            <CrewGauge />
           </div>
         </div>
       )}

@@ -77,13 +77,33 @@ export interface MissionProfile {
   readonly brakeStartTau: number;
   /** Rapidez de cruzeiro da fase de inércia; `null` no Flip-and-Burn puro. */
   readonly coastEta: number | null;
-  /** O voo depois de o piloto desligar ou religar o motor (ausente: o plano analítico). */
+  /** O plano em segmentos, com queimas e descansos da tripulação (§4.2.9); ausente: o plano analítico. */
+  readonly segments?: readonly FlightSegment[];
+  /** O ciclo de queima e descanso, quando o plano o usa. */
+  readonly crewRest?: CrewRestCycle;
+  /** O voo depois de o piloto desligar ou religar o motor (ausente: o plano). */
   readonly maneuvers?: Maneuvers;
 }
 
+/** Queimas e descansos alternados para a tripulação se recuperar (§4.2.9). */
+export interface CrewRestCycle {
+  /** Queima mais longa (s de bordo): uma fração da tolerância contínua. */
+  readonly burnTau: number;
+  /** Descanso entre queimas (s de bordo), por inércia, sem peso. */
+  readonly restTau: number;
+  /** Tolerância contínua à aceleração do plano (s). */
+  readonly enduranceS: number;
+  /** Quantas queimas o plano tem (aceleração e frenagem). */
+  readonly burns: number;
+}
+
 // ── Motor desligado e religado pelo piloto: o voo em segmentos ──────────────
-/** Empuxo constante, rampa da aceleração até zero (desligando o motor) ou inércia. */
-export type SegmentKind = 'thrust' | 'ramp' | 'coast';
+/**
+ * Empuxo constante, rampa da aceleração até zero (desligando o motor), inércia ou
+ * ciclos de queima e descanso da tripulação (`count` vezes: `burnTau` de empuxo e
+ * `restTau` de inércia), calculados em forma fechada.
+ */
+export type SegmentKind = 'thrust' | 'ramp' | 'coast' | 'cycles';
 
 export interface FlightSegment {
   readonly kind: SegmentKind;
@@ -96,8 +116,17 @@ export interface FlightSegment {
   readonly eta0: number;
   readonly remaining0: number;
   readonly earth0: number;
-  /** Frenagem que termina parada no alvo: a distância sai exata de (c²/|a|)(cosh η − 1). */
+  /**
+   * Frenagem que termina parada no alvo: a distância sai exata de (c²/|a|)(cosh η − 1), contada a
+   * partir do fim (sem o cancelamento de D − x). Numa frenagem com descansos, cada trecho também.
+   */
   readonly toArrival?: boolean;
+  /** Com `toArrival`: a distância que ainda falta no fim do segmento (os trechos seguintes da frenagem). */
+  readonly tailM?: number;
+  /** Inércia para a tripulação se recuperar (na inércia comum, `undefined`). */
+  readonly rest?: boolean;
+  /** Os ciclos de `kind: 'cycles'`. */
+  readonly cycle?: { readonly burnTau: number; readonly restTau: number; readonly count: number };
 }
 
 /** Como o voo termina: parado no alvo, passando por ele sem frear ou à deriva (parado ou lento demais). */
@@ -162,24 +191,84 @@ export interface SegmentState {
   readonly earthTimeS: number;
   /** Aceleração própria no instante (m/s², com sinal). */
   readonly accel: number;
+  /** Num descanso da tripulação. */
+  readonly rest: boolean;
+}
+
+/** cosh η₁ − cosh η₀ e sinh η₁ − sinh η₀ como produtos, sem cancelamento. */
+function hyperbolicDeltas(eta1: number, eta0: number): [dCosh: number, dSinh: number] {
+  const half = (eta1 - eta0) / 2;
+  const mid = (eta1 + eta0) / 2;
+  return [2 * Math.sinh(mid) * Math.sinh(half), 2 * Math.cosh(mid) * Math.sinh(half)];
+}
+
+/** Σ sinh(x + jΔ) e Σ cosh(x + jΔ) para j = 1…k, em forma fechada. */
+export function hyperbolicSums(x: number, d: number, k: number): [sinhSum: number, coshSum: number] {
+  if (k <= 0) return [0, 0];
+  const center = x + ((k + 1) * d) / 2;
+  const ratio = Math.abs(d) < 1e-300 ? k : Math.sinh((k * d) / 2) / Math.sinh(d / 2);
+  return [Math.sinh(center) * ratio, Math.cosh(center) * ratio];
 }
 
 /** Estado `s` segundos de bordo depois do início do segmento. */
 export function segmentState(seg: FlightSegment, s: number): SegmentState {
   const { eta0, remaining0, earth0 } = seg;
   if (seg.kind === 'coast' || seg.accel === 0) {
-    return { eta: eta0, remainingM: remaining0 - C * Math.sinh(eta0) * s, earthTimeS: earth0 + Math.cosh(eta0) * s, accel: 0 };
+    return {
+      eta: eta0,
+      remainingM: seg.toArrival ? (seg.tailM ?? 0) + C * Math.sinh(eta0) * (seg.duration - s) : remaining0 - C * Math.sinh(eta0) * s,
+      earthTimeS: earth0 + Math.cosh(eta0) * s,
+      accel: 0,
+      rest: seg.rest === true,
+    };
   }
   if (seg.kind === 'thrust') {
     const a = seg.accel;
     const eta = eta0 + (a * s) / C;
-    // cosh η − cosh η₀ e sinh η − sinh η₀ como produtos, sem cancelamento.
-    const half = (eta - eta0) / 2;
-    const mid = (eta + eta0) / 2;
-    const dCosh = 2 * Math.sinh(mid) * Math.sinh(half);
-    const dSinh = 2 * Math.cosh(mid) * Math.sinh(half);
-    const remainingM = seg.toArrival ? (C2 / Math.abs(a)) * coshm1(eta) : remaining0 - (C2 / a) * dCosh;
-    return { eta, remainingM, earthTimeS: earth0 + (C / a) * dSinh, accel: a };
+    const [dCosh, dSinh] = hyperbolicDeltas(eta, eta0);
+    const remainingM = !seg.toArrival
+      ? remaining0 - (C2 / a) * dCosh
+      : seg.tailM === undefined
+        ? (C2 / Math.abs(a)) * coshm1(eta)
+        : seg.tailM + (C2 / Math.abs(a)) * hyperbolicDeltas(eta, eta0 + (a * seg.duration) / C)[0];
+    return { eta, remainingM, earthTimeS: earth0 + (C / a) * dSinh, accel: a, rest: false };
+  }
+  if (seg.kind === 'cycles') {
+    // k ciclos completos: as queimas somam (c²/a)(cosh η_k − cosh η₀) de distância; os descansos, que
+    // acontecem nas rapidezes η₀ + jΔη (j = 1…k), r·c·Σ sinh(η₀ + jΔη).
+    const { burnTau: b, restTau: r, count } = seg.cycle!;
+    const a = seg.accel;
+    const k = Math.min(Math.floor(s / (b + r)), count);
+    const local = s - k * (b + r);
+    const dEta = (a * b) / C;
+    const etaK = eta0 + k * dEta;
+    const [burnCosh, burnSinh] = hyperbolicDeltas(etaK, eta0);
+    const [restSinh, restCosh] = hyperbolicSums(eta0, dEta, k);
+    const remainingK = remaining0 - (C2 / a) * burnCosh - r * C * restSinh;
+    const earthK = earth0 + (C / a) * burnSinh + r * restCosh;
+    const eta = k === count ? etaK : etaK + (a * Math.min(local, b)) / C;
+    const resting = k === count ? 0 : Math.max(0, local - b);
+    // Na frenagem até o alvo, a distância sai do que falta percorrer (só termos positivos):
+    // as queimas até o fim do bloco, os descansos à frente e o resto do descanso em curso.
+    const ahead = (): number => {
+      const etaEnd = eta0 + count * dEta;
+      const burns = (C2 / Math.abs(a)) * hyperbolicDeltas(eta, etaEnd)[0];
+      if (k === count) return burns;
+      const inRest = local >= b;
+      const restsAhead = hyperbolicSums(eta0 + (inRest ? k + 1 : k) * dEta, dEta, count - k - (inRest ? 1 : 0))[0];
+      return burns + r * C * restsAhead + (inRest ? C * Math.sinh(eta) * (r - resting) : 0);
+    };
+    if (k === count) {
+      return { eta: etaK, remainingM: seg.toArrival ? (seg.tailM ?? 0) + ahead() : remainingK, earthTimeS: earthK, accel: 0, rest: true };
+    }
+    const [dCosh, dSinh] = hyperbolicDeltas(eta, etaK);
+    return {
+      eta,
+      remainingM: seg.toArrival ? (seg.tailM ?? 0) + ahead() : remainingK - (C2 / a) * dCosh - C * Math.sinh(eta) * resting,
+      earthTimeS: earthK + (C / a) * dSinh + Math.cosh(eta) * resting,
+      accel: local < b ? a : 0,
+      rest: local >= b,
+    };
   }
   // Rampa: a(u) = a₀(1 − u/d), então η(u) = η₀ + (a₀/c)(u − u²/2d), integrado numericamente.
   const { accel: a0, duration: d } = seg;
@@ -189,6 +278,7 @@ export function segmentState(seg: FlightSegment, s: number): SegmentState {
     remainingM: remaining0 - C * integrate((u) => Math.sinh(etaAt(u)), s),
     earthTimeS: earth0 + integrate((u) => Math.cosh(etaAt(u)), s),
     accel: a0 * (1 - s / d),
+    rest: false,
   };
 }
 
@@ -296,6 +386,8 @@ export interface FlightState {
   readonly engine: EngineState;
   /** Aceleração própria do motor no instante (m/s²); 0 com o motor desligado. */
   readonly thrustAccel: number;
+  /** Na inércia de um descanso da tripulação (§4.2.9). */
+  readonly crewRest: boolean;
 }
 
 function stateFrom(
@@ -307,6 +399,7 @@ function stateFrom(
   restDistanceRemainingM: number,
   engine: EngineState,
   thrustAccel: number,
+  crewRest = false,
 ): FlightState {
   const k = computeShaderKinematics(eta);
   return {
@@ -322,41 +415,95 @@ function stateFrom(
     contractedDistanceRemainingM: restDistanceRemainingM / k.uGamma,
     engine,
     thrustAccel,
+    crewRest,
   };
 }
 
-/** Estado no voo em segmentos (depois do primeiro comando do piloto). */
-function maneuveredState(profile: MissionProfile, m: Maneuvers, t: number): FlightState {
-  const { segments } = m;
+/** Os segmentos do plano: os do plano com descansos, ou acelerar, cruzar (se houver) e frear até o alvo. */
+export function planSegments(plan: MissionProfile): FlightSegment[] {
+  if (plan.segments) return [...plan.segments];
+  const at = (kind: SegmentKind, startTau: number, duration: number, accel: number, extra: Partial<FlightSegment> = {}): FlightSegment => {
+    const s = computeFlightState(plan, startTau);
+    return { kind, startTau, duration, accel, eta0: s.eta, remaining0: s.restDistanceRemainingM, earth0: s.earthTimeS, ...extra };
+  };
+  const a = plan.properAccel;
+  const segments = [at('thrust', 0, plan.burnEndTau, a)];
+  if (plan.brakeStartTau > plan.burnEndTau) segments.push(at('coast', plan.burnEndTau, plan.brakeStartTau - plan.burnEndTau, 0));
+  segments.push(at('thrust', plan.brakeStartTau, plan.tauTotal - plan.brakeStartTau, -a, { toArrival: true }));
+  return segments;
+}
+
+/** Os segmentos do voo efetivo, do início ao fim (com os comandos do piloto, se houver). */
+export const flightSegments = (profile: MissionProfile): FlightSegment[] =>
+  profile.maneuvers ? [...profile.maneuvers.segments] : planSegments(profile);
+
+/** O segmento em curso no instante τ (o último que começou até lá). */
+export function segmentAt(segments: readonly FlightSegment[], tau: number): FlightSegment {
   let i = segments.length - 1;
-  while (i > 0 && segments[i]!.startTau > t) i--;
-  const seg = segments[i]!;
+  while (i > 0 && segments[i]!.startTau > tau) i--;
+  return segments[i]!;
+}
+
+/**
+ * Primeiro instante em que o voo chegou à rapidez η acelerando (numa queima, ou no
+ * meio dos ciclos de queima e descanso), antes de `beforeTau`; `null` se não chegou.
+ */
+export function ascentTauAt(profile: MissionProfile, eta: number, beforeTau: number): number | null {
+  for (const seg of flightSegments(profile)) {
+    if (seg.startTau >= beforeTau) break;
+    if (seg.accel <= 0 || seg.kind === 'coast' || eta < seg.eta0) continue;
+    const cOverA = C / seg.accel;
+    let tau: number | null = null;
+    if (seg.kind === 'thrust') {
+      if (eta <= seg.eta0 + seg.duration / cOverA) tau = seg.startTau + cOverA * (eta - seg.eta0);
+    } else if (seg.kind === 'cycles') {
+      const { burnTau: b, restTau: r, count } = seg.cycle!;
+      const dEta = b / cOverA;
+      const j = Math.min(Math.floor((eta - seg.eta0) / dEta), count - 1);
+      if (eta <= seg.eta0 + count * dEta) tau = seg.startTau + j * (b + r) + cOverA * (eta - seg.eta0 - j * dEta);
+    } else {
+      // Rampa: η(u) = η₀ + (a₀/c)(u − u²/2d), crescente até o fim.
+      const k = (eta - seg.eta0) * cOverA;
+      const d = seg.duration;
+      if (k <= d / 2) tau = seg.startTau + d * (1 - Math.sqrt(1 - (2 * k) / d));
+    }
+    // Um bloco cortado por um comando do piloto termina antes do fim dos ciclos.
+    if (tau !== null && tau <= seg.startTau + seg.duration) return tau < beforeTau ? tau : null;
+  }
+  return null;
+}
+
+/** Estado num voo em segmentos: o plano com descansos ou o voo depois de um comando do piloto. */
+function segmentedState(profile: MissionProfile, segments: readonly FlightSegment[], end: ManeuverEnd, t: number): FlightState {
+  const seg = segmentAt(segments, t);
   const s = Math.min(Math.max(t - seg.startTau, 0), seg.duration);
   const st = segmentState(seg, s);
   const remainingM = Math.max(0, st.remainingM);
   const ended = t >= profile.tauTotal;
+  const off = seg.kind === 'coast' || (seg.kind === 'cycles' && st.accel === 0);
   const phase: FlightPhase = ended
-    ? m.end === 'arrival'
+    ? end === 'arrival'
       ? 'arrived'
-      : m.end === 'flyby'
+      : end === 'flyby'
         ? 'flyby'
         : 'coasting'
-    : seg.kind === 'coast'
+    : off
       ? 'coasting'
       : seg.accel > 0
         ? 'accelerating'
         : 'decelerating';
-  const engine: EngineState = ended || seg.kind === 'coast' ? 'off' : seg.kind === 'ramp' ? 'ramp' : 'thrust';
-  const eta = ended && m.end === 'arrival' ? 0 : st.eta;
+  const engine: EngineState = ended || off ? 'off' : seg.kind === 'ramp' ? 'ramp' : 'thrust';
+  const eta = ended && end === 'arrival' ? 0 : st.eta;
   return stateFrom(
     t,
     phase,
     eta,
     profile.distanceM - remainingM,
     st.earthTimeS,
-    ended && m.end === 'arrival' ? 0 : remainingM,
+    ended && end === 'arrival' ? 0 : remainingM,
     engine,
     engine === 'off' ? 0 : Math.abs(st.accel),
+    !ended && st.rest,
   );
 }
 
@@ -364,8 +511,9 @@ export function computeFlightState(profile: MissionProfile, tau: number): Flight
   const m = profile.maneuvers;
   if (m) {
     const t = Math.min(Math.max(tau, 0), profile.tauTotal);
-    return t >= m.firstTau ? maneuveredState(profile, m, t) : computeFlightState(m.plan, t);
+    return t >= m.firstTau ? segmentedState(profile, m.segments, m.end, t) : computeFlightState(m.plan, t);
   }
+  if (profile.segments) return segmentedState(profile, profile.segments, 'arrival', Math.min(Math.max(tau, 0), profile.tauTotal));
   const { distanceM, properAccel, burnEndTau, brakeStartTau, tauTotal, tTotal } = profile;
   const t = Math.min(Math.max(tau, 0), tauTotal);
   const cOverA = C / properAccel;

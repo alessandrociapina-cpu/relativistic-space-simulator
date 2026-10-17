@@ -1,12 +1,14 @@
 import { create } from 'zustand';
 import { computeFlightState, type FlightState, type MissionProfile } from '../physics/RelativityEngine';
 import type { CrewKind } from '../physics/accelerationPresets';
+import { DESTINATIONS, type Destination, type DestinationId } from '../physics/destinations';
 import {
-  DESTINATIONS,
-  destinationMissionProfile,
-  type Destination,
-  type DestinationId,
-} from '../physics/destinations';
+  crewStatusAt,
+  crewToleranceFor,
+  missionProfileFor,
+  type CrewStatus,
+  type CrewTolerance,
+} from '../physics/crewRest';
 import { computeCriticalWindows, firstWindowStartingIn, type CriticalWindow } from '../physics/criticalEvents';
 import {
   computeEyeTimeline,
@@ -67,6 +69,10 @@ export interface FlightStore extends MissionChoice {
   readonly flight: FlightState;
   /** Luz da CMB à frente, olho do piloto e auto-zoom, no mesmo instante de `flight`. */
   readonly photometry: PhotometryAndEyeState;
+  /** Tolerância do piloto humano à aceleração do plano; `null` na sonda robótica. */
+  readonly crewTolerance: CrewTolerance | null;
+  /** Estado da tripulação no instante de `flight` (§4.2.9); `null` na sonda robótica. */
+  readonly crewStatus: CrewStatus | null;
   /** Último efeito que começou em voo (cartão do modo Explicar); `null` se não há ou foi dispensado. */
   readonly insight: EffectId | null;
   /** Efeitos já anunciados nesta missão: cada um ganha um cartão por voo. */
@@ -100,6 +106,13 @@ function derivePhotometry(
   return computePhotometryAndEyeState(flight, profile, eyeTimeline, targetRadiusRad);
 }
 
+function deriveCrewStatus(
+  flight: FlightState,
+  { profile, crewTolerance, playing }: Pick<FlightStore, 'profile' | 'crewTolerance' | 'playing'>,
+): CrewStatus | null {
+  return crewTolerance && crewStatusAt(profile, flight, crewTolerance, playing || flight.tau > 0);
+}
+
 /** Explicações de um voo novo: nenhum efeito anunciado ainda. */
 function newFlightLog(): Pick<FlightStore, 'insight' | 'announcedEffects'> {
   return { insight: null, announcedEffects: [] };
@@ -118,12 +131,14 @@ function flightPlan(profile: MissionProfile) {
 
 /** Nova missão parada no instante da partida. */
 function newMission({ destination, accelG, coastEta, crew }: MissionChoice) {
-  const profile = destinationMissionProfile(destination, accelG, coastEta);
+  // Com piloto humano além da tolerância contínua, o plano alterna queimas e descansos.
+  const profile = missionProfileFor(destination, accelG, coastEta, crew);
   return {
     destination,
     accelG,
     coastEta,
     crew,
+    crewTolerance: crew === 'crewed' ? crewToleranceFor(accelG) : null,
     plannedProfile: profile,
     ...flightPlan(profile),
     tau: 0,
@@ -144,7 +159,7 @@ export const useFlightStore = create<FlightStore>()((set, get) => {
   const update = (patch: Partial<FlightStore>) => {
     const next = { ...get(), ...patch };
     const flight = computeFlightState(next.profile, next.tau);
-    set({ ...patch, flight, photometry: derivePhotometry(flight, next) });
+    set({ ...patch, flight, photometry: derivePhotometry(flight, next), crewStatus: deriveCrewStatus(flight, next) });
   };
 
   // A demonstração clássica: Proxima a 1,61×10⁶ g, com o olho de um piloto (hipotético).
@@ -168,6 +183,7 @@ export const useFlightStore = create<FlightStore>()((set, get) => {
     timeScaleTouched: false,
     flight: initialFlight,
     photometry: derivePhotometry(initialFlight, initial),
+    crewStatus: deriveCrewStatus(initialFlight, initial),
 
     configureMission: (choice) => remission(choice),
     setDestination: (id) => remission({ destination: DESTINATIONS[id] }),
@@ -184,8 +200,12 @@ export const useFlightStore = create<FlightStore>()((set, get) => {
       update({ tau: 0, ignitionCountdownS: COUNTDOWN_FROM_S, ...replan, ...newFlightLog() });
       emitFlightEvents([countdown('ignition', COUNTDOWN_FROM_S)]);
     },
-    // O scrub não anuncia efeitos e dispensa o cartão, que falaria de outro instante.
-    seek: (tau) => update({ tau: clamp(tau, 0, get().profile.tauTotal), insight: null }),
+    // O scrub não anuncia efeitos e dispensa o cartão, que falaria de outro instante. O slider guarda só
+    // ~15 algarismos: no fim da linha do tempo, τ fica a um fio de τ_total e ainda não seria a chegada.
+    seek: (tau) => {
+      const { tauTotal } = get().profile;
+      update({ tau: tau >= tauTotal * (1 - 1e-13) ? tauTotal : clamp(tau, 0, tauTotal), insight: null });
+    },
     setTimeScale: (timeScale) => set({ timeScale, timeScaleTouched: true }),
     setAutoStepDown: (autoStepDown) => set({ autoStepDown }),
     toggleEngine: () => {

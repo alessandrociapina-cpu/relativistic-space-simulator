@@ -14,6 +14,7 @@ export const daysToMs = (days: number) => (days + J2000_JD - UNIX_EPOCH_JD) * DA
 export const isoToDays = (iso: string) => msToDays(Date.parse(iso.length === 10 ? `${iso}T00:00:00Z` : iso));
 
 const dateFormat = new Intl.DateTimeFormat('pt-BR', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+const liveDateFormat = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
 const shortDateFormat = new Intl.DateTimeFormat('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });
 const timeFormat = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'UTC' });
 
@@ -26,3 +27,9 @@ export const formatDate = (days: number) => dateFormat.format(roundedMs(days));
 export const formatShortDate = (days: number) => shortDateFormat.format(roundedMs(days));
 /** "5 de mar. de 1979, 12:05 UTC". */
 export const formatDateTime = (days: number) => `${formatDate(days)}, ${timeFormat.format(roundedMs(days))} UTC`;
+/**
+ * O visor da data, ao lado da barra: "05 de mar. de 1979, 12:05 UTC". Com o dia em dois dígitos (e os
+ * meses abreviados todos com quatro letras), a largura não muda e a barra não é empurrada.
+ */
+export const formatLiveDateTime = (days: number) =>
+  `${liveDateFormat.format(roundedMs(days))}, ${timeFormat.format(roundedMs(days))} UTC`;

@@ -35,7 +35,9 @@ function useRoute() {
         : flight.engine === 'ramp'
           ? 'DESLIGANDO O MOTOR'
           : flight.phase === 'coasting'
-            ? 'INÉRCIA'
+            ? flight.crewRest
+              ? 'DESCANSO'
+              : 'INÉRCIA'
             : flight.phase === 'decelerating'
               ? '◂◂ FREANDO'
               : playing || flight.tau > 0
