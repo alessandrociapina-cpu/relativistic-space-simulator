@@ -3,10 +3,10 @@ import { create } from 'zustand';
 import { BODIES, isMoon } from './bodies';
 import { ALL_EVENTS, MISSIONS, craft, type MissionEvent, type ProbeId } from './missions';
 import { AU_KM, distanceTo, probePosition } from './probes';
-import type { FocusId, ScaleMode } from './sceneMath';
+import type { FocusId, FrameMode, ScaleMode } from './sceneMath';
 import { DAYS_PER_YEAR, isoToDays } from './time';
 
-export type { FocusId, ScaleMode } from './sceneMath';
+export type { FocusId, FrameMode, ScaleMode } from './sceneMath';
 
 /** Datas cobertas pelo simulador: da Apollo 8 (dezembro de 1968) ao fim das tabelas do JPL (2036). */
 export const PROBE_TIME_RANGE = { start: isoToDays('1968-12-01'), end: isoToDays('2035-12-31') } as const;
@@ -56,6 +56,8 @@ interface ProbeStore {
   readonly scale: ScaleMode;
   /** As outras sondas na cena (desligado: só a escolhida, as companheiras e a sonda em foco, com seus rastros). */
   readonly showOthers: boolean;
+  /** Referencial dos rastros em escala real: o do corpo do encontro (automático) ou sempre o do Sol. */
+  readonly frameMode: FrameMode;
   /** Evento cujo cartão está aberto (alcançado na reprodução ou escolhido na lista). */
   readonly eventId: string | null;
   readonly view: ViewRequest;
@@ -68,6 +70,7 @@ interface ProbeStore {
   setSelected: (id: ProbeId) => void;
   setScale: (scale: ScaleMode) => void;
   setShowOthers: (on: boolean) => void;
+  setFrameMode: (frameMode: FrameMode) => void;
   showEvent: (id: string | null) => void;
   /** Vai para o evento: pausa, foca o corpo certo e abre o cartão. */
   jumpToEvent: (id: string) => void;
@@ -102,12 +105,29 @@ export function eventView(event: MissionEvent): { focus: FocusId; scale: ScaleMo
 }
 
 const SHOW_OTHERS_KEY = 'relsim:probes-others';
+const FRAME_KEY = 'relsim:probes-frame';
 
 function loadShowOthers(): boolean {
   try {
     return localStorage.getItem(SHOW_OTHERS_KEY) !== 'off';
   } catch {
     return true;
+  }
+}
+
+function loadFrameMode(): FrameMode {
+  try {
+    return localStorage.getItem(FRAME_KEY) === 'sun' ? 'sun' : 'auto';
+  } catch {
+    return 'auto';
+  }
+}
+
+function save(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // sem armazenamento: a escolha vale só nesta sessão
   }
 }
 
@@ -121,6 +141,7 @@ export const useProbeStore = create<ProbeStore>()((set, get) => ({
   selected: 'voyager2',
   scale: 'log',
   showOthers: loadShowOthers(),
+  frameMode: loadFrameMode(),
   eventId: null,
   view: { distance: null, nonce: 0 },
 
@@ -135,12 +156,12 @@ export const useProbeStore = create<ProbeStore>()((set, get) => ({
   setSelected: (selected) => set({ selected, eventId: null }),
   setScale: (scale) => set((s) => ({ scale, view: { distance: null, nonce: s.view.nonce + 1 } })),
   setShowOthers: (showOthers) => {
-    try {
-      localStorage.setItem(SHOW_OTHERS_KEY, showOthers ? 'on' : 'off');
-    } catch {
-      // sem armazenamento: a escolha vale só nesta sessão
-    }
+    save(SHOW_OTHERS_KEY, showOthers ? 'on' : 'off');
     set({ showOthers });
+  },
+  setFrameMode: (frameMode) => {
+    save(FRAME_KEY, frameMode);
+    set({ frameMode });
   },
   showEvent: (eventId) => set({ eventId }),
   jumpToEvent: (id) => {

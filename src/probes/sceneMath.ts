@@ -18,6 +18,8 @@ import { add, cross, lerp, norm, scale as scaleVec, sub, type Vec3 } from './vec
 export type FocusId = 'sun' | BodyId | CraftId;
 /** `log`: distâncias ao Sol em escala logarítmica (visão geral); `linear`: escala real. */
 export type ScaleMode = 'log' | 'linear';
+/** `auto`: o referencial do corpo em foco ou do encontro (em escala real); `sun`: sempre o do Sol. */
+export type FrameMode = 'auto' | 'sun';
 
 /** Escala log: R = K·log₁₀(1 + r/r₀). Terra em ~4,8, Júpiter em ~10, Netuno em ~18, Voyager 1 hoje em ~25. */
 export const LOG_R0_AU = 0.5;
@@ -70,10 +72,11 @@ export const framePosition = (id: BodyId, t: number): Vec3 => bodyPositionClampe
  * Referencial dos rastros: em escala real, o corpo em foco (ou o sistema do
  * encontro em que está a sonda em foco), que acompanha o corpo sem girar.
  * Assim uma órbita em torno de Júpiter ou do cometa aparece como órbita, e a
- * aproximação como a hipérbole que ela é. Na escala log e no Sol: heliocêntrico.
+ * aproximação como a hipérbole que ela é. Na escala log, no Sol ou com o
+ * referencial do Sol escolhido nos controles: heliocêntrico.
  */
-export function frameBody(focus: FocusId, t: number, mode: ScaleMode): BodyId | null {
-  if (mode !== 'linear' || focus === 'sun') return null;
+export function frameBody(focus: FocusId, t: number, mode: ScaleMode, frameMode: FrameMode = 'auto'): BodyId | null {
+  if (mode !== 'linear' || focus === 'sun' || frameMode === 'sun') return null;
   if (isBodyFocus(focus)) return focus;
   const { trajectory } = craft(focus);
   const e = currentEncounter(trajectory, Math.min(Math.max(t, trajectory.launch), trajectory.end));
