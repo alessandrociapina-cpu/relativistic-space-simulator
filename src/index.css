@@ -57,6 +57,9 @@ body,
   .animate-beacon {
     animation: beacon 1.6s ease-in-out infinite;
   }
+  .animate-halo {
+    animation: halo 2.2s ease-in-out infinite;
+  }
 }
 
 @keyframes beacon {
@@ -66,5 +69,18 @@ body,
   }
   50% {
     opacity: 0.35;
+  }
+}
+
+/* Halo violeta que pulsa em volta de um botão ainda não visitado (a aba da ficção científica). */
+@keyframes halo {
+  0%,
+  100% {
+    box-shadow: 0 0 10px rgb(167 139 250 / 0.3);
+  }
+  50% {
+    box-shadow:
+      0 0 28px rgb(167 139 250 / 0.75),
+      0 0 0 2px rgb(196 181 253 / 0.55);
   }
 }
