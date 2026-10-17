@@ -255,7 +255,7 @@ describe('textos e fórmulas com os valores do instante', () => {
     expect(inRest.flight.crewRest).toBe(true);
     expect(activeEffects(inRest)).toContain('crew-rest');
     expect(activeEffects(inRest)).not.toContain('coasting');
-    expect(explainEffect('crew-rest', inRest).summary).toMatch(/próxima queima a 10 g começa em 1,50 dias/);
+    expect(explainEffect('crew-rest', inRest).summary).toMatch(/próxima queima a 10 g começa em 4,05 dias/);
 
     for (const destination of DESTINATION_LIST) {
       for (const [accelG, coastEta] of [

@@ -8,7 +8,7 @@ import {
   type CrewKind,
   type MissionAssessment,
 } from '../physics/accelerationPresets';
-import { missionProfileFor, plannedCoastEta } from '../physics/crewRest';
+import { REST_RATIOS, missionProfileFor, plannedCoastEta } from '../physics/crewRest';
 import { DESTINATION_LIST, MAX_COAST_FRACTION, destinationMissionProfile, type Destination } from '../physics/destinations';
 import { useFlightStore, type MissionChoice } from '../store/useFlightStore';
 import { APP_HASH } from '../ui/appMode';
@@ -85,20 +85,23 @@ function PresetCard({
   preset,
   destination,
   coastEta,
+  restRatio,
   active,
   onSelect,
 }: {
   preset: AccelerationPreset;
   destination: Destination;
   coastEta: number | null;
+  restRatio: number;
   active: boolean;
   onSelect: () => void;
 }) {
   const profile = missionProfileFor(
     destination,
     preset.accelG,
-    plannedCoastEta(destination, preset.accelG, coastEta, preset.crew),
+    plannedCoastEta(destination, preset.accelG, coastEta, preset.crew, restRatio),
     preset.crew,
+    restRatio,
   );
   const { viability, rests } = assessMission(preset.crew, preset.accelG, profile);
   return (
@@ -231,6 +234,25 @@ function ProfileChoice({
   );
 }
 
+/** Quanto dura o descanso entre queimas, em vezes a queima (com piloto humano e descansos). */
+function RestChoice({ ratio, onChange }: { ratio: number; onChange: (ratio: number) => void }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="grid grid-cols-[auto_1fr_1fr] items-center gap-2" role="radiogroup" aria-label="Descanso entre queimas">
+        <span className="text-[11px] text-slate-400">Descanso</span>
+        {REST_RATIOS.map((r) => (
+          <button key={r} type="button" role="radio" aria-checked={ratio === r} className={optionClass(ratio === r)} onClick={() => onChange(r)}>
+            <span className="text-[13px] font-semibold text-cyan-100">{r}× a queima</span>
+          </button>
+        ))}
+      </div>
+      <div className="text-[11px] leading-snug text-slate-400">
+        Sem peso, o corpo se recupera mais devagar do que se desgasta: 5× dá mais folga e alonga a viagem.
+      </div>
+    </div>
+  );
+}
+
 function SummaryRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline justify-between gap-3 border-b border-white/5 py-1 last:border-b-0">
@@ -275,7 +297,8 @@ function viabilityText(
         `Suportável com descansos: sem eles, seriam ${formatSpan(continuousBurnS)} de empuxo contínuo a ${g}, e o limite ` +
         `do corpo (${protection}) é de ${formatSpan(rest.enduranceS)}. O piloto automático divide a aceleração e a ` +
         `frenagem em ${formatProse(rest.burns)} queimas de até ${formatSpan(rest.burnTau)} (90 % do limite), separadas por ` +
-        `${formatSpan(rest.restTau)} de inércia, sem peso, para a tripulação se recuperar.`,
+        `${formatSpan(rest.restTau)} de inércia (${formatProse(rest.restTau / rest.burnTau)} vezes a queima), sem peso, ` +
+        'para a tripulação se recuperar.',
     };
   }
   return {
@@ -287,11 +310,12 @@ function viabilityText(
   };
 }
 
-const pickChoice = ({ destination, accelG, coastEta, crew }: MissionChoice): MissionChoice => ({
+const pickChoice = ({ destination, accelG, coastEta, crew, restRatio }: MissionChoice): MissionChoice => ({
   destination,
   accelG,
   coastEta,
   crew,
+  restRatio,
 });
 
 /**
@@ -309,14 +333,14 @@ function Planner() {
   const midFlight = useFlightStore((s) => s.tau > 0 && s.tau < s.profile.tauTotal);
   const closePlanner = useCockpitUi((s) => s.closePlanner);
   // O cruzeiro do slider fica guardado no rascunho; o que vale é o limitado à aceleração escolhida.
-  const coastEta = plannedCoastEta(draft.destination, draft.accelG, draft.coastEta, draft.crew);
+  const coastEta = plannedCoastEta(draft.destination, draft.accelG, draft.coastEta, draft.crew, draft.restRatio);
   const profile = useMemo(
-    () => missionProfileFor(draft.destination, draft.accelG, coastEta, draft.crew),
-    [draft.destination, draft.accelG, coastEta, draft.crew],
+    () => missionProfileFor(draft.destination, draft.accelG, coastEta, draft.crew, draft.restRatio),
+    [draft.destination, draft.accelG, coastEta, draft.crew, draft.restRatio],
   );
   const flipEta = useMemo(
-    () => missionProfileFor(draft.destination, draft.accelG, null, draft.crew).etaMax,
-    [draft.destination, draft.accelG, draft.crew],
+    () => missionProfileFor(draft.destination, draft.accelG, null, draft.crew, draft.restRatio).etaMax,
+    [draft.destination, draft.accelG, draft.crew, draft.restRatio],
   );
   const assessment = assessMission(draft.crew, draft.accelG, profile);
   const continuousBurnS = longestBurnS(destinationMissionProfile(draft.destination, draft.accelG, coastEta));
@@ -432,6 +456,7 @@ function Planner() {
                   preset={p}
                   destination={draft.destination}
                   coastEta={draft.coastEta}
+                  restRatio={draft.restRatio}
                   active={!customOpen && p.accelG === draft.accelG}
                   onSelect={() => {
                     setCustomOpen(false);
@@ -452,6 +477,7 @@ function Planner() {
 
           <Section step={3} title="Perfil e resumo">
             <ProfileChoice flipEta={flipEta} coastEta={draft.coastEta} onChange={(coastEta) => update({ coastEta })} />
+            {profile.crewRest && <RestChoice ratio={draft.restRatio} onChange={(restRatio) => update({ restRatio })} />}
             <div className="hull-panel mt-1 rounded-lg px-3 py-2">
               <SummaryRow label="Destino" value={draft.destination.name} />
               <SummaryRow label="A bordo" value={draft.crew === 'crewed' ? 'Piloto humano' : 'Sonda robótica'} />
@@ -461,7 +487,10 @@ function Planner() {
               {profile.crewRest && (
                 <>
                   <SummaryRow label="Queimas" value={`${formatProse(profile.crewRest.burns)} × até ${formatSpan(profile.crewRest.burnTau)}`} />
-                  <SummaryRow label="Descanso entre queimas" value={formatSpan(profile.crewRest.restTau)} />
+                  <SummaryRow
+                    label="Descanso entre queimas"
+                    value={`${formatSpan(profile.crewRest.restTau)} (${formatProse(profile.crewRest.restTau / profile.crewRest.burnTau)}×)`}
+                  />
                 </>
               )}
               <SummaryRow label="γ máximo" value={formatGamma(profile.gammaMax)} />

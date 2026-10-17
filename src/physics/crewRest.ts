@@ -4,12 +4,13 @@
  * +Gx da NASA; a imersão em líquido estudada em Johnsville, em 1958, levou a
  * ~31 g por segundos). Quando o empuxo contínuo do plano passaria do limite do
  * piloto, a rota alterna queimas e descansos por inércia (sem peso): cada
- * queima usa 90 % da tolerância e cada descanso dura a tolerância inteira (no
- * mínimo 1 h), o bastante para a carga voltar a zero com folga.
+ * queima usa 90 % da tolerância e cada descanso dura 3 vezes a queima (ou 5,
+ * no planejamento), no mínimo 1 h.
  *
  * Não há medidas de recuperação depois de horas ou dias perto do limite: o
- * simulador estima que o corpo se recupera sem peso no mesmo ritmo em que se
- * desgasta sob a aceleração (como no trabalho físico pesado), em no mínimo 1 h.
+ * simulador estima que a recuperação sem peso é mais lenta que o desgaste e
+ * que um descanso desses leva a carga de 100 % a zero (com folga, depois de
+ * uma queima de 90 %).
  */
 import { enduranceFor, longestBurnS, type CrewKind } from './accelerationPresets';
 import { MAX_COAST_FRACTION, destinationMissionProfile, type Destination } from './destinations';
@@ -34,6 +35,9 @@ const acosh1p = (eps: number) => Math.log1p(eps + Math.sqrt(eps * (2 + eps)));
 export const BURN_FRACTION = 0.9;
 /** Descanso mínimo entre queimas (s). */
 export const MIN_REST_S = 3600;
+/** Quantas vezes o descanso dura a queima: 3 por padrão, 5 para mais folga (escolha no planejamento). */
+export const REST_RATIOS = [3, 5] as const;
+export const DEFAULT_REST_RATIO = 3;
 /** Até esta aceleração (g) o corpo aguenta indefinidamente: não há desgaste e a recuperação continua. */
 export const SUSTAINABLE_G = 1.2;
 /** A tolerância cai com ~g⁻³ (as curvas de +Gx caem entre g⁻³ e g⁻⁴ de minutos a horas). */
@@ -48,10 +52,14 @@ export interface RestCycle {
 /** Estado no início de um trecho do voo. */
 export type SegmentStart = Pick<FlightSegment, 'startTau' | 'eta0' | 'remaining0' | 'earth0'>;
 
-/** O ciclo para uma tolerância contínua; `null` se o corpo aguenta indefinidamente (ou não aguenta). */
-export function restCycleFor(enduranceS: number): RestCycle | null {
+/**
+ * O ciclo para uma tolerância contínua: queima de 90 % dela e descanso de `ratio` vezes a queima,
+ * no mínimo 1 h; `null` se o corpo aguenta indefinidamente (ou não aguenta).
+ */
+export function restCycleFor(enduranceS: number, ratio = DEFAULT_REST_RATIO): RestCycle | null {
   if (!(enduranceS > 0 && Number.isFinite(enduranceS))) return null;
-  return { burnTau: BURN_FRACTION * enduranceS, restTau: Math.max(enduranceS, MIN_REST_S) };
+  const burnTau = BURN_FRACTION * enduranceS;
+  return { burnTau, restTau: Math.max(ratio * burnTau, MIN_REST_S) };
 }
 
 const endOf = (seg: FlightSegment): SegmentStart => {
@@ -137,25 +145,26 @@ export function brakeSegments(start: SegmentStart, a: number, cycle: RestCycle):
 }
 
 /**
- * Freia já, com descansos, com a menor aceleração que para a nave no alvo: menor que a do
- * plano (religando perto do flip) ou maior (frenagem de emergência, além do limite). A
- * distância de frenagem cai com a aceleração, aos saltos (o número de descansos muda): uma
- * inércia curta antes da primeira queima cobre a diferença.
+ * Freia já com a aceleração do plano e descansos encurtados (desligando o motor na frenagem)
+ * ou alongados (religando perto do flip) na medida exata para parar no alvo: a distância é
+ * linear na duração dos descansos, então a conta é contínua. Mudar a aceleração seria pior:
+ * a tolerância cai com g⁻³, e a distância de frenagem muda aos saltos com o número de
+ * descansos. Sem descansos à frente, uma inércia antes da última queima cobre a sobra;
+ * `null` se nem frear sem parar com `a` cabe (aí só a frenagem de emergência contínua).
  */
-export function brakeWithRests(start: SegmentStart, cycle: RestCycle, a0: number): { segments: FlightSegment[]; accel: number } {
+export function brakeWithRests(start: SegmentStart, cycle: RestCycle, a: number): FlightSegment[] | null {
   const { eta0: eta, remaining0: remaining } = start;
-  let lo = Math.log(a0) - 40;
-  let hi = Math.log(a0) + 40;
-  for (let i = 0; i < 200; i++) {
-    const mid = (lo + hi) / 2;
-    if (brakingDistance(eta, Math.exp(mid), cycle) > remaining) lo = mid;
-    else hi = mid;
+  const burns = (C2 / a) * coshm1(eta);
+  if (!(eta > 0) || remaining < burns) return null;
+  const rests = restsOf(splitBurns((C * eta) / a, cycle.burnTau));
+  if (rests > 0) {
+    const restTau = (remaining - burns) / (C * hyperbolicSums(0, (a * cycle.burnTau) / C, rests)[0]);
+    return brakeSegments(start, a, { burnTau: cycle.burnTau, restTau });
   }
-  const a = Math.exp(hi);
-  const gap = (remaining - brakingDistance(eta, a, cycle)) / (C * Math.sinh(eta));
-  if (!(gap > 0)) return { segments: brakeSegments(start, a, cycle), accel: a };
+  const gap = (remaining - burns) / (C * Math.sinh(eta));
+  if (!(gap > 0)) return brakeSegments(start, a, cycle);
   const wait: FlightSegment = { kind: 'coast', ...start, duration: gap, accel: 0, rest: true };
-  return { segments: [wait, ...brakeSegments(endOf(wait), a, cycle)], accel: a };
+  return [wait, ...brakeSegments(endOf(wait), a, cycle)];
 }
 
 /**
@@ -222,25 +231,36 @@ export function crewRestProfile(plan: MissionProfile, cycle: RestCycle, enduranc
 }
 
 /** O plano para a nave escolhida: com piloto humano e empuxo contínuo além da tolerância, com descansos. */
-export function crewAwareProfile(plan: MissionProfile, crew: CrewKind, accelG: number): MissionProfile {
+export function crewAwareProfile(plan: MissionProfile, crew: CrewKind, accelG: number, restRatio = DEFAULT_REST_RATIO): MissionProfile {
   if (crew !== 'crewed') return plan;
   const { enduranceS } = enduranceFor('crewed', accelG);
-  const cycle = restCycleFor(enduranceS);
+  const cycle = restCycleFor(enduranceS, restRatio);
   if (!cycle || longestBurnS(plan) <= cycle.burnTau) return plan;
   return crewRestProfile(plan, cycle, enduranceS);
 }
 
 /** O plano da missão escolhida no planejamento. */
-export const missionProfileFor = (destination: Destination, accelG: number, coastEta: number | null, crew: CrewKind) =>
-  crewAwareProfile(destinationMissionProfile(destination, accelG, coastEta), crew, accelG);
+export const missionProfileFor = (
+  destination: Destination,
+  accelG: number,
+  coastEta: number | null,
+  crew: CrewKind,
+  restRatio = DEFAULT_REST_RATIO,
+) => crewAwareProfile(destinationMissionProfile(destination, accelG, coastEta), crew, accelG, restRatio);
 
 /**
  * O cruzeiro limitado a 0,999 da rapidez de pico sem cruzeiro (com os descansos da tripulação, se
  * houver): trocar para uma aceleração menor não vira Flip-and-Burn sem aviso (`effectiveCoastEta`).
  */
-export function plannedCoastEta(destination: Destination, accelG: number, coastEta: number | null, crew: CrewKind): number | null {
+export function plannedCoastEta(
+  destination: Destination,
+  accelG: number,
+  coastEta: number | null,
+  crew: CrewKind,
+  restRatio = DEFAULT_REST_RATIO,
+): number | null {
   if (coastEta === null) return null;
-  return Math.min(coastEta, missionProfileFor(destination, accelG, null, crew).etaMax * MAX_COAST_FRACTION);
+  return Math.min(coastEta, missionProfileFor(destination, accelG, null, crew, restRatio).etaMax * MAX_COAST_FRACTION);
 }
 
 // ── Carga na tripulação ──────────────────────────────────────────────────────
@@ -250,13 +270,13 @@ export interface CrewTolerance {
   readonly accelG: number;
   /** Tolerância contínua a `accelG` (s): `Infinity` sem limite, 0 sem chance. */
   readonly enduranceS: number;
-  /** Tempo para a carga cair de 100 % a 0 sem peso (s). */
+  /** Tempo para a carga cair de 100 % a 0 sem peso (s): o descanso do ciclo. */
   readonly recoveryS: number;
 }
 
-export function crewToleranceFor(accelG: number): CrewTolerance {
+export function crewToleranceFor(accelG: number, restRatio = DEFAULT_REST_RATIO): CrewTolerance {
   const { enduranceS } = enduranceFor('crewed', accelG);
-  return { accelG, enduranceS, recoveryS: Math.max(Number.isFinite(enduranceS) ? enduranceS : 0, MIN_REST_S) };
+  return { accelG, enduranceS, recoveryS: restCycleFor(enduranceS, restRatio)?.restTau ?? MIN_REST_S };
 }
 
 /** A tolerância de um plano com descansos (a mesma de `crewToleranceFor`, sem procurar o preset de novo). */

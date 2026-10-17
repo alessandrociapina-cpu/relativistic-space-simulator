@@ -3,6 +3,7 @@ import { computeFlightState, type FlightState, type MissionProfile } from '../ph
 import type { CrewKind } from '../physics/accelerationPresets';
 import { DESTINATIONS, type Destination, type DestinationId } from '../physics/destinations';
 import {
+  DEFAULT_REST_RATIO,
   crewStatusAt,
   crewToleranceFor,
   missionProfileFor,
@@ -43,6 +44,8 @@ export interface MissionChoice {
   readonly coastEta: number | null;
   /** Piloto humano (olho do piloto no para-brisa) ou sonda robótica (câmeras). */
   readonly crew: CrewKind;
+  /** Com piloto humano e descansos: quantas vezes o descanso dura a queima (3 ou 5). */
+  readonly restRatio: number;
 }
 
 export interface FlightStore extends MissionChoice {
@@ -130,15 +133,16 @@ function flightPlan(profile: MissionProfile) {
 }
 
 /** Nova missão parada no instante da partida. */
-function newMission({ destination, accelG, coastEta, crew }: MissionChoice) {
+function newMission({ destination, accelG, coastEta, crew, restRatio }: MissionChoice) {
   // Com piloto humano além da tolerância contínua, o plano alterna queimas e descansos.
-  const profile = missionProfileFor(destination, accelG, coastEta, crew);
+  const profile = missionProfileFor(destination, accelG, coastEta, crew, restRatio);
   return {
     destination,
     accelG,
     coastEta,
     crew,
-    crewTolerance: crew === 'crewed' ? crewToleranceFor(accelG) : null,
+    restRatio,
+    crewTolerance: crew === 'crewed' ? crewToleranceFor(accelG, restRatio) : null,
     plannedProfile: profile,
     ...flightPlan(profile),
     tau: 0,
@@ -168,11 +172,12 @@ export const useFlightStore = create<FlightStore>()((set, get) => {
     accelG: DESTINATIONS.proxima.defaultAccelG,
     coastEta: null,
     crew: 'crewed',
+    restRatio: DEFAULT_REST_RATIO,
   });
   /** Troca de missão: começa sempre em tempo real (1 s/s); o painel sugere acelerar. */
   const remission = (patch: Partial<MissionChoice>) => {
-    const { destination, accelG, coastEta, crew } = get();
-    update({ ...newMission({ destination, accelG, coastEta, crew, ...patch }), timeScale: 1 });
+    const { destination, accelG, coastEta, crew, restRatio } = get();
+    update({ ...newMission({ destination, accelG, coastEta, crew, restRatio, ...patch }), timeScale: 1 });
   };
   const initialFlight = computeFlightState(initial.profile, 0);
 

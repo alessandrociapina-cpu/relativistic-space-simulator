@@ -129,7 +129,7 @@ const brakeFrom = (start: SegmentStart, a: number, cycle: RestCycle | null): Fli
  * a aceleração do plano, L = (c²/α)(cosh η − 1) (com descansos, mais a distância
  * percorrida neles), e o piloto automático religa o motor ali (o flip). Sem essa
  * distância, freia já com a aceleração necessária, aₑ = (c²/L)(cosh η − 1) (com
- * descansos, a menor que para a nave no alvo). Parada ou lenta demais para chegar
+ * descansos, com α e descansos mais curtos). Parada ou lenta demais para chegar
  * num tempo razoável, a nave fica à deriva.
  */
 function coastThenBrake(
@@ -141,7 +141,7 @@ function coastThenBrake(
   const { eta0: eta, remaining0: remaining } = start;
   const brakingDistance = cycle ? restBrakingDistance(eta, a, cycle) : (C2 / a) * coshm1(eta);
   if (remaining < brakingDistance) {
-    const segments = cycle ? brakeWithRests(start, cycle, a).segments : [emergencyBrake(start)];
+    const segments = (cycle && brakeWithRests(start, cycle, a)) || [emergencyBrake(start)];
     return { segments, end: 'arrival', flipTau: null, brakeTau: firstBurnTau(segments) };
   }
   const planSpan = Math.max(plan.tauTotal, plan.tTotal);
@@ -278,8 +278,8 @@ export function relightEngine(profile: MissionProfile, tau: number): MissionProf
  * Religar com descansos da tripulação: se a tripulação ainda não se recuperou da última
  * queima (carga `strain`), o piloto automático espera o descanso terminar; depois, a nova
  * subida em queimas e descansos, um descanso no topo e a frenagem ao contrário. Sem
- * distância para isso, freia com descansos e a aceleração que para a nave no alvo (menor
- * que α, ou maior numa emergência).
+ * distância para isso, freia já com α e os descansos ajustados para parar no alvo (sem
+ * distância nem para frear com α, frenagem de emergência contínua).
  */
 function relightWithRests(
   plan: MissionProfile,
@@ -303,7 +303,7 @@ function relightWithRests(
   const route = restRoute(from, a, cycle);
   if (route) return buildProfile(plan, firstTau, [...segments, ...added, ...route.segments], 'arrival', route.flipTau);
   if (!(from.eta0 > 0)) return buildProfile(plan, firstTau, [...segments, emergencyBrake(start)], 'arrival', null, start.startTau);
-  const brake = brakeWithRests(from, cycle, a).segments;
+  const brake = brakeWithRests(from, cycle, a) ?? [emergencyBrake(from)];
   return buildProfile(plan, firstTau, [...segments, ...added, ...brake], 'arrival', null, firstBurnTau(brake));
 }
 

@@ -102,8 +102,9 @@ export const INDICATOR_HELP: Readonly<Record<IndicatorId, IndicatorHelp>> = {
       'Quanto o corpo do piloto já gastou da tolerância à aceleração (100 % é o limite: desmaio e lesões). Sob ' +
       'peso acima de 1,2 g a carga sobe, mais depressa quanto maior a aceleração; sem peso, na inércia, ela cai. ' +
       'Quando o empuxo contínuo passaria do limite, o plano alterna queimas que param em 90 % (a marca na barra) ' +
-      'com descansos por inércia. As durações são uma estimativa: não há medidas de recuperação depois de horas ' +
-      'ou dias perto do limite.',
+      'com descansos por inércia de 3 ou 5 vezes a queima (escolha no planejamento): sem peso, o corpo se recupera ' +
+      'mais devagar do que se desgasta. As durações são uma estimativa: não há medidas de recuperação depois de ' +
+      'horas ou dias perto do limite.',
   },
   route: {
     title: 'Rota',
