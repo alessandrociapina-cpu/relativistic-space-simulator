@@ -15,6 +15,8 @@ import {
   computeNoBrakeProperTime,
   computeShaderKinematics,
   flipTauOf,
+  isAscending,
+  isDescending,
   rocketMassRatio,
   type FlightState,
   type MissionProfile,
@@ -68,6 +70,7 @@ export type EffectId =
   | 'cmb-xray'
   | 'hot-cone'
   | 'illuminance'
+  | 'ism-radiation'
   | 'cmb-visible'
   | 'doppler'
   | 'aberration'
@@ -92,6 +95,7 @@ export const EFFECT_ORDER: readonly EffectId[] = [
   'cmb-xray',
   'hot-cone',
   'illuminance',
+  'ism-radiation',
   'cmb-visible',
   'doppler',
   'aberration',
@@ -139,6 +143,8 @@ export const EFFECT_THRESHOLDS = {
   illuminanceLux: 1500,
   /** Pico de Wien da CMB à frente na faixa dos raios X. */
   xRayPeakNm: 10,
+  /** O gás interestelar vira radiação dura: prótons de GeV contra a proa. */
+  ismGamma: 10,
 } as const;
 
 const T_SUN_K = 5778;
@@ -150,6 +156,11 @@ const FUSION_EXHAUST_BETA = 0.1;
 /** Constante de Boltzmann (eV/K) e energia de repouso do próton (eV). */
 const K_B_EV = 8.617333262e-5;
 const PROTON_REST_EV = 938.27208816e6;
+/** Energia de repouso do próton (J) e densidade do hidrogênio interestelar, ~1 átomo/cm³ (m⁻³). */
+const PROTON_REST_J = 1.50327761802e-10;
+const ISM_DENSITY_M3 = 1e6;
+/** Luz do Sol na órbita da Terra (W/m²), para comparar. */
+const SOLAR_CONSTANT_W_M2 = 1361;
 const C2 = C * C;
 
 const tex = String.raw;
@@ -398,12 +409,15 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
     announce: true,
     isActive: (s) => s.flight.gamma >= EFFECT_THRESHOLDS.timeDilationGamma,
     explain: ({ flight, profile }) => {
-      const { gamma, tau, earthTimeS, phase } = flight;
+      const { gamma, tau, earthTimeS, earthRadioTimeS, phase, eta } = flight;
+      // Com descansos ou manobras, t não tem uma fórmula fechada só: vale a integral.
+      const segmented = profile.crewRest !== undefined || profile.maneuvers !== undefined;
       const formulas: Formula[] = [
         { tex: tex`\frac{dt}{d\tau} = \gamma = ${n(gamma, 4)}` },
         {
-          tex:
-            phase === 'decelerating'
+          tex: segmented
+            ? tex`t = \int_0^{\tau} \cosh\eta\,d\tau = ${texDuration(earthTimeS)}`
+            : phase === 'decelerating'
               ? tex`t = t_{\text{total}} - \frac{c}{\alpha}\sinh\eta = ${texDuration(earthTimeS)}`
               : phase === 'coasting'
                 ? tex`t = \frac{c}{\alpha}\sinh\eta_c + \gamma_c\,(\tau - \tau_1) = ${texDuration(earthTimeS)}`
@@ -413,6 +427,12 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
       if (tau > 0) {
         formulas.push({ tex: tex`\frac{t}{\tau} = \frac{${texDuration(earthTimeS)}}{${texDuration(tau)}} = ${n(earthTimeS / tau)}` });
       }
+      // O rádio da Terra: a luz que chega agora partiu em t − x/c = ∫ e^(−η) dτ, com a frequência dividida por e^η.
+      formulas.push(
+        { tex: tex`t_{\text{rádio}} = t - \frac{x}{c} = \int_0^{\tau} e^{-\eta}\,d\tau = ${texDuration(earthRadioTimeS)}` },
+        { tex: tex`\frac{f_{\text{rec}}}{f_{\text{em}}} = e^{-\eta} = ${n(Math.exp(-eta))}` },
+      );
+      const radioTotal = profile.tTotal - profile.distanceM / C;
       return {
         summary:
           `Cada segundo a bordo corresponde agora a ${formatSpan(gamma)} na Terra.` +
@@ -425,8 +445,57 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
             `${formatSpan(profile.tauTotal)} a bordo.`,
           'Para a nave, é a Terra que se move. A assimetria vem de quem acelera: só a nave sente o empuxo, e é ela ' +
             'que envelhece menos (o paradoxo dos gêmeos).',
+          `O que a nave vê da Terra é outra coisa: a luz (ou o rádio) que chega agora partiu ${formatSpan(earthRadioTimeS)} ` +
+            `depois da partida, enquanto o relógio da Terra já marca ${formatSpan(earthTimeS)}. Esse sinal chega com a ` +
+            `frequência dividida por e^η = ${num(Math.exp(eta))}: um vídeo da Terra passaria ${num(Math.exp(eta))} vezes mais ` +
+            'devagar. Na subida a Terra parece congelada; na frenagem η cai e o sinal volta a correr mais depressa, mas ' +
+            'nunca mais que um segundo da Terra por segundo de bordo.',
+          `Na chegada, o rádio mostra a Terra de ${formatSpan(Math.max(0, radioTotal))} depois da partida (t_total − D/c). ` +
+            `O resto da história, ${formatSpan(profile.distanceM / C)}, chega nos ${formatSpan(profile.distanceM / C)} ` +
+            'seguintes, o tempo que a luz leva para cruzar a distância.',
         ],
         formulas,
+      };
+    },
+  },
+
+  'ism-radiation': {
+    title: 'O meio interestelar vira radiação',
+    announce: true,
+    isActive: (s) => s.flight.gamma >= EFFECT_THRESHOLDS.ismGamma,
+    explain: ({ flight, crewed }) => {
+      // γ − 1 sem cancelamento: 2 sinh²(η/2).
+      const gammaM1 = 2 * Math.sinh(flight.eta / 2) ** 2;
+      const protonEv = gammaM1 * PROTON_REST_EV;
+      // Fluxo de prótons na proa, γ·n·βc (a densidade cresce por γ no referencial da nave), vezes a energia de cada um.
+      const powerW = flight.gamma * ISM_DENSITY_M3 * flight.beta * C * gammaM1 * PROTON_REST_J;
+      return {
+        summary:
+          `A v = ${velocityOf(flight)}, cada átomo de hidrogênio do meio interestelar (cerca de 1 por cm³) bate na ` +
+          `proa com ${formatEnergyEv(protonEv)}: são ${formatScientific(powerW)} W em cada metro quadrado do escudo ` +
+          `frontal, ${num(powerW / SOLAR_CONSTANT_W_M2)} vezes a luz do Sol na Terra.`,
+        details: [
+          'No referencial da nave, o gás entre as estrelas vem ao encontro dela a quase c e mais denso por γ (contração ' +
+            'de Lorentz). Cada próton chega com E = (γ − 1)·m_p c², a energia dos raios cósmicos: GeV a partir de γ ≈ 2, ' +
+            'TeV em γ ≈ 1 000, PeV em γ ≈ 10⁶.',
+          'A potência sobre a proa é o fluxo de prótons, γ·n_H·βc, vezes a energia de cada um: cresce com γ². ' +
+            (crewed
+              ? 'Sem um escudo, a tripulação receberia uma dose letal de radiação em instantes, e o casco seria vaporizado.'
+              : 'Sem um escudo, a eletrônica da sonda seria destruída e o casco vaporizado.'),
+          'Viagens relativísticas precisariam de um escudo de ablação na proa (um bloco que se desgasta aos poucos), de ' +
+            'um campo magnético que desviasse as partículas carregadas ou de um laser que ionizasse o gás à frente. Os ' +
+            'grãos de poeira, raros mas milhares de vezes mais pesados, seriam ainda piores.',
+        ],
+        formulas: [
+          {
+            card: true,
+            tex: tex`E_p = (\gamma - 1)\,m_p c^2 = ${n(gammaM1)} \times 938{,}27\ \mathrm{MeV} = ${texEnergyEv(protonEv)}`,
+          },
+          {
+            tex: tex`\frac{P}{A} = \gamma\,n_H\,\beta c\,(\gamma - 1)\,m_p c^2 = ${n(powerW)}\ \mathrm{W/m^2}`,
+            note: 'com n_H ≈ 1 átomo/cm³',
+          },
+        ],
       };
     },
   },
@@ -457,7 +526,7 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
     title: 'Atravessando o Sistema Solar',
     announce: true,
     isActive: (s) =>
-      s.flight.phase === 'accelerating' && inRange(s.sunDistanceAu, EFFECT_THRESHOLDS.solarSystemAu),
+      isAscending(s.profile, s.flight) && inRange(s.sunDistanceAu, EFFECT_THRESHOLDS.solarSystemAu),
     explain: ({ flight, sunDistanceAu, alpha }) => {
       const horizon = C2 / alpha;
       // Distância da frente de luz emitida na ignição: ct − x = (c²/α)(1 − e^(−η)).
@@ -686,13 +755,16 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
   braking: {
     title: 'Frenagem',
     announce: true,
-    isActive: (s) => s.flight.phase === 'decelerating',
+    // Nos descansos da frenagem (§4.2.9) a nave segue na metade de frenagem.
+    isActive: (s) => isDescending(s.profile, s.flight),
     explain: ({ flight, profile }) => {
       const mirror = profile.tauTotal - flight.tau;
       return {
         summary:
-          'O motor agora empurra contra o movimento, e a rapidez cai no mesmo ritmo em que subiu. Por isso o céu ' +
-          `repete, de trás para a frente, o que se viu na ida. Faltam ${formatSpan(mirror)} de bordo.`,
+          (flight.crewRest
+            ? 'Na frenagem, entre duas queimas: a tripulação descansa sem peso e a rapidez fica parada até a próxima. '
+            : 'O motor agora empurra contra o movimento, e a rapidez cai no mesmo ritmo em que subiu. ') +
+          `Por isso o céu repete, de trás para a frente, o que se viu na ida. Faltam ${formatSpan(mirror)} de bordo.`,
         details: [
           'Aberração, Doppler e a cor da CMB dependem só da velocidade, não da aceleração. O instante τ da frenagem ' +
             `mostra o mesmo céu do instante espelho τ_total − τ da ida: agora, τ = ${formatSpan(mirror)}.`,
@@ -716,7 +788,7 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
     title: 'O alvo à frente, azulado',
     announce: true,
     isActive: (s) =>
-      s.flight.phase === 'decelerating' && inRange(s.flight.gamma, BLUESHIFT_HOLOGRAM_GAMMA),
+      isDescending(s.profile, s.flight) && inRange(s.flight.gamma, BLUESHIFT_HOLOGRAM_GAMMA),
     explain: ({ destination, flight, dFront }) => {
       const seenK = destination.temperatureK * dFront;
       return {

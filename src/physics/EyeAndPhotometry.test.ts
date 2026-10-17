@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { computeFlightState, flipTauOf } from './RelativityEngine';
 import { DESTINATIONS, destinationMissionProfile } from './destinations';
 import { cutEngine, relightEngine } from './maneuvers';
+import { missionProfileFor } from './crewRest';
 import { computeBodyAngularRadii } from './sky';
 import {
   WINDSHIELD_FOV_DEG,
@@ -10,6 +11,7 @@ import {
   computePhotometryAndEyeState,
   formatRelativisticSpeedPercent,
   peakCmbLux,
+  peakCmbLuxRapidity,
   recommendedRearZoom,
   recommendedTelescopeZoom,
   steadyPupilMm,
@@ -119,6 +121,35 @@ describe('olho do piloto na missão para Proxima', () => {
     const early = stateIn(relit)(flip + 1);
     expect(early.whiteoutTau).toBeCloseTo(flip - 1, 6);
     expect(early.dimmerFactor).toBeGreaterThan(0);
+  });
+});
+
+describe('pico de luz e descansos da tripulação', () => {
+  it('rumo a Andrômeda na demonstração, o pico universal de lux não escapa da grade da linha do tempo', () => {
+    const andromeda = destinationMissionProfile(DESTINATIONS.andromeda);
+    const eyes = computeEyeTimeline(andromeda);
+    expect(relErr(eyes.peakLux, peakCmbLux())).toBeLessThan(1e-12);
+    expect(eyes.peakLuxTau).toBeCloseTo((299_792_458 / andromeda.properAccel) * peakCmbLuxRapidity(), 6);
+  });
+
+  it('nos descansos da subida o aviso de ofuscamento continua; nos da frenagem, o espelho da ida', () => {
+    const plan = missionProfileFor(DESTINATIONS.andromeda, 10, null, 'crewed');
+    const eyes = computeEyeTimeline(plan);
+    const at = (tau: number) => {
+      const flight = computeFlightState(plan, tau);
+      return { flight, p: computePhotometryAndEyeState(flight, plan, eyes, computeBodyAngularRadii(flight, DESTINATIONS.andromeda).targetRadiusRad) };
+    };
+    // Um descanso da subida com γ entre 200 e 12 000, e o instante espelho na frenagem.
+    let restTau = -1;
+    for (let i = 1; i < 4000 && restTau < 0; i++) {
+      const { flight } = at((i / 4000) * plan.burnEndTau);
+      if (flight.crewRest && flight.gamma >= 200 && flight.gamma <= 12_000) restTau = flight.tau;
+    }
+    expect(restTau).toBeGreaterThan(0);
+    expect(at(restTau).p.isEyeHazard).toBe(true);
+    const mirror = at(plan.tauTotal - restTau);
+    expect(mirror.flight.crewRest).toBe(true);
+    expect(mirror.p.whiteoutTau).toBeCloseTo(restTau, 3);
   });
 });
 

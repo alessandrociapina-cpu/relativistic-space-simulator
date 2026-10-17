@@ -158,7 +158,7 @@ export function TelemetryHUD({ className = '' }: { className?: string }) {
       {/* Altura fixa (2 linhas no celular, 1 na tela larga): um aviso que muda de largura,
           como a contagem do flip, não empurra o resto do cockpit a cada segundo. */}
       <div className="mb-1.5 flex h-[2.6rem] flex-wrap content-start items-center gap-1 overflow-hidden sm:h-5 sm:gap-1.5">
-        <Chip className="border border-cyan-300/50 text-cyan-200">{PHASE_LABEL[flight.phase]}</Chip>
+        <Chip className="border border-cyan-300/50 text-cyan-200">{flight.crewRest ? 'Descanso' : PHASE_LABEL[flight.phase]}</Chip>
         {crew === 'crewed' ? (
           <CrewChip />
         ) : (

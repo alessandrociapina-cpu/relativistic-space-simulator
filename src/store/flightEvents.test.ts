@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { computeCriticalWindows } from '../physics/criticalEvents';
 import { DESTINATIONS, destinationMissionProfile } from '../physics/destinations';
-import { computeMilestones, detectFlightEvents, type Milestone } from './flightEvents';
+import { computeMilestones, detectCrewRestEvent, detectFlightEvents, type Milestone } from './flightEvents';
 
 describe('marcos do voo', () => {
   it('Proxima: CMB na aceleração, flip, CMB na frenagem e chegada', () => {
@@ -51,5 +51,16 @@ describe('detectFlightEvents', () => {
       { type: 'milestone', kind: 'flip' },
       { type: 'countdown', target: 'arrival', secondsLeft: 3 },
     ]);
+  });
+});
+
+describe('aviso de descanso da tripulação', () => {
+  it('toca na transição, nos dois sentidos, se o ciclo dura ao menos 4 s reais', () => {
+    const cycle = 10.8 * 86_400; // 10 g: 2,7 dias de queima + 8,1 de descanso
+    expect(detectCrewRestEvent(false, true, cycle, 86_400)).toEqual({ type: 'crew-rest', resting: true });
+    expect(detectCrewRestEvent(true, false, cycle, 86_400)).toEqual({ type: 'crew-rest', resting: false });
+    expect(detectCrewRestEvent(true, true, cycle, 86_400)).toBeNull();
+    // A 1 mês/s o ciclo passa em ~0,4 s: o aviso tocaria sem parar.
+    expect(detectCrewRestEvent(false, true, cycle, 30 * 86_400)).toBeNull();
   });
 });

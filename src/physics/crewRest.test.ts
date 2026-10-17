@@ -30,7 +30,17 @@ const relErr = (a: number, b: number) => Math.abs(a - b) / Math.max(Math.abs(b),
 /** O fim de um segmento como início do próximo. */
 const endOf = (seg: FlightSegment, kind: FlightSegment['kind'], duration: number, accel: number, extra: Partial<FlightSegment> = {}): FlightSegment => {
   const e = segmentState(seg, seg.duration);
-  return { kind, startTau: seg.startTau + seg.duration, duration, accel, eta0: e.eta, remaining0: e.remainingM, earth0: e.earthTimeS, ...extra };
+  return {
+    kind,
+    startTau: seg.startTau + seg.duration,
+    duration,
+    accel,
+    eta0: e.eta,
+    remaining0: e.remainingM,
+    earth0: e.earthTimeS,
+    radio0: e.radioTimeS,
+    ...extra,
+  };
 };
 
 /** Maior carga da tripulação ao longo do voo, em `n` amostras. */
@@ -68,6 +78,7 @@ describe('ciclo de queima e descanso', () => {
         eta0,
         remaining0: 4e16,
         earth0: 0,
+        radio0: 0,
         cycle: { burnTau: b, restTau: r, count },
       };
       // A mesma sequência, segmento a segmento.
@@ -84,6 +95,7 @@ describe('ciclo de queima e descanso', () => {
         expect(relErr(st.eta, ref.eta)).toBeLessThan(1e-12);
         expect(relErr(st.remainingM, ref.remainingM)).toBeLessThan(1e-12);
         expect(relErr(st.earthTimeS, ref.earthTimeS)).toBeLessThan(1e-12);
+        expect(relErr(st.radioTimeS, ref.radioTimeS)).toBeLessThan(1e-12);
         expect(st.rest).toBe(step.kind === 'coast');
       }
     }
@@ -253,6 +265,26 @@ describe('motor desligado e religado com descansos', () => {
         expect(end.phase).toBe('arrived');
         expect(maxStrain(profile, g, 600)).toBeLessThanOrEqual(0.9 + 1e-9);
       }
+    }
+  });
+});
+
+describe('tempo de rádio da Terra com descansos e manobras', () => {
+  it('cresce sempre e chega a t_total − D/c, também depois de desligar e religar o motor', () => {
+    const C_M_S = 299_792_458;
+    const rest = tenG.crewRest!;
+    let tau = 0.2 * tenG.tauTotal;
+    while (engineCommandAt(tenG, tau) !== 'cut') tau += rest.burnTau / 5;
+    const cut = cutEngine(tenG, tau, 3 * 3600);
+    for (const p of [tenG, cut]) {
+      let prev = -1;
+      for (let i = 0; i <= 3000; i++) {
+        const r = computeFlightState(p, (i / 3000) * p.tauTotal).earthRadioTimeS;
+        expect(r).toBeGreaterThanOrEqual(prev);
+        prev = r;
+      }
+      const end = computeFlightState(p, p.tauTotal).earthRadioTimeS;
+      expect(Math.abs(end - (p.tTotal - p.distanceM / C_M_S))).toBeLessThan(1e-9 * p.tTotal);
     }
   });
 });

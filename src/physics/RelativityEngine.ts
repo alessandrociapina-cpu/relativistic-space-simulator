@@ -116,6 +116,8 @@ export interface FlightSegment {
   readonly eta0: number;
   readonly remaining0: number;
   readonly earth0: number;
+  /** Tempo de rádio da Terra no início (s): quando partiu da Terra a luz que chega agora à nave. */
+  readonly radio0: number;
   /**
    * Frenagem que termina parada no alvo: a distância sai exata de (c²/|a|)(cosh η − 1), contada a
    * partir do fim (sem o cancelamento de D − x). Numa frenagem com descansos, cada trecho também.
@@ -189,6 +191,8 @@ export interface SegmentState {
   readonly eta: number;
   readonly remainingM: number;
   readonly earthTimeS: number;
+  /** Tempo de rádio da Terra: ∫ e^(−η) dτ (s). */
+  readonly radioTimeS: number;
   /** Aceleração própria no instante (m/s², com sinal). */
   readonly accel: number;
   /** Num descanso da tripulação. */
@@ -210,14 +214,28 @@ export function hyperbolicSums(x: number, d: number, k: number): [sinhSum: numbe
   return [Math.sinh(center) * ratio, Math.cosh(center) * ratio];
 }
 
+/**
+ * ∫ e^(−η) dτ numa queima com aceleração `a` de η₀ a η = η₀ + Δη: (c/a)(e^(−η₀) − e^(−η)), escrito como
+ * produto (expm1), sem cancelamento quando Δη é pequeno.
+ */
+const burnRadio = (eta0: number, dEta: number, a: number) => (C / a) * Math.exp(-eta0) * -Math.expm1(-dEta);
+
+/** Σ e^(−(x + jΔ)) para j = 1…k (os descansos de um bloco de ciclos), em forma fechada. */
+function expSum(x: number, d: number, k: number): number {
+  if (k <= 0) return 0;
+  const ratio = Math.abs(d) < 1e-300 ? k : Math.expm1(-k * d) / Math.expm1(-d);
+  return Math.exp(-x - d) * ratio;
+}
+
 /** Estado `s` segundos de bordo depois do início do segmento. */
 export function segmentState(seg: FlightSegment, s: number): SegmentState {
-  const { eta0, remaining0, earth0 } = seg;
+  const { eta0, remaining0, earth0, radio0 } = seg;
   if (seg.kind === 'coast' || seg.accel === 0) {
     return {
       eta: eta0,
       remainingM: seg.toArrival ? (seg.tailM ?? 0) + C * Math.sinh(eta0) * (seg.duration - s) : remaining0 - C * Math.sinh(eta0) * s,
       earthTimeS: earth0 + Math.cosh(eta0) * s,
+      radioTimeS: radio0 + Math.exp(-eta0) * s,
       accel: 0,
       rest: seg.rest === true,
     };
@@ -231,7 +249,7 @@ export function segmentState(seg: FlightSegment, s: number): SegmentState {
       : seg.tailM === undefined
         ? (C2 / Math.abs(a)) * coshm1(eta)
         : seg.tailM + (C2 / Math.abs(a)) * hyperbolicDeltas(eta, eta0 + (a * seg.duration) / C)[0];
-    return { eta, remainingM, earthTimeS: earth0 + (C / a) * dSinh, accel: a, rest: false };
+    return { eta, remainingM, earthTimeS: earth0 + (C / a) * dSinh, radioTimeS: radio0 + burnRadio(eta0, eta - eta0, a), accel: a, rest: false };
   }
   if (seg.kind === 'cycles') {
     // k ciclos completos: as queimas somam (c²/a)(cosh η_k − cosh η₀) de distância; os descansos, que
@@ -246,6 +264,8 @@ export function segmentState(seg: FlightSegment, s: number): SegmentState {
     const [restSinh, restCosh] = hyperbolicSums(eta0, dEta, k);
     const remainingK = remaining0 - (C2 / a) * burnCosh - r * C * restSinh;
     const earthK = earth0 + (C / a) * burnSinh + r * restCosh;
+    // Rádio: as queimas somam (c/a)(e^(−η₀) − e^(−η_k)) e os descansos r·Σ e^(−(η₀ + jΔη)), só termos positivos.
+    const radioK = radio0 + burnRadio(eta0, k * dEta, a) + r * expSum(eta0, dEta, k);
     const eta = k === count ? etaK : etaK + (a * Math.min(local, b)) / C;
     const resting = k === count ? 0 : Math.max(0, local - b);
     // Na frenagem até o alvo, a distância sai do que falta percorrer (só termos positivos):
@@ -259,13 +279,21 @@ export function segmentState(seg: FlightSegment, s: number): SegmentState {
       return burns + r * C * restsAhead + (inRest ? C * Math.sinh(eta) * (r - resting) : 0);
     };
     if (k === count) {
-      return { eta: etaK, remainingM: seg.toArrival ? (seg.tailM ?? 0) + ahead() : remainingK, earthTimeS: earthK, accel: 0, rest: true };
+      return {
+        eta: etaK,
+        remainingM: seg.toArrival ? (seg.tailM ?? 0) + ahead() : remainingK,
+        earthTimeS: earthK,
+        radioTimeS: radioK,
+        accel: 0,
+        rest: true,
+      };
     }
     const [dCosh, dSinh] = hyperbolicDeltas(eta, etaK);
     return {
       eta,
       remainingM: seg.toArrival ? (seg.tailM ?? 0) + ahead() : remainingK - (C2 / a) * dCosh - C * Math.sinh(eta) * resting,
       earthTimeS: earthK + (C / a) * dSinh + Math.cosh(eta) * resting,
+      radioTimeS: radioK + burnRadio(etaK, eta - etaK, a) + Math.exp(-eta) * resting,
       accel: local < b ? a : 0,
       rest: local >= b,
     };
@@ -277,6 +305,7 @@ export function segmentState(seg: FlightSegment, s: number): SegmentState {
     eta: etaAt(s),
     remainingM: remaining0 - C * integrate((u) => Math.sinh(etaAt(u)), s),
     earthTimeS: earth0 + integrate((u) => Math.cosh(etaAt(u)), s),
+    radioTimeS: radio0 + integrate((u) => Math.exp(-etaAt(u)), s),
     accel: a0 * (1 - s / d),
     rest: false,
   };
@@ -379,6 +408,12 @@ export interface FlightState {
   readonly positionM: number;
   /** Tempo da Terra t(τ) (s). */
   readonly earthTimeS: number;
+  /**
+   * Tempo de rádio da Terra (s): o instante, no relógio da Terra, em que partiu a luz (ou o sinal de
+   * rádio) que chega agora à nave, t − x/c = ∫ e^(−η) dτ. A integral soma só termos positivos e é exata
+   * em 64 bits em qualquer regime (t − x/c perderia todos os dígitos perto de c).
+   */
+  readonly earthRadioTimeS: number;
   /** L_repouso = D_total − x(τ) (m). */
   readonly restDistanceRemainingM: number;
   /** L_contraída = L_repouso / γ, exibida no HUD (m). */
@@ -396,6 +431,7 @@ function stateFrom(
   eta: number,
   positionM: number,
   earthTimeS: number,
+  earthRadioTimeS: number,
   restDistanceRemainingM: number,
   engine: EngineState,
   thrustAccel: number,
@@ -411,6 +447,7 @@ function stateFrom(
     oneMinusBeta: k.uOneMinusBeta,
     positionM,
     earthTimeS,
+    earthRadioTimeS,
     restDistanceRemainingM,
     contractedDistanceRemainingM: restDistanceRemainingM / k.uGamma,
     engine,
@@ -419,12 +456,33 @@ function stateFrom(
   };
 }
 
+/**
+ * Na metade de subida do voo: acelerando, ou num descanso da tripulação antes do fim da subida
+ * (§4.2.9). Os descansos são inércia, mas o céu, os hologramas e o olho seguem a subida.
+ */
+export const isAscending = (profile: MissionProfile, flight: FlightState) =>
+  flight.phase === 'accelerating' || (flight.crewRest && flight.tau <= profile.burnEndTau);
+
+/** Na metade de frenagem: freando, ou num descanso da tripulação depois do início da frenagem. */
+export const isDescending = (profile: MissionProfile, flight: FlightState) =>
+  flight.phase === 'decelerating' || (flight.crewRest && flight.tau >= profile.brakeStartTau);
+
 /** Os segmentos do plano: os do plano com descansos, ou acelerar, cruzar (se houver) e frear até o alvo. */
 export function planSegments(plan: MissionProfile): FlightSegment[] {
   if (plan.segments) return [...plan.segments];
   const at = (kind: SegmentKind, startTau: number, duration: number, accel: number, extra: Partial<FlightSegment> = {}): FlightSegment => {
     const s = computeFlightState(plan, startTau);
-    return { kind, startTau, duration, accel, eta0: s.eta, remaining0: s.restDistanceRemainingM, earth0: s.earthTimeS, ...extra };
+    return {
+      kind,
+      startTau,
+      duration,
+      accel,
+      eta0: s.eta,
+      remaining0: s.restDistanceRemainingM,
+      earth0: s.earthTimeS,
+      radio0: s.earthRadioTimeS,
+      ...extra,
+    };
   };
   const a = plan.properAccel;
   const segments = [at('thrust', 0, plan.burnEndTau, a)];
@@ -500,6 +558,7 @@ function segmentedState(profile: MissionProfile, segments: readonly FlightSegmen
     eta,
     profile.distanceM - remainingM,
     st.earthTimeS,
+    st.radioTimeS,
     ended && end === 'arrival' ? 0 : remainingM,
     engine,
     engine === 'off' ? 0 : Math.abs(st.accel),
@@ -523,6 +582,9 @@ export function computeFlightState(profile: MissionProfile, tau: number): Flight
   let positionM: number;
   let restDistanceRemainingM: number;
   let earthTimeS: number;
+  // Rádio da Terra: ∫ e^(−η) dτ, (c/α)(1 − e^(−η)) em cada queima e e^(−η_c)·Δτ na inércia.
+  const burnRadioTo = (eta: number) => -cOverA * Math.expm1(-eta);
+  let earthRadioTimeS: number;
 
   if (t <= burnEndTau) {
     // Fase 1 — aceleração
@@ -530,6 +592,7 @@ export function computeFlightState(profile: MissionProfile, tau: number): Flight
     positionM = c2OverA * coshm1(eta);
     restDistanceRemainingM = distanceM - positionM;
     earthTimeS = cOverA * Math.sinh(eta);
+    earthRadioTimeS = burnRadioTo(eta);
   } else if (t < brakeStartTau) {
     // Inércia (só no perfil com cruzeiro): rapidez constante η_c
     eta = profile.etaMax;
@@ -537,6 +600,7 @@ export function computeFlightState(profile: MissionProfile, tau: number): Flight
     positionM = c2OverA * coshm1(eta) + C * Math.sinh(eta) * dt;
     restDistanceRemainingM = distanceM - positionM;
     earthTimeS = cOverA * Math.sinh(eta) + Math.cosh(eta) * dt;
+    earthRadioTimeS = burnRadioTo(eta) + Math.exp(-eta) * dt;
   } else {
     // Fase 2 — frenagem: tudo em função do tempo próprio restante. A distância
     // restante sai direto da fórmula, não de D − x, para não perder precisão
@@ -546,12 +610,26 @@ export function computeFlightState(profile: MissionProfile, tau: number): Flight
     restDistanceRemainingM = c2OverA * coshm1(eta);
     positionM = distanceM - restDistanceRemainingM;
     earthTimeS = tTotal - cOverA * Math.sinh(eta);
+    // O total (subida, cruzeiro e frenagem) menos o que falta da frenagem: t_total − D/c na chegada.
+    const etaPeak = burnEndTau / cOverA;
+    const radioTotal = 2 * burnRadioTo(etaPeak) + Math.exp(-etaPeak) * (brakeStartTau - burnEndTau);
+    earthRadioTimeS = radioTotal - burnRadioTo(eta);
   }
 
   const phase: FlightPhase =
     t <= burnEndTau ? 'accelerating' : t < brakeStartTau ? 'coasting' : t < tauTotal ? 'decelerating' : 'arrived';
   const thrusting = phase === 'accelerating' || phase === 'decelerating';
-  return stateFrom(t, phase, eta, positionM, earthTimeS, restDistanceRemainingM, thrusting ? 'thrust' : 'off', thrusting ? properAccel : 0);
+  return stateFrom(
+    t,
+    phase,
+    eta,
+    positionM,
+    earthTimeS,
+    earthRadioTimeS,
+    restDistanceRemainingM,
+    thrusting ? 'thrust' : 'off',
+    thrusting ? properAccel : 0,
+  );
 }
 
 /** η a partir de log₁₀γ, sem perder precisão perto de γ = 1 (slider logarítmico). */

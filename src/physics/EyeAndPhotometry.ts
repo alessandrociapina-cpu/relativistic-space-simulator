@@ -10,6 +10,8 @@
 import {
   T_CMB_0,
   ascentTauAt,
+  isAscending,
+  isDescending,
   computeFlightState,
   computeShaderKinematics,
   type FlightState,
@@ -169,6 +171,12 @@ export function computeEyeTimeline(profile: MissionProfile): EyeTimeline {
     pupilMm[i] = relax(q, p, dt, p < q ? EYE.pupilConstrictionS : EYE.pupilDilationS);
   }
 
+  // Em viagens longas com aceleração alta, a passagem por γ ≈ 6 955 dura menos que um passo da grade e o
+  // pico universal escaparia das amostras: se o voo passa por ele, o pico registrado é o da física.
+  if (profile.etaMax >= peakCmbLuxRapidity() && peakCmbLux() > lux[peakIndex]!) {
+    const peakTau = ascentTauAt(profile, peakCmbLuxRapidity(), profile.tauTotal) ?? peakIndex * dt;
+    return { dt, lux, pupilMm, stops, peakLux: peakCmbLux(), peakLuxTau: peakTau };
+  }
   return { dt, lux, pupilMm, stops, peakLux: lux[peakIndex]!, peakLuxTau: peakIndex * dt };
 }
 
@@ -272,7 +280,8 @@ export function computePhotometryAndEyeState(
   // um comando do piloto a simetria acaba (a frenagem de emergência usa a > α): vale o primeiro instante
   // da subida com a mesma rapidez, se ele existiu.
   const mirrorTau = profile.maneuvers ? ascentTauAt(profile, flight.eta, flight.tau) : profile.tauTotal - flight.tau;
-  if (flight.phase === 'decelerating' && mirrorTau !== null && mirrorTau < flight.tau) {
+  // Nos descansos da frenagem (§4.2.9) a mesma luz da ida continua valendo.
+  if (isDescending(profile, flight) && mirrorTau !== null && mirrorTau < flight.tau) {
     whiteoutTau = mirrorTau;
     const mirrorStops = sample(timeline.stops, timeline, whiteoutTau);
     whiteoutPupilMm = sample(timeline.pupilMm, timeline, whiteoutTau);
@@ -300,7 +309,7 @@ export function computePhotometryAndEyeState(
     glareColor: blackbodyLinearRgb(cmbTempAheadK),
     isEyeHazard:
       lux > EYE_HAZARD_LUX ||
-      (flight.phase === 'accelerating' && flight.gamma >= EYE_HAZARD_GAMMA.min && flight.gamma <= EYE_HAZARD_GAMMA.max),
+      (isAscending(profile, flight) && flight.gamma >= EYE_HAZARD_GAMMA.min && flight.gamma <= EYE_HAZARD_GAMMA.max),
     isWhiteoutHudActive: glareIntensity * eyeSensitivity > WHITEOUT_HUD_THRESHOLD,
     recommendedTelescopeZoom: recommendedTelescopeZoom(flight.eta, targetRadiusRestRad),
   };

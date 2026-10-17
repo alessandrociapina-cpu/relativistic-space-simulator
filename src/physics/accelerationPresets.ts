@@ -178,11 +178,16 @@ export const presetsFor = (crew: CrewKind) => ACCELERATION_PRESETS.filter((p) =>
 export const findPreset = (crew: CrewKind, accelG: number) =>
   ACCELERATION_PRESETS.find((p) => p.crew === crew && p.accelG === accelG);
 
-/** Faixas de tolerância para uma aceleração qualquer (a melhor proteção disponível em cada faixa). */
+/**
+ * Faixas de tolerância para uma aceleração qualquer, as mesmas dos presets (a proteção de cada um vale
+ * até o meio do caminho para o seguinte): 5,9 g e 6,1 g aguentam o mesmo que o preset de 6 g.
+ */
 const CREW_BANDS: readonly { maxG: number; enduranceS: number; text: string; protection: string }[] = [
   { maxG: 1.2, enduranceS: Infinity, text: 'suportável por anos', protection: 'nenhuma' },
   { maxG: 1.5, enduranceS: 21 * DAY, text: 'suportável por dias a semanas', protection: 'nenhuma' },
-  { maxG: 10, enduranceS: 3 * DAY, text: 'suportável por até ~3 dias', protection: 'imersão em líquido' },
+  { maxG: 3.5, enduranceS: 4 * HOUR, text: 'suportável por algumas horas', protection: 'assento reclinado contra o empuxo' },
+  { maxG: 6.5, enduranceS: 10 * MINUTE, text: 'suportável por ~10 min', protection: 'traje anti-G' },
+  { maxG: 12, enduranceS: 3 * DAY, text: 'suportável por até ~3 dias', protection: 'imersão em líquido' },
   { maxG: 50, enduranceS: 3 * HOUR, text: 'suportável por minutos a horas', protection: 'imersão e ventilação líquida' },
 ];
 const ROBOT_BANDS: readonly { maxG: number; protection: string }[] = [
