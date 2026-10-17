@@ -478,10 +478,40 @@ function SciFiMenu({
 
 type PlannerView = 'plan' | 'scifi';
 
-const tabClass = (active: boolean) =>
-  `font-display -mb-px border-b-2 px-3 py-2 text-[11px] tracking-[0.2em] uppercase transition-colors ${
-    active ? 'border-cyan-300 text-cyan-100' : 'border-transparent text-slate-400 hover:text-slate-200'
+const tabBase = 'flex min-w-0 flex-col items-start gap-0.5 rounded-lg border px-3 py-2 text-left transition-colors sm:px-4';
+
+const planTabClass = (active: boolean) =>
+  `${tabBase} ${
+    active
+      ? 'border-cyan-300/80 bg-cyan-400/15 text-cyan-50 shadow-[0_0_18px_rgba(34,211,238,0.2)]'
+      : 'border-slate-700 bg-slate-900/60 text-slate-300 hover:border-slate-500 hover:text-white'
   }`;
+
+/** A aba da ficção sempre em destaque (violeta, fora do ciano do resto); `beckon` pulsa até a primeira visita. */
+const sciFiTabClass = (active: boolean, beckon: boolean) =>
+  `${tabBase} ${
+    active
+      ? 'border-violet-300 bg-violet-500/25 text-violet-50 shadow-[0_0_24px_rgba(167,139,250,0.45)]'
+      : 'border-violet-300/70 bg-violet-500/15 text-violet-100 shadow-[0_0_16px_rgba(167,139,250,0.3)] hover:bg-violet-500/25'
+  } ${beckon ? 'animate-halo' : ''}`;
+
+const SCIFI_SEEN_KEY = 'relsim:scifi-seen';
+
+function loadSciFiSeen(): boolean {
+  try {
+    return localStorage.getItem(SCIFI_SEEN_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function saveSciFiSeen(): void {
+  try {
+    localStorage.setItem(SCIFI_SEEN_KEY, '1');
+  } catch {
+    // sem armazenamento: a aba volta a pulsar na próxima visita
+  }
+}
 
 const pickChoice = ({ destination, accelG, coastEta, crew, restRatio }: MissionChoice): MissionChoice => ({
   destination,
@@ -523,6 +553,7 @@ function Planner() {
   const [customOpen, setCustomOpen] = useState(!presetActive);
   const update = (patch: Partial<MissionChoice>) => setDraft((d) => ({ ...d, ...patch }));
   const [view, setView] = useState<PlannerView>('plan');
+  const [sciFiSeen, setSciFiSeen] = useState(loadSciFiSeen);
   const dialogRef = useRef<HTMLDivElement>(null);
   const activeSciFi =
     findSciFiMission({
@@ -548,6 +579,10 @@ function Planner() {
   const showView = (next: PlannerView) => {
     setView(next);
     dialogRef.current?.scrollTo({ top: 0 });
+    if (next === 'scifi' && !sciFiSeen) {
+      setSciFiSeen(true);
+      saveSciFiSeen();
+    }
   };
 
   const applySciFi = (m: SciFiMission) => {
@@ -599,19 +634,30 @@ function Planner() {
           </div>
         </header>
 
-        <div role="tablist" aria-label="Planejamento ou missões da ficção" className="flex gap-1 border-b border-slate-800">
-          <button type="button" role="tab" aria-selected={view === 'plan'} className={tabClass(view === 'plan')} onClick={() => showView('plan')}>
-            ⚙ Planejar
+        <div role="tablist" aria-label="Planejamento ou missões da ficção" className="grid grid-cols-[2fr_3fr] gap-2 sm:flex sm:flex-wrap">
+          <button type="button" role="tab" aria-selected={view === 'plan'} className={planTabClass(view === 'plan')} onClick={() => showView('plan')}>
+            <span className="font-display text-[12px] tracking-[0.1em] uppercase sm:tracking-[0.2em]">⚙ Planejar</span>
+            <span className="text-[11px] leading-snug opacity-75">Destino, nave, aceleração e perfil</span>
           </button>
           <button
             type="button"
             role="tab"
             aria-selected={view === 'scifi'}
-            className={tabClass(view === 'scifi')}
+            className={sciFiTabClass(view === 'scifi', !sciFiSeen && view !== 'scifi')}
             onClick={() => showView('scifi')}
           >
-            📚 <span className="sm:hidden">Ficção hard</span>
-            <span className="hidden sm:inline">Ficção científica hard</span>
+            <span className="font-display flex items-center gap-2 text-[12px] tracking-[0.1em] uppercase sm:tracking-[0.2em]">
+              <span>
+                📚 <span className="sm:hidden">Ficção hard</span>
+                <span className="hidden sm:inline">Ficção científica hard</span>
+              </span>
+              <span className="rounded-full bg-violet-300 px-1.5 text-[10px] font-bold tracking-normal text-violet-950">
+                {SCIFI_MISSIONS.length}
+              </span>
+            </span>
+            <span className="text-[11px] leading-snug opacity-80">
+              Avatar, Tau Zero, The Expanse e mais<span className="hidden sm:inline">, em um clique</span>
+            </span>
           </button>
         </div>
 

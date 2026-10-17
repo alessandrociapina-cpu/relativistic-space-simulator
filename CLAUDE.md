@@ -685,7 +685,7 @@ relativistic-space-simulator/
 ---
 ## 7. Regras de UX e Controles de Voo
 1. **Telas:** a abertura (`#inicio`, ou sem âncora) escolhe entre a viagem relativística (`#viagem`) e as sondas (`#sondas`, §11). O cockpit carrega sob demanda; ao entrar, abre o **planejamento da missão** por cima dele.
-2. **Planejamento** (`MissionPlanner.tsx`), em duas abas: "⚙ Planejar", em três colunas (empilhadas no celular, com o embarque fixo no rodapé), e "📚 Ficção científica hard" (o último tópico abaixo):
+2. **Planejamento** (`MissionPlanner.tsx`), em duas abas: "⚙ Planejar", em três colunas (empilhadas no celular, com o embarque fixo no rodapé), e "📚 Ficção científica hard" (o último tópico abaixo). As abas são dois botões com subtítulo; o da ficção fica sempre em destaque, em violeta (fora do ciano do resto), com o número de missões e "Avatar, Tau Zero, The Expanse e mais", e um halo pulsa em volta dele até a primeira visita (`relsim:scifi-seen` no `localStorage`; sem armazenamento, volta a pulsar na próxima vez; parado com `prefers-reduced-motion`). No celular, a aba da ficção fica com 3/5 da largura:
    - **Destino:** os cinco da §4.3, com distância, tipo e uma linha de descrição.
    - **Nave:** "Piloto humano" (o para-brisa passa pelo olho do piloto, §9) ou "Sonda robótica" (câmeras de bordo, sem olho nem véu).
    - **Aceleração** (`src/physics/accelerationPresets.ts`), por tipo de nave, cada uma com a proteção, a tolerância e o tempo de viagem para o destino escolhido:
