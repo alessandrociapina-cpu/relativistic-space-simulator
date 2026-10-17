@@ -25,6 +25,7 @@ uniform float uSunRadiusRad;
 uniform float uSunPointAmp;      // o Sol como estrela pontual, quando o disco fica menor que um pixel
 uniform vec3  uTargetDir;
 uniform float uTargetRadiusRad;
+uniform float uEinsteinRadiusRad; // raio de Einstein físico do buraco negro, 2√(GM/(c²D)); 0 nos outros alvos
 uniform float uTargetTemp;
 uniform int   uTargetType;       // 0 = estrela, 1 = buraco negro (Sgr A*), 2 = galáxia (Andrômeda)
 uniform float uTargetPointAmp;   // o alvo como estrela pontual, antes de virar disco
@@ -387,19 +388,19 @@ vec3 renderBackgroundStars(RelativisticRay ray, float glowRel) {
 }
 
 // Lente gravitacional de Sagittarius A*: o fundo (estrelas e Via Láctea) visto fora da sombra vem da
-// direção β = θ − θE²/θ, no plano que contém o raio e o alvo (lente de ponto-massa; β < 0 é a imagem
-// do outro lado). Perto de θE o céu de trás do buraco negro se espalha num anel de Einstein.
-// θE = 1,45 × o raio da sombra (o anel de fótons fica em ~1,05). A lente conserva o brilho superficial.
+// direção β = θ − θE²/θ, no plano que contém o raio e o alvo (lente de ponto-massa, campo fraco; β < 0
+// é a imagem do outro lado). θE = 2√(GM/(c²D)) é o raio de Einstein físico, calculado na CPU pela
+// distância: de longe, o anel fica muito maior que a sombra. Na borda da sombra o desvio θE²/θ chega a
+// 4/(3√3) ≈ 0,77 rad em qualquer distância. A lente conserva o brilho superficial.
 vec3 lensedSourceDir(vec3 sourceDir) {
-    if (uTargetType != 1 || uTargetRadiusRad <= 1e-5) return sourceDir;
+    if (uTargetType != 1 || uEinsteinRadiusRad <= 0.0) return sourceDir;
     float theta = angleBetween(sourceDir, uTargetDir);
     if (theta <= uTargetRadiusRad) return sourceDir;
     // Com o alvo em −Z, a componente perpendicular é só (x, y): sem cancelamento em float32.
     vec3 perp = sourceDir - dot(sourceDir, uTargetDir) * uTargetDir;
     float perpLen = length(perp);
     if (perpLen <= 0.0) return sourceDir;
-    float thetaE = 1.45 * uTargetRadiusRad;
-    float beta = theta - thetaE * thetaE / theta;
+    float beta = theta - uEinsteinRadiusRad * uEinsteinRadiusRad / theta;
     return cos(beta) * uTargetDir + sin(beta) * (perp / perpLen);
 }
 

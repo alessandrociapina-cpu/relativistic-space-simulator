@@ -5,6 +5,12 @@ import { G0, LIGHT_YEAR_M, computeMissionProfile, type MissionProfile } from './
 
 /** Raio solar nominal IAU 2015 (m). */
 export const SOLAR_RADIUS_M = 6.957e8;
+/** GM☉/c² (m): metade do raio de Schwarzschild do Sol. */
+export const SOLAR_GRAVITATIONAL_RADIUS_M = 1.32712440018e20 / 299_792_458 ** 2;
+/** Massa de Sagittarius A* (M☉), ~4 milhões de massas solares (EHT, 2022). */
+const SGR_A_MASS_SOLAR = 4.0e6;
+/** Raio da sombra de um buraco negro de Schwarzschild, em GM/c²: o parâmetro de impacto crítico 3√3. */
+const SHADOW_RADII = 3 * Math.sqrt(3);
 /** Parsec (m). */
 export const PARSEC_M = 3.0856775814913673e16;
 
@@ -37,6 +43,8 @@ export interface Destination {
   readonly blurb: string;
   /** Magnitude visual vista da Terra (estrelas): o brilho do alvo como ponto, antes de virar disco. */
   readonly visualMag?: number;
+  /** Buraco negro: GM/c² (m), que dá a sombra (3√3·GM/c²) e o raio de Einstein da lente gravitacional. */
+  readonly gravitationalRadiusM?: number;
 }
 
 export const DESTINATIONS: Readonly<Record<DestinationId, Destination>> = {
@@ -90,7 +98,9 @@ export const DESTINATIONS: Readonly<Record<DestinationId, Destination>> = {
     distanceLy: 26_700,
     // disco de acreção / aglomerado central
     temperatureK: 12_000,
-    radiusM: 15 * SOLAR_RADIUS_M,
+    // A sombra de 4 milhões de massas solares: 3√3·GM/c² ≈ 3,07 × 10¹⁰ m ≈ 44 R☉.
+    radiusM: SHADOW_RADII * SGR_A_MASS_SOLAR * SOLAR_GRAVITATIONAL_RADIUS_M,
+    gravitationalRadiusM: SGR_A_MASS_SOLAR * SOLAR_GRAVITATIONAL_RADIUS_M,
     defaultAccelG: DEFAULT_ACCEL_G,
     raDeg: 266.4168,
     decDeg: -29.0078,
