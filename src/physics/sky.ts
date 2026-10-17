@@ -23,6 +23,17 @@ export function angularRadius(radiusM: number, distanceM: number): number {
 export interface BodyAngularRadii {
   readonly sunRadiusRad: number;
   readonly targetRadiusRad: number;
+  /** Raio de Einstein da lente gravitacional do alvo (rad); 0 se o alvo não é um buraco negro. */
+  readonly einsteinRadiusRad: number;
+}
+
+/**
+ * Raio de Einstein de um buraco negro visto de `distanceM`, para fontes muito mais distantes que ele
+ * (o fundo de estrelas e a Via Láctea): θ_E = √(4GM/(c²·D)) = 2√((GM/c²)/D). Para quem está longe, o anel
+ * fica muito maior que a sombra (θ_E/θ_sombra ≈ 0,38·√(D·c²/GM)); a 8 raios da sombra, ~2,5 vezes.
+ */
+export function einsteinRadius(gravitationalRadiusM: number, distanceM: number): number {
+  return 2 * Math.sqrt(gravitationalRadiusM / distanceM);
 }
 
 /** Distância do ponto de observação final ao centro do alvo (m). */
@@ -39,8 +50,10 @@ export function targetViewDistanceM(flight: FlightState, destination: Destinatio
 }
 
 export function computeBodyAngularRadii(flight: FlightState, destination: Destination): BodyAngularRadii {
+  const targetDistanceM = targetViewDistanceM(flight, destination);
   return {
     sunRadiusRad: angularRadius(SOLAR_RADIUS_M, AU_M + flight.positionM),
-    targetRadiusRad: angularRadius(destination.radiusM, targetViewDistanceM(flight, destination)),
+    targetRadiusRad: angularRadius(destination.radiusM, targetDistanceM),
+    einsteinRadiusRad: destination.gravitationalRadiusM ? einsteinRadius(destination.gravitationalRadiusM, targetDistanceM) : 0,
   };
 }

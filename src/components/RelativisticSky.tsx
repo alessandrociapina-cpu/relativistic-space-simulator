@@ -61,6 +61,7 @@ function createSkyMaterial() {
     uSunRadiusRad: { value: 0 },
     uTargetDir: { value: FORWARD },
     uTargetRadiusRad: { value: 0 },
+    uEinsteinRadiusRad: { value: 0 },
     uTargetTemp: { value: 0 },
     uTargetType: { value: 0 },
     uTargetPointAmp: { value: 0 },
@@ -140,6 +141,7 @@ export function RelativisticSky({
     u.uTime.value = clock.elapsedTime;
     u.uSunRadiusRad.value = bodies.sunRadiusRad;
     u.uTargetRadiusRad.value = bodies.targetRadiusRad;
+    u.uEinsteinRadiusRad.value = bodies.einsteinRadiusRad;
     u.uTargetTemp.value = destination.temperatureK;
     u.uTargetType.value = TARGET_TYPE[destination.kind];
     u.uTargetPointAmp.value = sky.targetPointAmp;

@@ -87,7 +87,7 @@ Dado um destino a distância em repouso $D_{\text{total}}$ (metros) e aceleraç�
 | `proxima` | Proxima Centauri | $4.25\text{ ly}$ | $3042\text{ K}$ | $0.154\,R_\odot$ | 217,43°, −62,68° | 11,13 | $1.61 \times 10^6\text{ G}$ (10 min de bordo) |
 | `sirius` | Sirius A | $8.60\text{ ly}$ | $9940\text{ K}$ | $1.711\,R_\odot$ | 101,29°, −16,72° | −1,46 | $1.61 \times 10^6\text{ G}$ |
 | `trappist1` | TRAPPIST-1 | $39.6\text{ ly}$ | $2566\text{ K}$ | $0.119\,R_\odot$ | 346,62°, −5,04° | 18,8 | $1.61 \times 10^6\text{ G}$ |
-| `sgrA` | Centro Galáctico (Sagittarius A*) | $26700\text{ ly}$ | $12000\text{ K}$ (disco/aglomerado) | $15.0\,R_\odot$ (sombra) | 266,42°, −29,01° | — | $1.61 \times 10^6\text{ G}$ (~15.5 min de bordo) |
+| `sgrA` | Centro Galáctico (Sagittarius A*) | $26700\text{ ly}$ | $12000\text{ K}$ (disco/aglomerado) | $44\,R_\odot$ (sombra: $3\sqrt{3}\,GM/c^2$ de $4 \times 10^6\,M_\odot$) | 266,42°, −29,01° | — | $1.61 \times 10^6\text{ G}$ (~15.5 min de bordo) |
 | `andromeda` | Galáxia de Andrômeda (M31) | $2.537 \times 10^6\text{ ly}$ | $5800\text{ K}$ (núcleo integrado) | $10\text{ kpc}$ (disco: ~3° de céu da Terra) | 10,68°, +41,27° | — | $1.61 \times 10^6\text{ G}$ (~18.4 min de bordo) |
 
 A direção orienta o céu real (§12); a magnitude V desenha o alvo estelar como estrela pontual enquanto o disco é menor que um pixel. Cada destino tem uma linha de descrição (`blurb`) para o planejamento.
@@ -124,6 +124,7 @@ uniform float uSunRadiusRad;
 uniform float uSunPointAmp;      // o Sol como estrela pontual, quando o disco fica menor que um pixel
 uniform vec3  uTargetDir;
 uniform float uTargetRadiusRad;
+uniform float uEinsteinRadiusRad; // raio de Einstein físico do buraco negro, 2√(GM/(c²D)); 0 nos outros alvos
 uniform float uTargetTemp;
 uniform int   uTargetType;       // 0 = estrela, 1 = buraco negro (Sgr A*), 2 = galáxia (Andrômeda)
 uniform float uTargetPointAmp;   // o alvo como estrela pontual, antes de virar disco
@@ -486,19 +487,19 @@ vec3 renderBackgroundStars(RelativisticRay ray, float glowRel) {
 }
 
 // Lente gravitacional de Sagittarius A*: o fundo (estrelas e Via Láctea) visto fora da sombra vem da
-// direção β = θ − θE²/θ, no plano que contém o raio e o alvo (lente de ponto-massa; β < 0 é a imagem
-// do outro lado). Perto de θE o céu de trás do buraco negro se espalha num anel de Einstein.
-// θE = 1,45 × o raio da sombra (o anel de fótons fica em ~1,05). A lente conserva o brilho superficial.
+// direção β = θ − θE²/θ, no plano que contém o raio e o alvo (lente de ponto-massa, campo fraco; β < 0
+// é a imagem do outro lado). θE = 2√(GM/(c²D)) é o raio de Einstein físico, calculado na CPU pela
+// distância: de longe, o anel fica muito maior que a sombra. Na borda da sombra o desvio θE²/θ chega a
+// 4/(3√3) ≈ 0,77 rad em qualquer distância. A lente conserva o brilho superficial.
 vec3 lensedSourceDir(vec3 sourceDir) {
-    if (uTargetType != 1 || uTargetRadiusRad <= 1e-5) return sourceDir;
+    if (uTargetType != 1 || uEinsteinRadiusRad <= 0.0) return sourceDir;
     float theta = angleBetween(sourceDir, uTargetDir);
     if (theta <= uTargetRadiusRad) return sourceDir;
     // Com o alvo em −Z, a componente perpendicular é só (x, y): sem cancelamento em float32.
     vec3 perp = sourceDir - dot(sourceDir, uTargetDir) * uTargetDir;
     float perpLen = length(perp);
     if (perpLen <= 0.0) return sourceDir;
-    float thetaE = 1.45 * uTargetRadiusRad;
-    float beta = theta - thetaE * thetaE / theta;
+    float beta = theta - uEinsteinRadiusRad * uEinsteinRadiusRad / theta;
     return cos(beta) * uTargetDir + sin(beta) * (perp / perpLen);
 }
 
@@ -575,7 +576,7 @@ void main() {
 - **`smoothstep`** sempre com os limites em ordem crescente, e **`pow` nunca com base negativa** (indefinidos em GLSL): o anel de fótons e os arcos de lensing usam $x \cdot x$.
 - **Alvos:** estrela (`uTargetType = 0`) com escurecimento de bordo $I(\mu) = 1 - 0{,}68(1 - \mu^{0,75})$, granulação FBM 3D animada por `uTime` (relógio real), manchas, coroa e spikes de difração (que somem quando o disco passa de ~0,05 rad); as projeções no disco usam sen(raio), exatas também a 3 raios. Enquanto o disco é menor que um pixel, o alvo estelar aparece como estrela pontual de brilho `uTargetPointAmp` (pela magnitude V); o Sol também (`uSunPointAmp`, V = −26,74 a 1 UA). Sagittarius A* (`1`) com sombra, anel de fótons, disco inclinado com lensing e beaming rotacional; Andrômeda (`2`) com bojo e braços espirais logarítmicos e brilho superficial na escala da Via Láctea (`uGalaxyGain`). O disco estelar e a sombra do buraco negro são opacos (`coverage`) e escondem as estrelas atrás. O escurecimento de bordo vem só da lei $I(\mu)$ (a temperatura não cai no bordo, o que escureceria duas vezes). A estrela-alvo segue o Sol: o disco não é diluído pela PSF e o ponto leva `psfDilution` uma vez só, no beaming, como as estrelas do catálogo; o buraco negro e a galáxia são multiplicados por `psfDilution`.
 - **Estrela-alvo grande no para-brisa** (`resolvedTargetGain`): sem autoexposição, uma anã vermelha que ocupa meia tela ficaria escura; entre 0,6° e 2,9° de raio aparente, `uTargetGain` leva a superfície ao nível da autoexposição (só clareia), e o fundo perde brilho (`uBackgroundGain` = ganho^−0,3). Nos instrumentos com autoexposição, o fundo cai com (exposição padrão/exposição)^0,75 quando a exposição sobe por causa do alvo.
-- **Lente gravitacional de Sagittarius A\*** (`lensedSourceDir`, com `uTargetType == 1` e raio da sombra > $10^{-5}$ rad): fora da sombra, o fundo (Via Láctea, estrelas do catálogo e de fundo) vem da direção $\beta = \theta - \theta_E^2/\theta$ no plano que contém o raio e o alvo (lente de ponto-massa; $\beta < 0$ é a imagem do outro lado), com $\theta_E = 1{,}45 \times$ o raio da sombra (o anel de fótons fica em ~1,05). Perto de $\theta_E$ o céu de trás do buraco negro se espalha num anel de Einstein. Com o alvo em −Z, a componente perpendicular é só $(x, y)$, sem cancelamento em float32. A lente conserva o brilho superficial (o difuso não muda de brilho; as estrelas viram arcos). O Sol e a CMB não passam por ela.
+- **Lente gravitacional de Sagittarius A\*** (`lensedSourceDir`, com `uTargetType == 1`): fora da sombra, o fundo (Via Láctea, estrelas do catálogo e de fundo) vem da direção $\beta = \theta - \theta_E^2/\theta$ no plano que contém o raio e o alvo (lente de ponto-massa em campo fraco; $\beta < 0$ é a imagem do outro lado). O raio de Einstein é o físico, calculado na CPU pela distância $D$ da nave ao buraco negro (`einsteinRadius` em `sky.ts`, uniform `uEinsteinRadiusRad`): $\theta_E = \sqrt{4GM/(c^2 D)} = 2\sqrt{(GM/c^2)/D}$, com $GM/c^2$ de $4 \times 10^6\,M_\odot$ (`gravitationalRadiusM`; a mesma massa dá a sombra, $3\sqrt{3}\,GM/c^2 \approx 44\,R_\odot$). De longe o anel fica muito maior que a sombra, $\theta_E/\theta_{\text{sombra}} \approx 0{,}38\sqrt{Dc^2/GM}$ (~2,5 na chegada, a 8 raios da sombra; ~490 a 1 ano-luz, com $\theta_E \approx 0{,}09°$); na borda da sombra o desvio $\theta_E^2/\theta$ chega a $4/(3\sqrt{3}) \approx 0{,}77$ rad em qualquer distância. Perto do anel de fótons o campo fraco subestima o desvio (que diverge na esfera de fótons); ali o anel de fótons e o disco de acreção cobrem o céu. Perto de $\theta_E$ o céu de trás do buraco negro se espalha num anel de Einstein. Com o alvo em −Z, a componente perpendicular é só $(x, y)$, sem cancelamento em float32. A lente conserva o brilho superficial (o difuso não muda de brilho; as estrelas viram arcos). O Sol e a CMB não passam por ela.
 - **Céu real** (§12): `renderCatalogStar` lê a célula do cubo (`uStarCells`) e calcula direção e brilho da estrela pela posição atual da nave (`uShipOffset`); a Via Láctea (`milkyWaySample`) gira a direção de origem para o referencial galáctico (`uShipToGalactic`) e mistura os dois mapas mais próximos da nave; `renderBackgroundStars` desenha a população local (só onde `uStarDensity` > 1) e o pó de estrelas fracas da faixa. O brilho difuso tem um joelho (satura devagar acima de 0,25 depois da exposição), para o centro galáctico desviado para o azul não virar uma parede branca.
 - **Olho e véu, só no para-brisa e só com piloto humano** (`pilotEye`): `uEyeSensitivity` $= 2^{-0,1 R}$ e `uGlareIntensity` $= 5{,}5\,(E/E_{\text{pico}})^{0,75}\,2^{-0,4 R}$, com $R$ a dessensibilização da retina em stops (§9). O véu final cai com $2^{-0,5 R}$: estoura o para-brisa no white-out da ida e vira névoa fraca com a mesma luz na frenagem. `uGlareColor` é a cor linear do corpo negro de $T_0 e^{\eta}$, calculada na CPU com luminância 1. Os instrumentos e a sonda robótica (câmera de bordo) recebem 1 e 0: na sonda, o cone quente da CMB é um ponto ofuscante, sem véu.
 - **Autoexposição do telescópio voltado para a frente** (`src/physics/sensorResponse.ts`): mede pelo pico da CMB diluído pela PSF ou pela superfície do alvo quando ele cobre ≥ 3 px. Voltado para trás, a exposição é fixa (o Sol some no infravermelho, como deve).
