@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { computeFlightState } from '../physics/RelativityEngine';
 import { DESTINATIONS, destinationMissionProfile } from '../physics/destinations';
+import { missionProfileFor } from '../physics/crewRest';
 import { cmbTemperatureAhead, wienPeakNm } from '../physics/EyeAndPhotometry';
 import { AU_M, arrivalDistanceM } from '../physics/sky';
 import { hologramCountdownS, selectHologramMode, type HologramMode } from './hologramMode';
@@ -88,5 +89,34 @@ describe('escala logarítmica da rota', () => {
     const oort = sunMarkerPosition(OORT_CLOUD_AU, geometry);
     expect(oort).toBeGreaterThan(0.3);
     expect(oort).toBeLessThan(0.5);
+  });
+});
+
+describe('descansos da tripulação', () => {
+  it('a curva de luz na subida e o alvo azulado na frenagem continuam nos descansos (o projetor não pisca)', () => {
+    const plan = missionProfileFor(DESTINATIONS.andromeda, 10, null, 'crewed');
+    const modeIn = (tau: number) => {
+      const flight = computeFlightState(plan, tau);
+      const cmbTempK = cmbTemperatureAhead(flight.eta);
+      return {
+        flight,
+        mode: selectHologramMode({ flight, profile: plan, sunDistanceAu: (AU_M + flight.positionM) / AU_M, cmbTempK, cmbPeakNm: wienPeakNm(cmbTempK) }),
+      };
+    };
+    const seen = { lux: false, blue: false };
+    for (let i = 1; i < 6000; i++) {
+      const { flight, mode } = modeIn((i / 6000) * plan.tauTotal);
+      if (!flight.crewRest) continue;
+      const tK = cmbTemperatureAhead(flight.eta);
+      if (flight.tau < plan.burnEndTau && tK > 16_000 && tK < 170_000 && wienPeakNm(tK) < 250) {
+        expect(mode).toBe('lux-curve');
+        seen.lux = true;
+      }
+      if (flight.tau > plan.brakeStartTau && flight.gamma > 9 && flight.gamma < 200 && plan.tauTotal - flight.tau > hologramCountdownS(plan)) {
+        expect(mode).toBe('target-blueshift');
+        seen.blue = true;
+      }
+    }
+    expect(seen).toEqual({ lux: true, blue: true });
   });
 });

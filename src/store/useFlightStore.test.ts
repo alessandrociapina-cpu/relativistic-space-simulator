@@ -116,7 +116,7 @@ describe('contagem regressiva e marcos (alertas sonoros)', () => {
     store().seek(store().profile.tauHalf - 3.5);
     store().togglePlay();
     const events = captureEvents(() => run(0.1, 40));
-    expect(events.filter((e) => e.type === 'countdown' || e.kind === 'flip')).toEqual([
+    expect(events.filter((e) => e.type === 'countdown' || (e.type === 'milestone' && e.kind === 'flip'))).toEqual([
       { type: 'countdown', target: 'flip', secondsLeft: 3 },
       { type: 'countdown', target: 'flip', secondsLeft: 2 },
       { type: 'countdown', target: 'flip', secondsLeft: 1 },
@@ -142,7 +142,7 @@ describe('contagem regressiva e marcos (alertas sonoros)', () => {
     let expectedTarget: string | null = null;
     for (const e of [...events].reverse()) {
       if (e.type === 'milestone') expectedTarget = e.kind;
-      else expect(e.target).toBe(expectedTarget);
+      else if (e.type === 'countdown') expect(e.target).toBe(expectedTarget);
     }
   });
 
@@ -334,5 +334,24 @@ describe('modos e missão', () => {
     expect(store().tau).toBe(0);
     store().seek(1e9);
     expect(store().tau).toBe(store().profile.tauTotal);
+  });
+});
+
+describe('descansos da tripulação no loop', () => {
+  it('a 10 g, o aviso de cabine toca no começo e no fim do primeiro descanso (a 1 dia/s)', () => {
+    const DAY = 86_400;
+    store().configureMission({ destination: store().destination, accelG: 10, coastEta: null, crew: 'crewed', restRatio: 3 });
+    const rest = store().profile.crewRest!;
+    expect(store().crewStatus?.condition).toBe('ready');
+    store().setAutoStepDown(false);
+    store().seek(rest.burnTau - 0.5 * DAY);
+    store().togglePlay();
+    store().setTimeScale(DAY);
+    const events = captureEvents(() => run(0.1, 100)); // 10 dias de bordo: passa do fim do descanso de 8,1 dias
+    expect(events.filter((e) => e.type === 'crew-rest')).toEqual([
+      { type: 'crew-rest', resting: true },
+      { type: 'crew-rest', resting: false },
+    ]);
+    expect(store().crewStatus?.condition).toBe('thrust');
   });
 });

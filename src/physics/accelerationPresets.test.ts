@@ -33,9 +33,26 @@ describe('acelerações por tipo de nave', () => {
     expect(fast.burnS / 86_400).toBeGreaterThan(100);
   });
 
+  it('a aceleração personalizada aguenta o mesmo que o preset vizinho (3 g, 6 g, 10 g, 30 g)', () => {
+    for (const preset of presetsFor('crewed').filter((p) => !p.hypothetical && p.accelG > 1.5)) {
+      for (const g of [preset.accelG * 0.97, preset.accelG * 1.03]) {
+        expect(enduranceFor('crewed', g).enduranceS).toBe(preset.enduranceS);
+      }
+    }
+    // Dentro de cada faixa a tolerância não cresce com a aceleração: só muda de faixa para faixa (de proteção).
+    const sweep = [1, 1.3, 2, 3, 3.4, 3.6, 5, 6, 6.4, 6.6, 9, 10, 11.9, 12.1, 30, 49];
+    for (let i = 1; i < sweep.length; i++) {
+      const [a, b] = [enduranceFor('crewed', sweep[i - 1]!), enduranceFor('crewed', sweep[i]!)];
+      if (a.protection === b.protection) expect(b.enduranceS).toBeLessThanOrEqual(a.enduranceS);
+    }
+    expect(enduranceFor('crewed', 3.4).protection).toBe('assento reclinado contra o empuxo');
+    expect(enduranceFor('crewed', 6.4).protection).toBe('traje anti-G');
+    expect(enduranceFor('crewed', 11).protection).toBe('imersão em líquido');
+  });
+
   it('as tolerâncias são frases completas, sem "aguenta" solto', () => {
     for (const p of ACCELERATION_PRESETS) expect(p.enduranceText).toMatch(/^(suportável por|suporta|nenhum)/);
-    expect(enduranceFor('crewed', 4).text).toBe('suportável por até ~3 dias');
+    expect(enduranceFor('crewed', 8).text).toBe('suportável por até ~3 dias');
     expect(enduranceFor('robotic', 500).text).toBe('suporta empuxo contínuo');
   });
 

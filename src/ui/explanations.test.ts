@@ -70,6 +70,7 @@ describe('cronologia dos cartões na missão para Proxima', () => {
       'doppler',
       'time-dilation',
       'length-contraction',
+      'ism-radiation',
       'solar-system',
       'cmb-visible',
       'illuminance',
@@ -177,6 +178,24 @@ describe('textos e fórmulas com os valores do instante', () => {
     const flip = explainEffect('flip', proximaAt(tauHalf - 5));
     expect(flip.details.join(' ')).toContain('18,99 s-luz');
     expect(flip.formulas.at(-1)!.tex).toContain('13{,}2');
+  });
+
+  it('meio interestelar: prótons de ~3 PeV e ~10¹⁷ W/m² no meio do caminho; ~8,4 GeV e ~4 MW/m² em γ = 10', () => {
+    const mid = explainEffect('ism-radiation', proximaAt(tauHalf));
+    expect(mid.summary).toMatch(/3,31 PeV/);
+    expect(mid.formulas[1]!.tex).toMatch(/10\^\{17\}/);
+    const tau10 = (Math.acosh(10) * 299_792_458) / destinationMissionProfile(proxima).properAccel;
+    const at10 = explainEffect('ism-radiation', proximaAt(tau10));
+    expect(at10.summary).toMatch(/8,44 GeV/);
+    expect(at10.summary).toMatch(/4,04 × 10⁶ W/); // β = 0,995
+    expect(activeEffects(proximaAt(tau10 - 0.01))).not.toContain('ism-radiation');
+    expect(activeEffects(proximaAt(tau10 + 0.01))).toContain('ism-radiation');
+  });
+
+  it('dilatação do tempo: o rádio da Terra chega de ~19 s depois da partida no meio do caminho', () => {
+    const mid = explainEffect('time-dilation', proximaAt(tauHalf));
+    expect(mid.details.join(' ')).toMatch(/partiu 19,0 s depois da partida/);
+    expect(mid.formulas.some((f) => f.tex.includes('t_{\\text{rádio}}'))).toBe(true);
   });
 
   it('CMB à frente: T = T₀·e^η e o pico de Wien', () => {

@@ -24,6 +24,7 @@ import { stepDownTimeScale } from './timeScales';
 import {
   COUNTDOWN_FROM_S,
   computeMilestones,
+  detectCrewRestEvent,
   detectFlightEvents,
   emitFlightEvents,
   type FlightEvent,
@@ -256,6 +257,9 @@ export const useFlightStore = create<FlightStore>()((set, get) => {
       }
       update({ tau, timeScale, playing: tau < s.profile.tauTotal });
       emitFlightEvents(detectFlightEvents(s.milestones, s.tau, tau, s.timeScale));
+      const rest = s.profile.crewRest;
+      const restChime = rest && detectCrewRestEvent(s.flight.crewRest, get().flight.crewRest, rest.burnTau + rest.restTau, s.timeScale);
+      if (restChime) emitFlightEvents([restChime]);
 
       // Efeitos que começaram neste passo: o mais próprio do instante vira o cartão.
       const fresh = newAnnouncements(activeEffects(s), activeEffects(get()), s.announcedEffects);

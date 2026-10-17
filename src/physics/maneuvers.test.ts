@@ -23,7 +23,7 @@ describe('segmentos do plano', () => {
   });
 
   it('rampa: η sobe a₀d/2c e a integral numérica bate com Simpson fino', () => {
-    const ramp: FlightSegment = { kind: 'ramp', startTau: 0, duration: 1e5, accel: 9.8, eta0: 0.5, remaining0: 1e17, earth0: 0 };
+    const ramp: FlightSegment = { kind: 'ramp', startTau: 0, duration: 1e5, accel: 9.8, eta0: 0.5, remaining0: 1e17, earth0: 0, radio0: 0 };
     const end = segmentState(ramp, ramp.duration);
     expect(end.eta).toBeCloseTo(0.5 + (9.8 * 1e5) / (2 * C), 14);
     expect(end.accel).toBe(0);

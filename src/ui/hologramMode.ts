@@ -3,7 +3,7 @@
  * cronologia do vídeo de referência, mas por critérios físicos (UA, γ, T da
  * CMB), então vale para qualquer destino e aceleração.
  */
-import { flipTauOf, type FlightState, type MissionProfile } from '../physics/RelativityEngine';
+import { flipTauOf, isAscending, isDescending, type FlightState, type MissionProfile } from '../physics/RelativityEngine';
 import { missionScaledS } from '../physics/criticalEvents';
 
 export type HologramMode =
@@ -46,8 +46,9 @@ export function selectHologramMode({ flight, profile, sunDistanceAu, cmbTempK, c
   if (toFlip > 0 && toFlip <= countdown) return 'countdown-flip';
   if (toArrival > 0 && toArrival <= countdown) return 'countdown-arrival';
 
-  const accelerating = flight.phase === 'accelerating' && flight.tau > 0;
-  const decelerating = flight.phase === 'decelerating';
+  // Os descansos da tripulação contam na metade em que acontecem: o projetor não pisca a cada ciclo.
+  const accelerating = isAscending(profile, flight) && flight.tau > 0;
+  const decelerating = isDescending(profile, flight);
   const inFlight = accelerating || decelerating || flight.phase === 'coasting';
   if (accelerating && inRange(sunDistanceAu, 5, 32)) return 'solar-system';
   if (inFlight && cmbNearVisible) return 'cmb-spectrum';

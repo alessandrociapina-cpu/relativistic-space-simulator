@@ -50,7 +50,7 @@ export interface RestCycle {
 }
 
 /** Estado no início de um trecho do voo. */
-export type SegmentStart = Pick<FlightSegment, 'startTau' | 'eta0' | 'remaining0' | 'earth0'>;
+export type SegmentStart = Pick<FlightSegment, 'startTau' | 'eta0' | 'remaining0' | 'earth0' | 'radio0'>;
 
 /**
  * O ciclo para uma tolerância contínua: queima de 90 % dela e descanso de `ratio` vezes a queima,
@@ -64,7 +64,7 @@ export function restCycleFor(enduranceS: number, ratio = DEFAULT_REST_RATIO): Re
 
 const endOf = (seg: FlightSegment): SegmentStart => {
   const e = segmentState(seg, seg.duration);
-  return { startTau: seg.startTau + seg.duration, eta0: e.eta, remaining0: e.remainingM, earth0: e.earthTimeS };
+  return { startTau: seg.startTau + seg.duration, eta0: e.eta, remaining0: e.remainingM, earth0: e.earthTimeS, radio0: e.radioTimeS };
 };
 
 /** Queimas inteiras e o resto de um empuxo total `total` em queimas de no máximo `burn`. */
@@ -204,7 +204,8 @@ export function restRoute(
 
 /** O plano com descansos a partir do plano analítico (mesma distância, aceleração e cruzeiro). */
 export function crewRestProfile(plan: MissionProfile, cycle: RestCycle, enduranceS: number): MissionProfile {
-  const route = restRoute({ startTau: 0, eta0: 0, remaining0: plan.distanceM, earth0: 0 }, plan.properAccel, cycle, plan.coastEta ?? Infinity)!;
+  const start = { startTau: 0, eta0: 0, remaining0: plan.distanceM, earth0: 0, radio0: 0 };
+  const route = restRoute(start, plan.properAccel, cycle, plan.coastEta ?? Infinity)!;
   const { segments, flipTau, cruise } = route;
   const last = segments.at(-1)!;
   const tauTotal = last.startTau + last.duration;

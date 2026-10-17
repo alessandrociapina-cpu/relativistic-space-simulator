@@ -311,3 +311,40 @@ describe('catálogo de destinos (§4.3)', () => {
     expect(effectiveCoastEta(proxima, 1, null)).toBeNull();
   });
 });
+
+describe('tempo de rádio da Terra (t − x/c = ∫ e^(−η) dτ)', () => {
+  const C_M_S = 299_792_458;
+  const proxima = DESTINATIONS.proxima;
+  /** Cresce sempre e chega a t_total − D/c na parada no alvo. */
+  function checkRadio(profile: ReturnType<typeof destinationMissionProfile>, tol: number) {
+    let prev = -1;
+    for (let i = 0; i <= 2000; i++) {
+      const s = computeFlightState(profile, (i / 2000) * profile.tauTotal);
+      expect(s.earthRadioTimeS).toBeGreaterThanOrEqual(prev);
+      expect(s.earthRadioTimeS).toBeLessThanOrEqual(s.earthTimeS);
+      prev = s.earthRadioTimeS;
+    }
+    const end = computeFlightState(profile, profile.tauTotal);
+    const expected = profile.tTotal - profile.distanceM / C_M_S;
+    expect(Math.abs(end.earthRadioTimeS - expected)).toBeLessThan(tol);
+  }
+
+  it('na demonstração: (c/α)(1 − e^(−η)) na subida, ~19 s de notícias da Terra até o meio do caminho', () => {
+    const demo = destinationMissionProfile(proxima);
+    const cOverA = C_M_S / demo.properAccel;
+    const mid = computeFlightState(demo, demo.tauHalf);
+    expect(mid.earthRadioTimeS).toBeCloseTo(cOverA * (1 - Math.exp(-demo.etaMax)), 12);
+    expect(mid.earthRadioTimeS).toBeCloseTo(19, 0);
+    // Exata também no início, onde t − x/c = τ(1 − η/2 + …) e a subtração perderia os dígitos.
+    const eta = 1e-3 / cOverA;
+    expect(computeFlightState(demo, 1e-3).earthRadioTimeS).toBeCloseTo(1e-3 * (1 - eta / 2 + (eta * eta) / 6), 15);
+    checkRadio(demo, 1e-6);
+  });
+
+  it('com cruzeiro, a 1 g e rumo a Andrômeda, chega a t_total − D/c', () => {
+    checkRadio(destinationMissionProfile(proxima, 1, Math.atanh(0.9)), 1e-3);
+    checkRadio(destinationMissionProfile(proxima, 1), 1e-3);
+    // Rumo a Andrômeda, t_total − D/c perde ~10⁻² s de precisão na subtração; a integral, não.
+    checkRadio(destinationMissionProfile(DESTINATIONS.andromeda, 1), 1e2);
+  });
+});

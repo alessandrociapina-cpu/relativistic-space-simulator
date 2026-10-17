@@ -14,10 +14,29 @@ export interface Milestone {
 
 export type FlightEvent =
   | { readonly type: 'countdown'; readonly target: MilestoneKind; readonly secondsLeft: number }
-  | { readonly type: 'milestone'; readonly kind: MilestoneKind };
+  | { readonly type: 'milestone'; readonly kind: MilestoneKind }
+  /** Começo (`resting`) ou fim de um descanso da tripulação (§4.2.9). */
+  | { readonly type: 'crew-rest'; readonly resting: boolean };
 
 /** A contagem regressiva começa 3 s (tempo real) antes de cada marco. */
 export const COUNTDOWN_FROM_S = 3;
+
+/** Ciclos de queima e descanso mais curtos que isso na tela (s reais) não tocam o aviso, para não virar ruído. */
+export const CREW_REST_CHIME_MIN_CYCLE_S = 4;
+
+/**
+ * Aviso de cabine quando um descanso da tripulação começa ou termina entre dois frames do loop, se o
+ * ciclo (queima + descanso) dura ao menos 4 s reais no multiplicador do momento.
+ */
+export function detectCrewRestEvent(
+  wasResting: boolean,
+  resting: boolean,
+  cycleS: number,
+  timeScale: number,
+): FlightEvent | null {
+  if (wasResting === resting || !(cycleS / timeScale >= CREW_REST_CHIME_MIN_CYCLE_S)) return null;
+  return { type: 'crew-rest', resting };
+}
 
 /**
  * Marcos em voo, ordenados por τ: entradas da CMB no visível, flip (início da

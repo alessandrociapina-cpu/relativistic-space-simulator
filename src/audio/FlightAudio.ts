@@ -11,6 +11,9 @@ const MASTER_GAIN = 0.22;
 const ENGINE_SMOOTHING_S = 0.25;
 /** Corte do motor durante a rotação de 180° do flip (s). */
 const FLIP_CUT_S = 0.7;
+/** Sopro dos jatos de controle de reação (RCS) que começam e param a rotação do flip (s). */
+const RCS_PUFF_S = 0.18;
+const RCS_PUFF_HZ = 800;
 
 interface EngineNodes {
   readonly gain: GainNode;
@@ -34,6 +37,13 @@ function brownNoise(ctx: BaseAudioContext, seconds: number): AudioBuffer {
   return buffer;
 }
 
+function whiteNoise(ctx: BaseAudioContext, seconds: number): AudioBuffer {
+  const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * seconds), ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  return buffer;
+}
+
 function nearlyEqual(a: EngineSound, b: EngineSound): boolean {
   return (
     Math.abs(a.humHz - b.humHz) < 0.2 &&
@@ -49,6 +59,7 @@ export class FlightAudio {
   private enabled = true;
   private lastSound: EngineSound | null = null;
   private flipCutUntil = 0;
+  private whiteNoise: AudioBuffer | null = null;
 
   /** Liga ou silencia tudo. Ao ligar, chame `unlock()` dentro do mesmo gesto. */
   setEnabled(enabled: boolean): void {
@@ -99,6 +110,13 @@ export class FlightAudio {
       this.tone(t, 880, 0.12, 'sine', 0.35);
       return;
     }
+    if (event.type === 'crew-rest') {
+      // Aviso suave de cabine: Ré → Lá descendo no começo do descanso (gravidade zero), subindo na volta à queima.
+      const [first, second] = event.resting ? [587.33, 440] : [440, 587.33];
+      this.tone(t, first, 0.35, 'sine', 0.16);
+      this.tone(t + 0.22, second, 0.5, 'sine', 0.16);
+      return;
+    }
     switch (event.kind) {
       case 'ignition':
         // "Vai": bipe longo e agudo sobre um baque grave descendente.
@@ -111,9 +129,12 @@ export class FlightAudio {
         this.tone(t + 0.14, 990, 0.5, 'triangle', 0.3);
         break;
       case 'flip':
-        // Alarme de dois tons e corte breve do motor enquanto a nave gira.
+        // Alarme de dois tons e corte breve do motor enquanto a nave gira; os jatos de controle de
+        // reação sopram no começo e no fim da rotação de 180°.
         this.flipCutUntil = ctx.currentTime + FLIP_CUT_S;
         [988, 740, 988, 740].forEach((f, i) => this.tone(t + i * 0.16, f, 0.13, 'square', 0.1));
+        this.puff(t, RCS_PUFF_S, RCS_PUFF_HZ);
+        this.puff(t + FLIP_CUT_S - RCS_PUFF_S, RCS_PUFF_S, RCS_PUFF_HZ);
         break;
       case 'arrival':
         // Arpejo maior: Dó, Mi, Sol, Dó.
@@ -162,6 +183,26 @@ export class FlightAudio {
     this.ctx = ctx;
     this.master = master;
     this.engine = { gain, filter, hum, sub };
+  }
+
+  /** Sopro de gás: ruído branco num passa-banda, com ataque curto e decaimento exponencial. */
+  private puff(at: number, duration: number, hz: number): void {
+    const ctx = this.ctx!;
+    this.whiteNoise ??= whiteNoise(ctx, 1);
+    const source = ctx.createBufferSource();
+    source.buffer = this.whiteNoise;
+    const band = ctx.createBiquadFilter();
+    band.type = 'bandpass';
+    band.frequency.value = hz;
+    band.Q.value = 1.4;
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0, at);
+    env.gain.linearRampToValueAtTime(0.5, at + 0.015);
+    env.gain.exponentialRampToValueAtTime(1e-4, at + duration);
+    source.connect(band).connect(env).connect(this.master!);
+    source.onended = () => env.disconnect();
+    source.start(at);
+    source.stop(at + duration + 0.02);
   }
 
   /** Nota com ataque curto e decaimento exponencial; `endHz` faz uma varredura. */

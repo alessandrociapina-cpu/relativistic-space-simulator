@@ -156,7 +156,8 @@ function coastThenBrake(
   const coast: FlightSegment = { kind: 'coast', ...start, duration: coastTau, accel: 0 };
   const atFlip = segmentState(coast, coastTau);
   const flipTau = start.startTau + coastTau;
-  const brake = brakeFrom({ startTau: flipTau, eta0: eta, remaining0: atFlip.remainingM, earth0: atFlip.earthTimeS }, a, cycle);
+  const atFlipStart = { startTau: flipTau, eta0: eta, remaining0: atFlip.remainingM, earth0: atFlip.earthTimeS, radio0: atFlip.radioTimeS };
+  const brake = brakeFrom(atFlipStart, a, cycle);
   return { segments: [coast, ...brake], end: 'arrival', flipTau, brakeTau: flipTau };
 }
 
@@ -214,6 +215,7 @@ export function cutEngine(profile: MissionProfile, tau: number, rampTau: number)
     eta0: now.eta,
     remaining0: now.restDistanceRemainingM,
     earth0: now.earthTimeS,
+    radio0: now.earthRadioTimeS,
   };
   // Passa pelo alvo durante a rampa?
   const remainingAt = (s: number) => segmentState(ramp, s).remainingM;
@@ -223,7 +225,13 @@ export function cutEngine(profile: MissionProfile, tau: number, rampTau: number)
   }
   const after = segmentState(ramp, duration);
   const rest = coastThenBrake(
-    { startTau: tau + duration, eta0: stops ? 0 : after.eta, remaining0: after.remainingM, earth0: after.earthTimeS },
+    {
+      startTau: tau + duration,
+      eta0: stops ? 0 : after.eta,
+      remaining0: after.remainingM,
+      earth0: after.earthTimeS,
+      radio0: after.radioTimeS,
+    },
     plan,
   );
   return buildProfile(plan, firstTau, [...segments, ramp, ...rest.segments], rest.end, rest.flipTau, rest.brakeTau);
@@ -243,7 +251,7 @@ export function relightEngine(profile: MissionProfile, tau: number): MissionProf
   const remaining = now.restDistanceRemainingM;
   const segments = segmentsUntil(profile, tau);
   const firstTau = Math.min(profile.maneuvers?.firstTau ?? tau, tau);
-  const start = { eta0: eta, remaining0: remaining, earth0: now.earthTimeS };
+  const start = { eta0: eta, remaining0: remaining, earth0: now.earthTimeS, radio0: now.earthRadioTimeS };
   if (plan.crewRest) {
     const strain = crewStrainAt(profile, tau, restPlanTolerance({ ...plan, crewRest: plan.crewRest }));
     return relightWithRests(plan, firstTau, segments, { startTau: tau, ...start }, plan.crewRest, strain);
@@ -266,6 +274,7 @@ export function relightEngine(profile: MissionProfile, tau: number): MissionProf
       eta0: atFlip.eta,
       remaining0: atFlip.remainingM,
       earth0: atFlip.earthTimeS,
+      radio0: atFlip.radioTimeS,
       toArrival: true,
     };
     const added = accelTau > 0 ? [boost, brake] : [brake];
@@ -297,7 +306,13 @@ function relightWithRests(
     const after = segmentState(wait, wait.duration);
     if (after.remainingM > 0) {
       added.push(wait);
-      from = { startTau: start.startTau + wait.duration, eta0: start.eta0, remaining0: after.remainingM, earth0: after.earthTimeS };
+      from = {
+        startTau: start.startTau + wait.duration,
+        eta0: start.eta0,
+        remaining0: after.remainingM,
+        earth0: after.earthTimeS,
+        radio0: after.radioTimeS,
+      };
     }
   }
   const route = restRoute(from, a, cycle);

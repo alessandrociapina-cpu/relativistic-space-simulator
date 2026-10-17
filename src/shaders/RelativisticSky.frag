@@ -386,17 +386,37 @@ vec3 renderBackgroundStars(RelativisticRay ray, float glowRel) {
     return stars;
 }
 
+// Lente gravitacional de Sagittarius A*: o fundo (estrelas e Via Láctea) visto fora da sombra vem da
+// direção β = θ − θE²/θ, no plano que contém o raio e o alvo (lente de ponto-massa; β < 0 é a imagem
+// do outro lado). Perto de θE o céu de trás do buraco negro se espalha num anel de Einstein.
+// θE = 1,45 × o raio da sombra (o anel de fótons fica em ~1,05). A lente conserva o brilho superficial.
+vec3 lensedSourceDir(vec3 sourceDir) {
+    if (uTargetType != 1 || uTargetRadiusRad <= 1e-5) return sourceDir;
+    float theta = angleBetween(sourceDir, uTargetDir);
+    if (theta <= uTargetRadiusRad) return sourceDir;
+    // Com o alvo em −Z, a componente perpendicular é só (x, y): sem cancelamento em float32.
+    vec3 perp = sourceDir - dot(sourceDir, uTargetDir) * uTargetDir;
+    float perpLen = length(perp);
+    if (perpLen <= 0.0) return sourceDir;
+    float thetaE = 1.45 * uTargetRadiusRad;
+    float beta = theta - thetaE * thetaE / theta;
+    return cos(beta) * uTargetDir + sin(beta) * (perp / perpLen);
+}
+
 vec3 renderSky(RelativisticRay ray) {
+    // O fundo passa pela lente de Sgr A* (o Sol, atrás da nave, não).
+    RelativisticRay bgRay = ray;
+    bgRay.sourceDir = lensedSourceDir(ray.sourceDir);
     // Via Láctea difusa: ε (fixo pela transformação de Lorentz) vezes o corpo
     // negro da luz estelar integrada, deslocado pelo Doppler.
-    vec2 mw = milkyWaySample(ray.sourceDir);
+    vec2 mw = milkyWaySample(bgRay.sourceDir);
     float eps = exp2(mw.x * LOG2_10);
     vec3 glow = eps * sampleBlackbodySensor(mix(6800.0, 5600.0, mw.y) * ray.doppler);
     // Joelho: o brilho difuso satura devagar (o olho e a câmera se adaptam), para o
     // centro galáctico desviado para o azul não virar uma parede branca.
     float glowLevel = dot(glow, vec3(0.2126, 0.7152, 0.0722)) * uExposure;
     glow *= 1.0 / (1.0 + 1.5 * max(glowLevel - 0.25, 0.0));
-    vec3 stars = (glow + renderCatalogStar(ray) + renderBackgroundStars(ray, eps / 0.07)) * uBackgroundGain
+    vec3 stars = (glow + renderCatalogStar(bgRay) + renderBackgroundStars(bgRay, eps / 0.07)) * uBackgroundGain
                + renderPointSource(ray, uSunDir, uSunPointAmp, T_SUN, uSunRadiusRad);
 
     // Sol atrás e alvo à frente; os discos opacos escondem as estrelas atrás deles.
