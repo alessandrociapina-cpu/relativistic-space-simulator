@@ -4,8 +4,8 @@ import moonData from './data/moons.json';
 import { BODIES, MOON_LIST, bodyPosition, moonPeriodDays, type MoonId } from './bodies';
 import { explainEvent } from './eventExplanations';
 import { ALL_EVENTS, LIGHT_DAY_AU, MISSIONS, MISSION_LIST } from './missions';
-import { AU_KM } from './probes';
-import { LOG_K, LOG_R0_AU, localScale, toDisplay, trailPoints, viewDistance } from './sceneMath';
+import { AU_KM, probePosition } from './probes';
+import { LOG_K, LOG_R0_AU, frameBody, localScale, toDisplay, trailPoints, viewDistance } from './sceneMath';
 import { daysToMs, isoToDays } from './time';
 import { FLYBY_SLOWDOWN, PROBE_TIME_RANGE, useProbeStore } from './useProbeStore';
 import { norm, sub } from './vec3';
@@ -158,6 +158,20 @@ describe('escala da cena', () => {
     const t = isoToDays('1989-08-25');
     expect(viewDistance('neptune', t, 'linear')).toBeCloseTo((24_764 * 60) / 149_597_870.7, 9);
     expect(viewDistance('comet67p', isoToDays('2015-01-01'), 'linear')).toBeCloseTo((2 * 60) / 149_597_870.7, 12);
+  });
+
+  it('referencial dos rastros: o de Júpiter quando a Voyager 2 entra na janela (10/05/1979), ou sempre o do Sol se escolhido', () => {
+    expect(frameBody('voyager2', isoToDays('1979-04-22'), 'linear')).toBeNull();
+    expect(frameBody('voyager2', isoToDays('1979-05-16'), 'linear')).toBe('jupiter');
+    // A janela começa perto da esfera de influência de Júpiter, a(m/M)^(2/5) ≈ 48 milhões de km.
+    const start = isoToDays('1979-05-10');
+    const away = norm(sub(probePosition(MISSIONS.voyager2.trajectory, start)!, bodyPosition('jupiter', start)!)) * AU_KM;
+    expect(away / 1e6).toBeGreaterThan(40);
+    expect(away / 1e6).toBeLessThan(55);
+    expect(frameBody('voyager2', isoToDays('1979-05-16'), 'linear', 'sun')).toBeNull();
+    expect(frameBody('voyager2', isoToDays('1979-05-16'), 'log')).toBeNull();
+    expect(frameBody('jupiter', isoToDays('1979-05-16'), 'linear')).toBe('jupiter');
+    expect(frameBody('jupiter', isoToDays('1979-05-16'), 'linear', 'sun')).toBeNull();
   });
 });
 

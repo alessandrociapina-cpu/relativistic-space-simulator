@@ -1,8 +1,10 @@
-import { MOON_LIST, SMALL_BODY_LIST } from './bodies';
+import { useEffect, useRef, useState } from 'react';
+import { BODIES, MOON_LIST, SMALL_BODY_LIST } from './bodies';
 import { COMPANIONS, MISSIONS, MISSION_LIST } from './missions';
 import { PLANET_LIST } from './planets';
+import { frameBody } from './sceneMath';
 import { formatDateTime, msToDays } from './time';
-import { PROBE_RATES, PROBE_TIME_RANGE, useProbeStore, type FocusId, type ScaleMode } from './useProbeStore';
+import { PROBE_RATES, PROBE_TIME_RANGE, useProbeStore, type FocusId, type FrameMode, type ScaleMode } from './useProbeStore';
 
 const segmentClass = (active: boolean) =>
   `whitespace-nowrap rounded-sm px-2 py-1 text-[11px] tracking-wider transition-colors max-sm:px-1.5 ${
@@ -14,6 +16,27 @@ const SCALES: readonly { value: ScaleMode; label: string; title: string }[] = [
   { value: 'linear', label: 'Real', title: 'Escala real: ideal para ver um sobrevoo ou uma órbita de perto' },
 ];
 
+const FRAME_TITLES: Readonly<Record<FrameMode, string>> = {
+  auto:
+    'Automático: em escala real, os rastros ficam no referencial do corpo em foco ou do planeta que a sonda em foco está visitando ' +
+    '(a órbita em torno dele aparece como órbita e o sobrevoo como a hipérbole); fora dos encontros e na escala log, no do Sol',
+  sun: 'Sempre o referencial do Sol: a rota em torno do Sol, também durante os encontros',
+};
+
+/** Verdadeiro por alguns segundos depois que `value` muda (não na montagem). */
+function useFlashOnChange(value: unknown, ms = 3200): boolean {
+  const [flash, setFlash] = useState(false);
+  const previous = useRef(value);
+  useEffect(() => {
+    if (previous.current === value) return;
+    previous.current = value;
+    setFlash(true);
+    const id = window.setTimeout(() => setFlash(false), ms);
+    return () => window.clearTimeout(id);
+  }, [value, ms]);
+  return flash;
+}
+
 /** Data, reprodução, velocidade do tempo, foco da câmera e escala. */
 export function ProbeControls({ className = '' }: { className?: string }) {
   const t = useProbeStore((s) => s.t);
@@ -24,7 +47,13 @@ export function ProbeControls({ className = '' }: { className?: string }) {
   const focus = useProbeStore((s) => s.focus);
   const scale = useProbeStore((s) => s.scale);
   const showOthers = useProbeStore((s) => s.showOthers);
-  const { togglePlay, setT, setRate, setAutoSlow, setFocus, setScale, setShowOthers } = useProbeStore.getState();
+  const frameMode = useProbeStore((s) => s.frameMode);
+  // O que o modo automático escolheria agora; muda ao entrar ou sair de uma janela de encontro.
+  const autoFrame = useProbeStore((s) => frameBody(s.focus, s.t, s.scale));
+  const frame = frameMode === 'sun' ? null : autoFrame;
+  const frameName = frame ? BODIES[frame].name : 'Sol';
+  const frameFlash = useFlashOnChange(frameName);
+  const { togglePlay, setT, setRate, setAutoSlow, setFocus, setScale, setShowOthers, setFrameMode } = useProbeStore.getState();
   const today = msToDays(Date.now());
 
   return (
@@ -142,6 +171,37 @@ export function ProbeControls({ className = '' }: { className?: string }) {
               {s.label}
             </button>
           ))}
+        </div>
+        {/* O referencial em uso, com um destaque quando ele muda (a rota muda de forma de repente). */}
+        <div
+          className={`flex items-center gap-1 rounded-sm ${frameFlash ? 'animate-beacon ring-2 ring-amber-300/90 ring-offset-2 ring-offset-black' : ''}`}
+          role="radiogroup"
+          aria-label="Referencial dos rastros"
+        >
+          <span className={`mr-1 ${frameFlash ? 'text-amber-300' : 'text-slate-400'}`}>Referencial</span>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={frameMode === 'auto'}
+            title={FRAME_TITLES.auto}
+            className={`min-w-[7.5rem] ${segmentClass(frameMode === 'auto')}`}
+            onClick={() => setFrameMode('auto')}
+          >
+            Auto · {autoFrame ? BODIES[autoFrame].name : 'Sol'}
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked={frameMode === 'sun'}
+            title={FRAME_TITLES.sun}
+            className={segmentClass(frameMode === 'sun')}
+            onClick={() => setFrameMode('sun')}
+          >
+            Sol
+          </button>
+          <span className="sr-only" aria-live="polite">
+            Referencial: {frameName}
+          </span>
         </div>
         <label className="flex items-center gap-1.5 text-slate-300" title="Desligado: só a missão escolhida (e as companheiras) aparece na cena, sem as outras sondas e suas rotas">
           <input type="checkbox" className="accent-cyan-400" checked={showOthers} onChange={(e) => setShowOthers(e.target.checked)} />

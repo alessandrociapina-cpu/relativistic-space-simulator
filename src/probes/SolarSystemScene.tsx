@@ -348,7 +348,7 @@ function SceneContent() {
   }, [view, camera]);
 
   useFrame(({ size }) => {
-    const { t, focus, scale: mode, showOthers } = useProbeStore.getState();
+    const { t, focus, scale: mode, showOthers, frameMode } = useProbeStore.getState();
     const cam = camera as PerspectiveCamera;
     const origin = focusDisplay(focus, t, mode);
     const worldPerPixel = (2 * Math.tan((cam.fov * Math.PI) / 360)) / size.height;
@@ -420,7 +420,7 @@ function SceneContent() {
 
     // Rastros no referencial do corpo em foco (em escala real): a órbita em torno de Júpiter ou do cometa
     // aparece como órbita, não como a espiral que ela desenha em torno do Sol.
-    const frame = frameBody(focus, t, mode);
+    const frame = frameBody(focus, t, mode, frameMode);
     trails.forEach((trail, i) => {
       if (trail.times.length === 0 || (trail.builtFor && trail.builtFor.body === frame && trail.builtFor.mode === mode)) return;
       trail.local = trail.points.map((point, k) => {
