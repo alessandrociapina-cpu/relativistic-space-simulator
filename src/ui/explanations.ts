@@ -769,9 +769,9 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
             `imersos em água chegaram a ~31 g por segundos (Johnsville, 1958). A ${num(accelG)} g, o simulador adota ` +
             `${formatSpan(rest.enduranceS)} de limite contínuo.`,
           'Não há medidas de recuperação depois de horas ou dias perto do limite. A estimativa: cada queima usa 90 % ' +
-            'da tolerância, a carga cai sem peso no mesmo ritmo em que sobe sob empuxo, e cada descanso dura a ' +
-            `tolerância inteira (no mínimo 1 h): ${formatSpan(rest.restTau)}. Assim a carga volta a zero antes da ` +
-            'próxima queima.',
+            'da tolerância, e sem peso o corpo se recupera mais devagar do que se desgasta, então cada descanso dura ' +
+            `${num(rest.restTau / rest.burnTau)} vezes a queima (no mínimo 1 h): ${formatSpan(rest.restTau)}. Assim a ` +
+            'carga volta a zero antes da próxima queima.',
           `Os descansos custam tempo: com ${num(rest.burns)} queimas, a viagem leva ${formatSpan(profile.tauTotal)} de ` +
             `bordo, contra ${formatSpan(continuous.tauTotal)} com empuxo contínuo, que a tripulação não aguentaria. A ` +
             'velocidade de pico também é menor, porque boa parte do tempo passa sem empuxo.',
@@ -779,7 +779,10 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
         formulas: [
           {
             card: true,
-            tex: tex`\Delta\tau_{\text{queima}} \le 0{,}9\,T_{\text{lim}} = ${texDuration(rest.burnTau)}, \qquad \Delta\tau_{\text{descanso}} = ${texDuration(rest.restTau)}`,
+            tex: tex`\Delta\tau_{\text{queima}} \le 0{,}9\,T_{\text{lim}} = ${texDuration(rest.burnTau)}`,
+          },
+          {
+            tex: tex`\Delta\tau_{\text{descanso}} = \max\!\left(k\,\Delta\tau_{\text{queima}},\ 1\ \mathrm{h}\right) = ${texDuration(rest.restTau)}`,
           },
           { tex: tex`\Delta\eta_{\text{queima}} = \frac{\alpha\,\Delta\tau_{\text{queima}}}{c} = ${n(dEta, 4)}` },
           { tex: tex`\eta = ${n(flight.eta, 4)}, \qquad \frac{dx}{d\tau} = c\,\sinh\eta = ${texSpeed(C * Math.sinh(flight.eta))}` },

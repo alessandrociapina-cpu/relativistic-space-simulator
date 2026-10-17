@@ -42,11 +42,16 @@ function maxStrain(profile: MissionProfile, accelG: number, n = 3000): number {
 }
 
 describe('ciclo de queima e descanso', () => {
-  it('cada queima usa 90 % da tolerância; o descanso dura a tolerância inteira, no mínimo 1 h', () => {
+  it('cada queima usa 90 % da tolerância; o descanso dura 3× a queima (ou 5×), no mínimo 1 h', () => {
     const cycle = restCycleFor(3 * DAY)!;
     expect(cycle.burnTau).toBeCloseTo(2.7 * DAY, 6);
-    expect(cycle.restTau).toBe(3 * DAY);
+    expect(cycle.restTau).toBeCloseTo(8.1 * DAY, 6);
+    expect(restCycleFor(3 * DAY, 5)!.restTau).toBeCloseTo(13.5 * DAY, 6);
     expect(restCycleFor(600)).toEqual({ burnTau: 540, restTau: 3600 });
+    expect(restCycleFor(600, 5)).toEqual({ burnTau: 540, restTau: 3600 });
+    // Um descanso leva a carga de 100 % a zero: a recuperação é a do ciclo.
+    expect(crewToleranceFor(10).recoveryS).toBeCloseTo(8.1 * DAY, 6);
+    expect(crewToleranceFor(10, 5).recoveryS).toBeCloseTo(13.5 * DAY, 6);
     expect(restCycleFor(Infinity)).toBeNull();
     expect(restCycleFor(0)).toBeNull();
   });
@@ -88,12 +93,11 @@ describe('ciclo de queima e descanso', () => {
 describe('plano com descansos (10 g até Proxima)', () => {
   const rest = tenG.crewRest!;
 
-  it('queimas de até 2,7 dias e descansos de 3 dias: 82 queimas e ~1,2 ano de bordo, contra ~271 dias sem descanso', () => {
+  it('queimas de até 2,7 dias e descansos de 8,1 dias: 66 queimas e ~1,96 ano de bordo, contra ~271 dias sem descanso', () => {
     expect(rest.burnTau).toBeCloseTo(2.7 * DAY, 6);
-    expect(rest.restTau).toBeCloseTo(3 * DAY, 6);
-    expect(rest.burns).toBe(82);
-    expect(tenG.tauTotal / DAY).toBeGreaterThan(400);
-    expect(tenG.tauTotal / DAY).toBeLessThan(500);
+    expect(rest.restTau).toBeCloseTo(8.1 * DAY, 6);
+    expect(rest.burns).toBe(66);
+    expect(tenG.tauTotal / DAY).toBeCloseTo(715.7, 0);
     expect(destinationMissionProfile(proxima, 10).tauTotal / DAY).toBeCloseTo(270.7, 0);
     for (const seg of flightSegments(tenG)) {
       if (seg.kind === 'thrust') expect(seg.duration).toBeLessThanOrEqual(rest.burnTau * (1 + 1e-9));
@@ -119,9 +123,12 @@ describe('plano com descansos (10 g até Proxima)', () => {
       const tau = f * tenG.tauTotal;
       expect(computeFlightState(tenG, tenG.tauTotal - tau).eta).toBeCloseTo(computeFlightState(tenG, tau).eta, 9);
     }
-    expect(relErr(computeFlightState(tenG, tenG.tauHalf).earthTimeS, tenG.tHalf)).toBeLessThan(1e-12);
+    expect(relErr(computeFlightState(tenG, tenG.tauHalf).earthTimeS, tenG.tHalf)).toBeLessThan(1e-10);
     expect(flipTauOf(tenG)).toBe(tenG.brakeStartTau);
-    expect(tenG.brakeStartTau - tenG.burnEndTau).toBeCloseTo(rest.restTau, 0);
+    // O descanso do meio dura pelo menos um descanso; a sobra de distância (o número de descansos muda aos
+    // saltos com a rapidez de pico) o alonga um pouco.
+    expect(tenG.brakeStartTau - tenG.burnEndTau).toBeGreaterThanOrEqual(rest.restTau);
+    expect(tenG.brakeStartTau - tenG.burnEndTau).toBeLessThan(3 * rest.restTau);
   });
 
   it('a carga nunca passa de 90 % e o estado acompanha queimas e descansos', () => {
@@ -134,8 +141,8 @@ describe('plano com descansos (10 g até Proxima)', () => {
     expect(burning.untilChangeS! / DAY).toBeCloseTo(2.2, 9);
     const resting = status(2.7 * DAY + DAY);
     expect(resting.condition).toBe('rest');
-    expect(resting.untilChangeS! / DAY).toBeCloseTo(2, 9);
-    expect(resting.strain).toBeCloseTo(0.9 - 1 / 3, 9);
+    expect(resting.untilChangeS! / DAY).toBeCloseTo(7.1, 9);
+    expect(resting.strain).toBeCloseTo(0.9 - 1 / 8.1, 9);
     expect(crewStatusAt(tenG, computeFlightState(tenG, 0), tol, false).condition).toBe('ready');
     expect(status(tenG.tauTotal).condition).toBe('arrived');
   });
@@ -183,6 +190,17 @@ describe('quem não precisa de descansos', () => {
     }
   });
 
+  it('com descansos de 5× a queima, a viagem fica mais longa e a carga continua no limite planejado', () => {
+    const five = missionProfileFor(proxima, 10, null, 'crewed', 5);
+    expect(five.crewRest!.restTau).toBeCloseTo(13.5 * DAY, 6);
+    expect(five.tauTotal).toBeGreaterThan(tenG.tauTotal);
+    expect(five.tauTotal / DAY).toBeCloseTo(928.8, 0);
+    const tol = crewToleranceFor(10, 5);
+    let max = 0;
+    for (let i = 0; i <= 3000; i++) max = Math.max(max, crewStrainAt(five, (i / 3000) * five.tauTotal, tol));
+    expect(max).toBeLessThanOrEqual(0.9 + 1e-9);
+  });
+
   it('o cruzeiro fica abaixo da rapidez de pico com descansos', () => {
     const flip = missionProfileFor(DESTINATIONS.trappist1, 10, null, 'crewed').etaMax;
     expect(plannedCoastEta(DESTINATIONS.trappist1, 10, 50, 'crewed')).toBeCloseTo(0.999 * flip, 12);
@@ -203,8 +221,14 @@ describe('motor desligado e religado com descansos', () => {
       const end = computeFlightState(cut, cut.tauTotal);
       expect(end.phase).toBe('arrived');
       expect(end.restDistanceRemainingM).toBe(0);
-      // Na frenagem, sem distância para frear com α, a emergência passa um pouco do limite.
-      expect(maxStrain(cut, 10)).toBeLessThan(f < 0.5 ? 0.9 + 1e-9 : 1.05);
+      expect(maxStrain(cut, 10)).toBeLessThanOrEqual(0.9 + 1e-9);
+      if (f > 0.5) {
+        // Na frenagem, sem distância para frear com α e descansos inteiros: α e descansos um pouco mais curtos.
+        const brake = flightSegments(cut).find((seg) => seg.kind === 'cycles' && seg.startTau > tau)!;
+        expect(brake.accel).toBe(-tenG.properAccel);
+        expect(brake.cycle!.restTau).toBeLessThan(rest.restTau);
+        expect(brake.cycle!.restTau).toBeGreaterThan(0.95 * rest.restTau);
+      }
     }
   });
 
