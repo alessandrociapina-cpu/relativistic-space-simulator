@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { computeFlightState } from './RelativityEngine';
+import { computeFlightState, flipTauOf } from './RelativityEngine';
 import { DESTINATIONS, destinationMissionProfile } from './destinations';
+import { cutEngine, relightEngine } from './maneuvers';
 import { computeBodyAngularRadii } from './sky';
 import {
   WINDSHIELD_FOV_DEG,
@@ -86,6 +87,36 @@ describe('olho do piloto na missão para Proxima', () => {
     expect(timeline.peakLux).toBeCloseTo(peakCmbLux(), -1);
   });
 
+  it('com o motor desligado e religado, o espelho é o instante da subida com a mesma rapidez', () => {
+    // Corta em τ = 250 s (η ≈ 13) e religa perto do alvo: sem distância para frear com α, a frenagem de
+    // emergência usa a > α, e τ_total − τ deixa de ser o instante da ida com a mesma luz.
+    const cut = cutEngine(profile, 250, 3);
+    const relightTau = 253 + 0.99 * (cut.tauTotal - 253);
+    const relit = relightEngine(cut, relightTau);
+    expect(flipTauOf(relit)).toBeNull();
+    const relitTimeline = computeEyeTimeline(relit);
+    const at = (tau: number) => {
+      const flight = computeFlightState(relit, tau);
+      return computePhotometryAndEyeState(flight, relit, relitTimeline, computeBodyAngularRadii(flight, proxima).targetRadiusRad);
+    };
+    // Na frenagem, o instante com a mesma η do white-out da ida (τ = 150 s).
+    const etaWhiteout = computeFlightState(profile, 150).eta;
+    let lo = relightTau;
+    let hi = relit.tauTotal;
+    for (let i = 0; i < 80; i++) {
+      const mid = (lo + hi) / 2;
+      if (computeFlightState(relit, mid).eta > etaWhiteout) lo = mid;
+      else hi = mid;
+    }
+    const s = at(lo);
+    expect(s.whiteoutTau).toBeCloseTo(150, 6);
+    expect(Math.abs(relit.tauTotal - lo - 150)).toBeGreaterThan(1); // τ_total − τ já não serve
+    expect(s.dimmerFactor).toBeGreaterThan(100);
+    // Logo depois de religar, η ainda passa da atingida antes do corte (a rampa somou um pouco): sem espelho.
+    const early = at(relightTau + 1e-3);
+    expect(early.whiteoutTau).toBeNull();
+    expect(early.dimmerFactor).toBe(1);
+  });
 });
 
 describe('alertas e véu', () => {

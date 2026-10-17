@@ -7,7 +7,7 @@ import {
   type CrewKind,
   type MissionAssessment,
 } from '../physics/accelerationPresets';
-import { DESTINATION_LIST, destinationMissionProfile, type Destination } from '../physics/destinations';
+import { DESTINATION_LIST, MAX_COAST_FRACTION, destinationMissionProfile, effectiveCoastEta, type Destination } from '../physics/destinations';
 import { useFlightStore, type MissionChoice } from '../store/useFlightStore';
 import { APP_HASH } from '../ui/appMode';
 import { useCockpitUi } from '../ui/cockpitUi';
@@ -92,7 +92,7 @@ function PresetCard({
   active: boolean;
   onSelect: () => void;
 }) {
-  const profile = destinationMissionProfile(destination, preset.accelG, coastEta);
+  const profile = destinationMissionProfile(destination, preset.accelG, effectiveCoastEta(destination, preset.accelG, coastEta));
   const { viability } = assessMission(preset.crew, preset.accelG, profile);
   return (
     <button type="button" role="radio" aria-checked={active} className={optionClass(active)} onClick={onSelect}>
@@ -180,7 +180,7 @@ function ProfileChoice({
 }) {
   // Rapidez do ponto médio: acima dela o cruzeiro nunca é atingido.
   const flipEta = computeMissionProfile(profile.distanceM, profile.properAccel).etaMax;
-  const maxCoastEta = flipEta * 0.999;
+  const maxCoastEta = flipEta * MAX_COAST_FRACTION;
   const shownEta = coastEta === null ? null : Math.min(coastEta, maxCoastEta);
   return (
     <div className="flex flex-col gap-2">
@@ -278,9 +278,11 @@ function Planner() {
   const configureMission = useFlightStore((s) => s.configureMission);
   const midFlight = useFlightStore((s) => s.tau > 0 && s.tau < s.profile.tauTotal);
   const closePlanner = useCockpitUi((s) => s.closePlanner);
+  // O cruzeiro do slider fica guardado no rascunho; o que vale é o limitado à aceleração escolhida.
+  const coastEta = effectiveCoastEta(draft.destination, draft.accelG, draft.coastEta);
   const profile = useMemo(
-    () => destinationMissionProfile(draft.destination, draft.accelG, draft.coastEta),
-    [draft.destination, draft.accelG, draft.coastEta],
+    () => destinationMissionProfile(draft.destination, draft.accelG, coastEta),
+    [draft.destination, draft.accelG, coastEta],
   );
   const assessment = assessMission(draft.crew, draft.accelG, profile);
   const verdict = viabilityText(draft, assessment);
@@ -298,7 +300,7 @@ function Planner() {
   }, [closePlanner]);
 
   const embark = () => {
-    configureMission(draft);
+    configureMission({ ...draft, coastEta });
     closePlanner();
   };
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { conicPolyline, lambert, lambertRevs, orbitalPeriod, propagate, specificEnergy } from './kepler';
-import { norm, sub, type Vec3 } from './vec3';
+import { cross, norm, sub, type Vec3 } from './vec3';
 
 const MU_EARTH = 398_600;
 const MU_SUN = 1.32712440018e11;
@@ -31,6 +31,44 @@ describe('propagação de Kepler em variáveis universais', () => {
     const period = 2 * Math.PI * Math.sqrt(7000 ** 3 / MU_EARTH);
     expect(norm(sub(propagate(leo, 25 * period, MU_EARTH).r, leo.r))).toBeLessThan(1e-3);
     expect(propagate({ r: [1, 2, 3], v: [1, 0, 0] }, 5, 0).r).toEqual([6, 2, 3]);
+  });
+
+  const relErr = (a: number, b: number) => Math.abs(a - b) / Math.abs(b);
+  const angularMomentumErr = (s: { r: Vec3; v: Vec3 }, start: { r: Vec3; v: Vec3 }) =>
+    norm(sub(cross(s.r, s.v), cross(start.r, start.v))) / norm(cross(start.r, start.v));
+
+  it('sobrevoo hiperbólico rápido e intervalos longos: converge sem NaN e conserva energia e momento angular', () => {
+    const MU_JUPITER = 126_686_534;
+    const vInf = 30;
+    const start = { r: [200_000, 0, 0] as Vec3, v: [0, Math.sqrt(vInf * vInf + (2 * MU_JUPITER) / 200_000), 0] as Vec3 };
+    for (const years of [1, 50, 1e4]) {
+      for (const sign of [1, -1]) {
+        const dt = sign * years * 31_557_600;
+        const s = propagate(start, dt, MU_JUPITER);
+        expect([...s.r, ...s.v].every(Number.isFinite)).toBe(true);
+        expect(relErr(specificEnergy(s, MU_JUPITER), specificEnergy(start, MU_JUPITER))).toBeLessThan(1e-12);
+        // Longe do planeta, a distância cresce com v∞: r ≈ v∞·|dt|.
+        expect(norm(s.r) / (vInf * Math.abs(dt))).toBeCloseTo(1, 2);
+        // r e v ficam quase paralelos lá longe: r × v e a volta ao periapse perdem algarismos com r/b.
+        expect(angularMomentumErr(s, start)).toBeLessThan(1e-11 * years);
+        expect(norm(sub(propagate(s, -dt, MU_JUPITER).r, start.r)) / norm(s.r)).toBeLessThan(1e-11 * years);
+      }
+    }
+  });
+
+  it('volta de um chute ruim ou de um passo de Newton que fugiu para H ~ 700 sem esgotar as iterações', () => {
+    // Antes paravam em 200 iterações longe da raiz: com F ~ e^H, o Newton só descia uma unidade de H por passo.
+    const cases = [
+      { mu: 5.479618758243372e-4, r0: 561.6611547421671, v: 1.3969957098544463e-3, th: 1.5994536144557265, dt: 6_765_268_273.6938305 },
+      { mu: 3.1589838981728056, r0: 88_204_928.07439229, v: 2.7422318616881315e-4, th: 3.1049059783138335, dt: 7_160_026_697_158.583 },
+    ];
+    for (const { mu, r0, v, th, dt } of cases) {
+      const start = { r: [r0, 0, 0] as Vec3, v: [v * Math.cos(th), v * Math.sin(th), 0] as Vec3 };
+      const s = propagate(start, dt, mu);
+      expect(relErr(specificEnergy(s, mu), specificEnergy(start, mu))).toBeLessThan(1e-9);
+      expect(angularMomentumErr(s, start)).toBeLessThan(1e-9);
+      expect(norm(sub(propagate(s, -dt, mu).r, start.r)) / norm(s.r)).toBeLessThan(1e-9);
+    }
   });
 });
 

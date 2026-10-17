@@ -39,28 +39,44 @@ export function propagate({ r: r0, v: v0 }: State, dt: number, mu: number): Stat
   const alpha = 2 / r0n - v2 / mu;
 
   // Anomalia universal χ: tem o sinal de dt e F(χ) cresce com χ, então o
-  // Newton é protegido por bisseção (sempre com um lado finito). Chute
-  // inicial de Vallado na hipérbole, quando cai no intervalo.
+  // Newton é protegido por bisseção (sempre com um lado finito). Na hipérbole,
+  // |χ|√(−α) é a variação da anomalia hiperbólica H: o intervalo vai até
+  // H = 700 (cosh e sinh estouram perto de 710; r ~ a·e⁷⁰⁰ está muito além de
+  // qualquer trajetória). Chute inicial de Vallado, quando cai no intervalo.
   let lo = dt > 0 ? 0 : -Infinity;
   let hi = dt > 0 ? Infinity : 0;
   let chi = alpha > 1e-12 ? sqrtMu * dt * alpha : (sqrtMu * dt) / r0n;
   if (alpha < -1e-12) {
+    const maxChi = 700 / Math.sqrt(-alpha);
+    lo = Math.max(lo, -maxChi);
+    hi = Math.min(hi, maxChi);
     const a = 1 / alpha;
     const sign = Math.sign(dt);
     const guess = sign * Math.sqrt(-a) * Math.log((-2 * mu * alpha * dt) / (rv + sign * Math.sqrt(-mu * a) * (1 - r0n * alpha)));
-    if (guess > lo && guess < hi) chi = guess;
+    chi = guess > lo && guess < hi ? guess : Math.min(Math.max(chi, lo / 2), hi / 2);
   }
+  // Bisseção também quando o Newton não encolhe o passo à metade a cada dois
+  // (rtsafe, Numerical Recipes): longe da raiz numa hipérbole, F ~ e^H e cada
+  // passo de Newton só desce uma unidade de H.
+  let step = Infinity;
+  let stepBefore = Infinity;
   for (let k = 0; k < 200; k++) {
     const z = alpha * chi * chi;
     const { C, S } = stumpff(z);
     const F = (rv / sqrtMu) * chi * chi * C + (1 - alpha * r0n) * chi * chi * chi * S + r0n * chi - sqrtMu * dt;
     const dF = (rv / sqrtMu) * chi * (1 - z * S) + (1 - alpha * r0n) * chi * chi * C + r0n;
+    // Raiz exata: o passo de Newton seria nulo, na borda do intervalo, e cairia na bisseção.
+    if (F === 0) break;
     // Estouro numérico (cosh enorme) só acontece com |χ| grande demais.
     if (Number.isNaN(F) ? chi > 0 : F > 0) hi = chi;
     else lo = chi;
     let next = chi - F / dF;
-    if (!(next > lo && next < hi)) next = Number.isFinite(lo) && Number.isFinite(hi) ? (lo + hi) / 2 : 2 * chi;
-    const done = Math.abs(next - chi) <= 1e-13 * Math.max(1, Math.abs(chi));
+    if (!(next > lo && next < hi) || Math.abs(2 * F) > Math.abs(stepBefore * dF)) {
+      next = Number.isFinite(lo) && Number.isFinite(hi) ? (lo + hi) / 2 : 2 * chi;
+    }
+    stepBefore = step;
+    step = next - chi;
+    const done = Math.abs(step) <= 1e-13 * Math.max(1, Math.abs(chi));
     chi = next;
     if (done) break;
   }

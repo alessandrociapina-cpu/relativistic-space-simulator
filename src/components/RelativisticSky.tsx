@@ -186,8 +186,9 @@ export function RelativisticSky({
   });
 
   return (
+    // A esfera só precisa cobrir a tela (o shader reconstrói a direção de gl_FragCoord): poucos triângulos bastam.
     <mesh material={material} renderOrder={-1} frustumCulled={false}>
-      <sphereGeometry args={[SKY_RADIUS, 64, 32]} />
+      <sphereGeometry args={[SKY_RADIUS, 16, 8]} />
     </mesh>
   );
 }

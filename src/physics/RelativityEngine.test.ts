@@ -13,7 +13,7 @@ import {
   rapidityFromLog10Gamma,
   rocketMassRatio,
 } from './RelativityEngine';
-import { DESTINATIONS, DESTINATION_LIST, destinationMissionProfile } from './destinations';
+import { DESTINATIONS, DESTINATION_LIST, MAX_COAST_FRACTION, destinationMissionProfile, effectiveCoastEta } from './destinations';
 
 const relErr = (actual: number, expected: number) => Math.abs(actual - expected) / Math.abs(expected);
 
@@ -297,5 +297,17 @@ describe('catálogo de destinos (§4.3)', () => {
       // L_contraída no flip ≈ c²/α ≈ 19 ls, independente do destino
       expect(Math.abs(mid.contractedDistanceRemainingM / LIGHT_SECOND_M - 19)).toBeLessThanOrEqual(1);
     }
+  });
+
+  it('o cruzeiro escolhido a 1,61×10⁶ G continua cruzeiro ao trocar para 1 g (limitado abaixo do ponto médio)', () => {
+    const proxima = DESTINATIONS.proxima;
+    const flipEta = destinationMissionProfile(proxima, 1).etaMax;
+    // Sem o limite, η = 5 passa da rapidez do ponto médio a 1 g e a viagem vira Flip-and-Burn sem aviso.
+    expect(destinationMissionProfile(proxima, 1, 5).coastEta).toBeNull();
+    const eta = effectiveCoastEta(proxima, 1, 5)!;
+    expect(eta).toBeCloseTo(flipEta * MAX_COAST_FRACTION, 12);
+    expect(destinationMissionProfile(proxima, 1, eta).coastEta).toBe(eta);
+    expect(effectiveCoastEta(proxima, 1.61e6, 5)).toBe(5);
+    expect(effectiveCoastEta(proxima, 1, null)).toBeNull();
   });
 });

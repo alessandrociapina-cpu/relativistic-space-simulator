@@ -126,3 +126,16 @@ export function destinationMissionProfile(
 ): MissionProfile {
   return computeMissionProfile(destination.distanceLy * LIGHT_YEAR_M, accelG * G0, coastEta);
 }
+
+/** O cruzeiro mais rápido que o planejamento aceita, como fração da rapidez do ponto médio. */
+export const MAX_COAST_FRACTION = 0.999;
+
+/**
+ * O cruzeiro que a viagem usa: o escolhido, limitado logo abaixo da rapidez do
+ * ponto médio. Acima dela não sobra trecho de inércia e `computeMissionProfile`
+ * voltaria ao Flip-and-Burn sem aviso (ao trocar para uma aceleração menor).
+ */
+export function effectiveCoastEta(destination: Destination, accelG: number, coastEta: number | null): number | null {
+  if (coastEta === null) return null;
+  return Math.min(coastEta, destinationMissionProfile(destination, accelG).etaMax * MAX_COAST_FRACTION);
+}
