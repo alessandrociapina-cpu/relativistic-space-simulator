@@ -1,15 +1,24 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { rocketMassRatio, type MissionProfile } from '../physics/RelativityEngine';
 import {
+  SCIFI_MISSIONS,
   assessMission,
+  findSciFiMission,
   longestBurnS,
   presetsFor,
   type AccelerationPreset,
   type CrewKind,
   type MissionAssessment,
+  type SciFiMission,
 } from '../physics/accelerationPresets';
 import { REST_RATIOS, missionProfileFor, plannedCoastEta } from '../physics/crewRest';
-import { DESTINATION_LIST, MAX_COAST_FRACTION, destinationMissionProfile, type Destination } from '../physics/destinations';
+import {
+  DESTINATIONS,
+  DESTINATION_LIST,
+  MAX_COAST_FRACTION,
+  destinationMissionProfile,
+  type Destination,
+} from '../physics/destinations';
 import { useFlightStore, type MissionChoice } from '../store/useFlightStore';
 import { APP_HASH } from '../ui/appMode';
 import { useCockpitUi } from '../ui/cockpitUi';
@@ -105,7 +114,7 @@ function PresetCard({
   );
   const { viability, rests } = assessMission(preset.crew, preset.accelG, profile);
   return (
-    <button type="button" role="radio" aria-checked={active} className={optionClass(active)} onClick={onSelect}>
+    <button type="button" role="radio" aria-checked={active} title={preset.detail} className={optionClass(active)} onClick={onSelect}>
       <div className="flex items-baseline justify-between gap-2">
         <span className="font-readout text-lg whitespace-nowrap text-slate-50">{preset.label}</span>
         <span className="flex items-baseline gap-1">
@@ -117,6 +126,7 @@ function PresetCard({
       <div className="text-[11px] leading-snug text-slate-400">
         {preset.protection} · {preset.enduranceText}
       </div>
+      <div className="mt-0.5 text-[10px] leading-snug text-slate-500">{preset.detail}</div>
       <div className="font-readout mt-0.5 text-[11px] text-slate-200 tabular-nums">
         {formatSpan(profile.tauTotal)} a bordo · {formatSpan(profile.tTotal)} na Terra
       </div>
@@ -272,7 +282,8 @@ function viabilityText(
   continuousBurnS: number,
 ): { tone: string; text: string } {
   const g = formatAccelG(choice.accelG);
-  const protection = lowerFirst(a.endurance.protection);
+  // "o limite do corpo (sem proteção)", não "(nenhuma)".
+  const protection = lowerFirst(a.endurance.protection).replace(/^nenhuma\b/, 'sem proteção');
   if (a.viability === 'hypothetical') {
     return {
       tone: 'border-rose-400/50 bg-rose-950/40 text-rose-100',
@@ -309,6 +320,168 @@ function viabilityText(
         : `Suportável: a sonda aguenta ${g} contínuos (${protection}).`,
   };
 }
+
+const profileLabel = (coastEta: number | null) =>
+  coastEta === null
+    ? 'Acelerar e frear'
+    : `Cruzeiro a ${formatVelocity(Math.tanh(coastEta), Math.exp(-coastEta) / Math.cosh(coastEta))}`;
+
+/** A missão da ficção como escolha do planejamento, com o cruzeiro limitado à aceleração. */
+function sciFiChoice(mission: SciFiMission, restRatio: number): MissionChoice {
+  const destination = DESTINATIONS[mission.destinationId];
+  const coastEta = plannedCoastEta(destination, mission.accelG, mission.coastEta, mission.crew, restRatio);
+  return { destination, crew: mission.crew, accelG: mission.accelG, coastEta, restRatio };
+}
+
+function SciFiParagraph({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div>
+      <h3 className="font-display text-[10px] tracking-[0.25em] text-cyan-300/80 uppercase">{title}</h3>
+      <p className="mt-0.5 text-[13px] leading-relaxed text-slate-200">{children}</p>
+    </div>
+  );
+}
+
+/** Uma missão da ficção: o que acontece na obra, a física, as diferenças e os números do simulador. */
+function SciFiArticle({
+  mission,
+  restRatio,
+  active,
+  onLoad,
+  onEmbark,
+}: {
+  mission: SciFiMission;
+  restRatio: number;
+  active: boolean;
+  onLoad: () => void;
+  onEmbark: () => void;
+}) {
+  const choice = sciFiChoice(mission, restRatio);
+  const { destination, coastEta } = choice;
+  const profile = useMemo(
+    () => missionProfileFor(destination, mission.accelG, coastEta, mission.crew, restRatio),
+    [destination, mission.accelG, coastEta, mission.crew, restRatio],
+  );
+  const plain = destinationMissionProfile(destination, mission.accelG, coastEta);
+  const verdict = viabilityText(choice, assessMission(mission.crew, mission.accelG, profile), profile, longestBurnS(plain));
+  const rest = profile.crewRest;
+  return (
+    <article
+      aria-label={`${mission.label} (${mission.work})`}
+      className={`rounded-xl border p-4 ${active ? 'border-cyan-300/70 bg-cyan-950/25' : 'border-slate-700/80 bg-slate-950/70'}`}
+    >
+      <div className="grid gap-4 lg:grid-cols-[1.7fr_1fr]">
+        <div className="flex min-w-0 flex-col gap-3">
+          <header>
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <h2 className="font-display text-lg font-bold tracking-wide text-white">{mission.label}</h2>
+              <span className="text-sm font-semibold text-cyan-200">{mission.work}</span>
+              {active && (
+                <span className="rounded-full border border-cyan-300/60 px-2 py-0.5 text-[10px] tracking-wider text-cyan-100 uppercase">
+                  no planejamento
+                </span>
+              )}
+            </div>
+            <div className="text-[11px] text-slate-400">{mission.credit}</div>
+          </header>
+          <SciFiParagraph title={mission.real ? 'O projeto' : 'Na obra'}>{mission.story}</SciFiParagraph>
+          <SciFiParagraph title="A física">{mission.physics}</SciFiParagraph>
+          <SciFiParagraph title="No simulador">{mission.simulator}</SciFiParagraph>
+        </div>
+        <aside className="flex min-w-0 flex-col gap-2">
+          <div className="hull-panel rounded-lg px-3 py-2">
+            <SummaryRow label="Destino" value={`${destination.name} · ${formatCompact(destination.distanceLy)} anos-luz`} />
+            <SummaryRow label="A bordo" value={mission.crew === 'crewed' ? 'Piloto humano' : 'Sonda robótica'} />
+            <SummaryRow label="Aceleração α" value={formatAccelG(mission.accelG)} />
+            <SummaryRow label="Perfil" value={profileLabel(coastEta)} />
+            <SummaryRow label="Tempo de bordo" value={formatSpan(profile.tauTotal)} />
+            <SummaryRow label="Tempo na Terra" value={formatSpan(profile.tTotal)} />
+            {rest && (
+              <>
+                <SummaryRow label="Queimas" value={`${formatProse(rest.burns)} × até ${formatSpan(rest.burnTau)}`} />
+                <SummaryRow
+                  label="Descanso entre queimas"
+                  value={`${formatSpan(rest.restTau)} (${formatProse(rest.restTau / rest.burnTau)}×)`}
+                />
+              </>
+            )}
+            <SummaryRow label="γ máximo" value={formatGamma(profile.gammaMax)} />
+            <SummaryRow
+              label="Velocidade máxima"
+              value={formatVelocity(Math.tanh(profile.etaMax), Math.exp(-profile.etaMax) / profile.gammaMax)}
+            />
+          </div>
+          {mission.withoutRests && rest && (
+            <div className="rounded-lg border border-slate-700/80 bg-slate-900/60 px-3 py-2">
+              <div className="text-[11px] text-slate-400">{mission.withoutRests}</div>
+              <div className="font-readout text-[13px] text-slate-100 tabular-nums">
+                {formatSpan(plain.tauTotal)} a bordo · {formatSpan(plain.tTotal)} na Terra
+              </div>
+            </div>
+          )}
+          <p className={`rounded-lg border px-3 py-2 text-[12px] leading-snug ${verdict.tone}`}>{verdict.text}</p>
+          <div className="mt-auto grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={onLoad}
+              className="rounded-lg border border-slate-600 px-3 py-2 text-[12px] text-slate-100 hover:border-slate-400 hover:bg-slate-800"
+            >
+              Carregar no planejamento
+            </button>
+            <button
+              type="button"
+              onClick={onEmbark}
+              className="font-display rounded-lg border border-cyan-300/70 bg-cyan-400/20 px-3 py-2 text-[12px] font-bold tracking-[0.2em] text-cyan-50 uppercase hover:bg-cyan-400/35"
+            >
+              Embarcar ›
+            </button>
+          </div>
+        </aside>
+      </div>
+    </article>
+  );
+}
+
+/** Menu "Ficção científica hard": missões clássicas e um projeto real, explicadas, em um clique. */
+function SciFiMenu({
+  restRatio,
+  activeId,
+  onLoad,
+  onEmbark,
+}: {
+  restRatio: number;
+  activeId: string | null;
+  onLoad: (mission: SciFiMission) => void;
+  onEmbark: (mission: SciFiMission) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="max-w-3xl text-[13px] leading-relaxed text-slate-300">
+        Viagens de obras de ficção científica hard e de um projeto real, com a física por trás de cada uma. Os números
+        ao lado de cada missão são os do simulador, com a mesma física da viagem; com piloto humano, incluem os
+        descansos da tripulação quando o corpo precisa deles (descansos de {formatProse(restRatio)}× a queima, a escolha
+        atual do planejamento). Carregue uma missão para ajustá-la ou embarque direto.
+      </p>
+      {SCIFI_MISSIONS.map((m) => (
+        <SciFiArticle
+          key={m.id}
+          mission={m}
+          restRatio={restRatio}
+          active={m.id === activeId}
+          onLoad={() => onLoad(m)}
+          onEmbark={() => onEmbark(m)}
+        />
+      ))}
+    </div>
+  );
+}
+
+type PlannerView = 'plan' | 'scifi';
+
+const tabClass = (active: boolean) =>
+  `font-display -mb-px border-b-2 px-3 py-2 text-[11px] tracking-[0.2em] uppercase transition-colors ${
+    active ? 'border-cyan-300 text-cyan-100' : 'border-transparent text-slate-400 hover:text-slate-200'
+  }`;
 
 const pickChoice = ({ destination, accelG, coastEta, crew, restRatio }: MissionChoice): MissionChoice => ({
   destination,
@@ -349,6 +522,15 @@ function Planner() {
   const presetActive = presets.some((p) => p.accelG === draft.accelG);
   const [customOpen, setCustomOpen] = useState(!presetActive);
   const update = (patch: Partial<MissionChoice>) => setDraft((d) => ({ ...d, ...patch }));
+  const [view, setView] = useState<PlannerView>('plan');
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const activeSciFi =
+    findSciFiMission({
+      destinationId: draft.destination.id,
+      crew: draft.crew,
+      accelG: draft.accelG,
+      coastEta: draft.coastEta,
+    }) ?? null;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -363,6 +545,22 @@ function Planner() {
     closePlanner();
   };
 
+  const showView = (next: PlannerView) => {
+    setView(next);
+    dialogRef.current?.scrollTo({ top: 0 });
+  };
+
+  const applySciFi = (m: SciFiMission) => {
+    setCustomOpen(false);
+    update({ destination: DESTINATIONS[m.destinationId], crew: m.crew, accelG: m.accelG, coastEta: m.coastEta });
+    showView('plan');
+  };
+
+  const embarkSciFi = (m: SciFiMission) => {
+    configureMission(sciFiChoice(m, draft.restRatio));
+    closePlanner();
+  };
+
   const chooseCrew = (crew: CrewKind) => {
     if (crew === draft.crew) return;
     // Mantém a aceleração se ela existe na outra lista (a demonstração existe nas duas).
@@ -373,6 +571,7 @@ function Planner() {
 
   return (
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-label="Planejamento da missão"
@@ -400,7 +599,41 @@ function Planner() {
           </div>
         </header>
 
-        <div className="grid gap-5 lg:grid-cols-[1fr_1.25fr_1fr]">
+        <div role="tablist" aria-label="Planejamento ou missões da ficção" className="flex gap-1 border-b border-slate-800">
+          <button type="button" role="tab" aria-selected={view === 'plan'} className={tabClass(view === 'plan')} onClick={() => showView('plan')}>
+            ⚙ Planejar
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === 'scifi'}
+            className={tabClass(view === 'scifi')}
+            onClick={() => showView('scifi')}
+          >
+            📚 <span className="sm:hidden">Ficção hard</span>
+            <span className="hidden sm:inline">Ficção científica hard</span>
+          </button>
+        </div>
+
+        {view === 'scifi' && (
+          <SciFiMenu restRatio={draft.restRatio} activeId={activeSciFi?.id ?? null} onLoad={applySciFi} onEmbark={embarkSciFi} />
+        )}
+
+        {view === 'plan' && activeSciFi && (
+          <p className="rounded-lg border border-cyan-400/30 bg-cyan-950/30 px-3 py-2 text-[12px] leading-snug text-cyan-100">
+            <span aria-hidden className="mr-1">
+              📚
+            </span>
+            <span className="font-semibold">{activeSciFi.label}</span>{' '}
+            <span className="text-cyan-200/70">({activeSciFi.work})</span> · {activeSciFi.note}{' '}
+            <button type="button" className="whitespace-nowrap text-cyan-300 underline hover:text-cyan-100" onClick={() => showView('scifi')}>
+              Saiba mais ›
+            </button>
+          </p>
+        )}
+
+        {/* Escondido, não desmontado, no menu da ficção: o campo da aceleração personalizada guarda o que foi digitado. */}
+        <div className={`${view === 'plan' ? 'grid' : 'hidden'} gap-5 lg:grid-cols-[1fr_1.25fr_1fr]`}>
           <Section step={1} title="Destino">
             <div className="flex flex-col gap-2" role="radiogroup" aria-label="Destino">
               {DESTINATION_LIST.map((d) => (
@@ -513,7 +746,9 @@ function Planner() {
       </div>
       {/* No celular, o resumo e o embarque ficam sempre à mão no rodapé. `sticky`, não
           `fixed`: o backdrop-blur do diálogo faria o `fixed` rolar junto com a lista. */}
-      <div className="sticky bottom-0 z-10 mt-auto flex shrink-0 items-center justify-between gap-3 border-t border-cyan-400/30 bg-neutral-950/95 px-4 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] lg:hidden">
+      <div
+        className={`sticky bottom-0 z-10 mt-auto ${view === 'plan' ? 'flex' : 'hidden'} shrink-0 items-center justify-between gap-3 border-t border-cyan-400/30 bg-neutral-950/95 px-4 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] lg:hidden`}
+      >
         <div className="min-w-0 text-[11px] leading-tight text-slate-300">
           <div className="truncate font-semibold text-slate-50">
             {draft.destination.shortName} · {formatAccelG(draft.accelG)} ·{' '}

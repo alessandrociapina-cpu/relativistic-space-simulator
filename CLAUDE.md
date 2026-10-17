@@ -601,7 +601,7 @@ relativistic-space-simulator/
 │   │   ├── RelativityEngine.ts    # Cinemática hiperbólica 64-bit e uniforms
 │   │   ├── RelativityEngine.test.ts # Testes unitários Vitest validando os marcos do vídeo
 │   │   ├── destinations.ts        # Catálogo de estrelas e galáxias (com direção no céu e magnitude)
-│   │   ├── accelerationPresets.ts # Acelerações por tipo de nave e limites de tolerância (§7) + teste
+│   │   ├── accelerationPresets.ts # Acelerações por tipo de nave, limites de tolerância e missões da ficção (§7) + teste
 │   │   ├── criticalEvents.ts      # Janelas críticas do Auto-Step Down (§7.2) + teste
 │   │   ├── maneuvers.ts           # Motor desligado (rampa e inércia) e religado (piloto automático) (§4.2.8) + teste
 │   │   ├── crewRest.ts            # Descanso da tripulação: ciclo, rota com descansos, carga e estado (§4.2.9) + teste
@@ -643,7 +643,7 @@ relativistic-space-simulator/
 │   │   ├── time.ts, vec3.ts       # Dias desde J2000 e vetores em 64 bits
 │   ├── components/
 │   │   ├── SplashScreen.tsx       # Abertura: viagem relativística ou sondas históricas
-│   │   ├── MissionPlanner.tsx     # Planejamento: destino, piloto ou sonda, aceleração, perfil (§7)
+│   │   ├── MissionPlanner.tsx     # Planejamento: destino, piloto ou sonda, aceleração, perfil; aba da ficção científica hard (§7)
 │   │   ├── RelativisticCockpit.tsx # Layout do cockpit (#viagem)
 │   │   ├── CockpitFrame.tsx       # Colunas do para-brisa (tela larga)
 │   │   ├── RelativisticSky.tsx    # Esfera celeste + uniforms, compartilhada pelos monitores
@@ -685,7 +685,7 @@ relativistic-space-simulator/
 ---
 ## 7. Regras de UX e Controles de Voo
 1. **Telas:** a abertura (`#inicio`, ou sem âncora) escolhe entre a viagem relativística (`#viagem`) e as sondas (`#sondas`, §11). O cockpit carrega sob demanda; ao entrar, abre o **planejamento da missão** por cima dele.
-2. **Planejamento** (`MissionPlanner.tsx`), em três colunas (empilhadas no celular, com o embarque fixo no rodapé):
+2. **Planejamento** (`MissionPlanner.tsx`), em duas abas: "⚙ Planejar", em três colunas (empilhadas no celular, com o embarque fixo no rodapé), e "📚 Ficção científica hard" (o último tópico abaixo):
    - **Destino:** os cinco da §4.3, com distância, tipo e uma linha de descrição.
    - **Nave:** "Piloto humano" (o para-brisa passa pelo olho do piloto, §9) ou "Sonda robótica" (câmeras de bordo, sem olho nem véu).
    - **Aceleração** (`src/physics/accelerationPresets.ts`), por tipo de nave, cada uma com a proteção, a tolerância e o tempo de viagem para o destino escolhido:
@@ -696,7 +696,15 @@ relativistic-space-simulator/
      - O veredito compara o maior empuxo contínuo (a viagem inteira no Flip-and-Burn, cada queima com cruzeiro, a queima do ciclo com descansos) com a tolerância: ✓ suportável, "Suportável com descansos" (quanto seria o empuxo contínuo, o limite do corpo, o número de queimas e a duração das queimas e dos descansos, em vezes a queima, §4.2.9; o cartão marca "com descansos"), ⚠ além do limite ("a tripulação não chegaria viva") ou ✕ hipotética.
    - **Perfil:** "Acelerar e frear" (Flip-and-Burn) ou "Acelerar, cruzar e frear", com a velocidade de cruzeiro num slider de rapidez (sugestão: 0,9c). O cruzeiro vale no máximo 0,999 da rapidez do ponto médio da aceleração escolhida (`effectiveCoastEta`): trocar para uma aceleração menor não vira Flip-and-Burn sem aviso, e o rascunho guarda o valor do slider para quando a aceleração voltar a subir. O resumo mostra tempos de bordo e na Terra, as queimas e o descanso entre elas (com descansos, "8,10 dias (3×)"), γ e velocidade máximos e a razão de massa do foguete de fótons.
    - **Descanso** (só quando o plano tem descansos): "3× a queima" (padrão) ou "5× a queima", com a nota de que sem peso o corpo se recupera mais devagar do que se desgasta e 5× dá mais folga e alonga a viagem. Os cartões de aceleração usam a escolha.
+   - Cada cartão de aceleração mostra também o `detail` do preset: a fisiologia e a referência da ficção (Tau Zero a 1 g, Avatar a 1,5 g, The Expanse a 3 g, Guerra Sem Fim a 10 g, A Floresta Sombria a 30 g).
    - O padrão é a demonstração clássica: Proxima, 1,61 × 10⁶ g, piloto humano (hipotético). "Embarcar" aplica a missão parada em τ = 0; "⚙ Planejar" no painel reabre o planejamento.
+   - **Ficção científica hard** (`SCIFI_MISSIONS` em `accelerationPresets.ts`): cinco missões, cada uma com um preset de aceleração e um destino do catálogo, carregadas em um clique ("Carregar no planejamento") ou embarcadas direto. Cada uma ocupa a largura da tela, com "Na obra" ("O projeto" na Starshot), "A física" e "No simulador" (onde o simulador difere da obra), e ao lado os números calculados pela mesma física (tempos de bordo e na Terra, queimas e descansos com a escolha atual de descanso, γ e velocidade máximos) e o veredito.
+     - ISV Venture Star (Avatar): Proxima, 1,5 g, cruzeiro a 0,7c. No filme todos viajam em criossono; com piloto acordado, 22 queimas com descansos, 6,55 anos de bordo e 8,03 na Terra; sem descansos (o quadro "Como no filme"), 4,93 e 6,60. Chegar a 0,7c leva 6,7 meses de bordo (os 5,5 meses citados são a conta de Newton).
+     - Leonora Christine (Tau Zero): Andrômeda a 1 g, 28,6 anos de bordo (no livro, Beta Virginis e sem frenagem; até TRAPPIST-1 seriam 7,28 anos).
+     - Rocinante (The Expanse): Proxima a 3 g, milhares de queimas com descansos (4,20 anos com 3×).
+     - Mar profundo (A Floresta Sombria · Guerra Sem Fim): Sirius a 30 g, centenas de queimas, 1,09 a 1,49 ano de bordo.
+     - Starshot (projeto real): Proxima, sonda a 30 000 g até 0,2c, queima de 3,4 min e ~21 anos; a real não freia.
+     - Na aba Planejar, a escolha que reproduz uma delas (`findSciFiMission`, cruzeiro com tolerância de 10⁻³ em η) mostra uma faixa com o resumo e "Saiba mais ›". A aba Planejar fica escondida, não desmontada, no menu da ficção.
 3. **Multiplicador de Tempo Próprio ($M_\tau$) com *Auto-Step Down*:**
    - Escada (`src/store/timeScales.ts`), em tempo de bordo por segundo real: `0,01 s/s`, `0,03 s/s`, `0,1 s/s`, `0,3 s/s`, `1 s/s`, `5 s/s`, `20 s/s`, `100 s/s`, `10 min/s`, `1 h/s`, `6 h/s`, `1 dia/s`, `1 sem/s`, `1 mês/s`, `3 meses/s`, `1 ano/s`, `5 anos/s`, `25 anos/s`: da câmera lenta a $10^7$ g aos séculos de Andrômeda a 0,1 g. O painel percorre a escada com ◀ ▶, mostra quanto falta na tela ("≈ 21 min até a chegada") e tem ⟲ para o degrau "natural", o que encaixa a viagem em ~10 min (demonstração: 1 s/s; 1 g até Proxima: 1 dia/s; 1 g até Andrômeda: 1 mês/s). **Toda missão começa em 1 s/s** (tempo real); enquanto o usuário não mexe no multiplicador e a viagem duraria mais de 2 min na tela, ▶ pulsa e um aviso "◂ toque para acelerar o tempo" aponta para ele. O visor do multiplicador é estreito (5,5 rem).
    - Opção "Desacelerar nos eventos" (quando a CMB atravessa o espectro visível em $\gamma \in [400, 15000]$ e na reta final antes do *Flip*): ao entrar na janela, M_τ cai para o maior degrau com que ela dura ≥ 20 s reais, nunca abaixo de 1x. Não há degrau entre 1x e 5x: na demonstração, isso é sempre 1x.
