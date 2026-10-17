@@ -32,11 +32,12 @@ export function CockpitMonitor({ title, subtitle, className = '', tilt, footer, 
       <div aria-hidden className="absolute -top-3 right-[18%] h-3 w-1 rounded-t-sm bg-gradient-to-b from-slate-500 to-slate-700 sm:-top-4 sm:h-4" />
       <section className={`hull-panel overflow-hidden rounded-lg p-1 ${tilt ? TILT[tilt] : ''}`}>
         <header className="font-display flex items-baseline justify-between gap-2 px-1.5 pt-0.5 pb-1 text-[9px] tracking-[0.18em] text-cyan-300/90 uppercase sm:text-[10px]">
-          <span className="flex min-w-0 items-center gap-1">
+          {/* O título (com o zoom do telescópio) fica inteiro; o subtítulo usa o que sobra. */}
+          <span className="flex max-w-full min-w-0 shrink-0 items-center gap-1">
             <span className="truncate whitespace-nowrap">{title}</span>
             {help && <InfoTip id={help} />}
           </span>
-          {subtitle && <span className="hidden truncate text-slate-500 normal-case sm:inline">{subtitle}</span>}
+          {subtitle && <span className="hidden min-w-0 truncate text-slate-500 normal-case sm:inline">{subtitle}</span>}
         </header>
         <div className="scanlines relative aspect-[16/10] overflow-hidden sm:aspect-[4/3] rounded-sm border border-cyan-400/25 bg-black shadow-[inset_0_0_18px_rgba(0,0,0,0.9)]">
           {children}

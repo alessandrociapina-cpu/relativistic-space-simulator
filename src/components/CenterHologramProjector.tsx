@@ -105,27 +105,30 @@ const niceStep = (span: number) => {
 /** Rótulo do eixo de tempo de bordo: segundos na demonstração, dias ou anos nas viagens longas. */
 const tickLabel = (seconds: number) => (seconds < 3600 ? `${Math.round(seconds)} s` : formatSpan(seconds));
 
-function LuxCurveHologram({ timeline, tau, tauHalf, lux }: { timeline: EyeTimeline; tau: number; tauHalf: number; lux: number }) {
-  const halfIndex = Math.round(tauHalf / timeline.dt);
+/** A luz à frente na queima de aceleração (até `burnEndTau`: o meio do caminho, ou o início do cruzeiro). */
+function LuxCurveHologram({ timeline, tau, burnEndTau, lux }: { timeline: EyeTimeline; tau: number; burnEndTau: number; lux: number }) {
+  const endIndex = Math.round(burnEndTau / timeline.dt);
   const threshold = timeline.peakLux * 0.01;
   let startIndex = 0;
-  while (startIndex < halfIndex && timeline.lux[startIndex]! < threshold) startIndex++;
-  const step = niceStep((halfIndex - startIndex) * timeline.dt);
-  const tauStart = Math.floor((startIndex * timeline.dt) / step) * step;
+  while (startIndex < endIndex && timeline.lux[startIndex]! < threshold) startIndex++;
+  // Intervalos nunca nulos: com manobras, o pico da missão pode vir depois da primeira queima.
+  const step = niceStep(Math.max((endIndex - startIndex) * timeline.dt, timeline.dt));
+  const tauStart = Math.min(Math.floor((startIndex * timeline.dt) / step) * step, burnEndTau);
+  const span = Math.max(burnEndTau - tauStart, 1e-3);
   const yMax = Math.max(timeline.peakLux, 10_000) * 1.12;
-  const x = (t: number) => 20 + (420 * (t - tauStart)) / (tauHalf - tauStart);
+  const x = (t: number) => 20 + (420 * (t - tauStart)) / span;
   const y = (l: number) => 86 - (68 * l) / yMax;
 
   const all: string[] = [];
   const done: string[] = [];
   for (let i = 0; i <= 90; i++) {
-    const t = tauStart + ((tauHalf - tauStart) * i) / 90;
-    const point = `${x(t).toFixed(1)},${y(timeline.lux[Math.min(Math.round(t / timeline.dt), halfIndex)]!).toFixed(1)}`;
+    const t = tauStart + (span * i) / 90;
+    const point = `${x(t).toFixed(1)},${y(timeline.lux[Math.min(Math.round(t / timeline.dt), endIndex)]!).toFixed(1)}`;
     all.push(point);
     if (t <= tau) done.push(point);
   }
   const ticks: number[] = [];
-  for (let t = tauStart; t < tauHalf - step * 0.5; t += step) ticks.push(t);
+  for (let t = tauStart; t < burnEndTau - step * 0.5; t += step) ticks.push(t);
 
   return (
     <>
@@ -140,7 +143,7 @@ function LuxCurveHologram({ timeline, tau, tauHalf, lux }: { timeline: EyeTimeli
         </text>
         <polyline points={all.join(' ')} fill="none" stroke="#cbd5e1" strokeOpacity="0.45" strokeWidth="1.5" strokeDasharray="4 4" />
         {done.length > 1 && <polyline points={done.join(' ')} fill="none" stroke="#ffffff" strokeWidth="2.2" />}
-        <circle cx={x(Math.min(Math.max(tau, tauStart), tauHalf))} cy={y(lux)} r="4" fill="#ffffff" />
+        <circle cx={x(Math.min(Math.max(tau, tauStart), burnEndTau))} cy={y(lux)} r="4" fill="#ffffff" />
         <line x1="20" y1="86" x2="440" y2="86" stroke="#64748b" />
         {ticks.map((t, i) => (
           <text key={t} x={x(t)} y="99" fill="#cbd5e1" fontSize="9">
@@ -283,7 +286,7 @@ export function CenterHologramProjector() {
       content = <CmbSpectrumHologram temperatureK={p.cmbTempAheadK} />;
       break;
     case 'lux-curve':
-      content = <LuxCurveHologram timeline={timeline} tau={flight.tau} tauHalf={profile.tauHalf} lux={p.visibleLuxAhead} />;
+      content = <LuxCurveHologram timeline={timeline} tau={flight.tau} burnEndTau={profile.burnEndTau} lux={p.visibleLuxAhead} />;
       break;
     case 'countdown-flip':
       content = (

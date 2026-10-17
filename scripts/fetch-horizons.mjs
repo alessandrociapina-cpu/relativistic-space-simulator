@@ -450,30 +450,41 @@ function propagate(row, dt, mu) {
   const rv = x * vx + y * vy + z * vz;
   const alpha = 2 / r0 - v2 / mu;
   // χ tem o sinal de dt; F(χ) cresce com χ, então a bisseção sempre tem um lado finito.
+  // Na hipérbole, o intervalo vai até H = |χ|√(−α) = 700 (cosh e sinh estouram perto de 710).
   let lo = dt > 0 ? 0 : -Infinity;
   let hi = dt > 0 ? Infinity : 0;
   let chi = alpha > 1e-12 ? sqrtMu * dt * alpha : (sqrtMu * dt) / r0;
   if (alpha < -1e-12) {
+    const maxChi = 700 / Math.sqrt(-alpha);
+    lo = Math.max(lo, -maxChi);
+    hi = Math.min(hi, maxChi);
     const a = 1 / alpha;
     const sign = Math.sign(dt);
     const guess = sign * Math.sqrt(-a) * Math.log((-2 * mu * alpha * dt) / (rv + sign * Math.sqrt(-mu * a) * (1 - r0 * alpha)));
-    if (guess > lo && guess < hi) chi = guess;
+    chi = guess > lo && guess < hi ? guess : Math.min(Math.max(chi, lo / 2), hi / 2);
   }
+  // Bisseção também quando o Newton não encolhe o passo à metade a cada dois (rtsafe).
+  let step = Infinity;
+  let stepBefore = Infinity;
   for (let k = 0; k < 200; k++) {
     const zz = alpha * chi * chi;
     const [C, S] = stumpff(zz);
     const F = (rv / sqrtMu) * chi * chi * C + (1 - alpha * r0) * chi * chi * chi * S + r0 * chi - sqrtMu * dt;
     const dF = (rv / sqrtMu) * chi * (1 - zz * S) + (1 - alpha * r0) * chi * chi * C + r0;
+    // Raiz exata: o passo de Newton seria nulo, na borda do intervalo, e cairia na bisseção.
+    if (F === 0) break;
     // Estouro numérico (cosh enorme) só acontece com |χ| grande demais.
     if (Number.isNaN(F) ? chi > 0 : F > 0) hi = chi;
     else lo = chi;
     let next = chi - F / dF;
-    if (!(next > lo && next < hi)) next = Number.isFinite(lo) && Number.isFinite(hi) ? (lo + hi) / 2 : 2 * chi;
-    if (Math.abs(next - chi) <= 1e-13 * Math.max(1, Math.abs(chi))) {
-      chi = next;
-      break;
+    if (!(next > lo && next < hi) || Math.abs(2 * F) > Math.abs(stepBefore * dF)) {
+      next = Number.isFinite(lo) && Number.isFinite(hi) ? (lo + hi) / 2 : 2 * chi;
     }
+    stepBefore = step;
+    step = next - chi;
+    const done = Math.abs(step) <= 1e-13 * Math.max(1, Math.abs(chi));
     chi = next;
+    if (done) break;
   }
   const zz = alpha * chi * chi;
   const [C, S] = stumpff(zz);

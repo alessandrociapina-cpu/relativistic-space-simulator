@@ -229,9 +229,10 @@ vec3 renderRealisticStarDisk(vec3 rayDir, vec3 centerDir, float radiusRad, float
         vec3 sphereNormal = normalize(xProj * right + yProj * localUp + mu * n);
         float granules = fbm(sphereNormal * 14.0 + vec3(0.0, 0.0, uTime * 0.04));
         float spots = smoothstep(0.35, 0.7, snoise(sphereNormal * 4.5));
-        // Escurecimento de bordo: I(μ) = 1 − u(1 − μ^0,75), u = 0,68
+        // Escurecimento de bordo só pela lei I(μ) = 1 − u(1 − μ^0,75), u = 0,68: baixar também a
+        // temperatura no bordo escureceria duas vezes (muito numa anã vermelha, no regime de Wien).
         float limbDarkening = 1.0 - 0.68 * (1.0 - pow(mu, 0.75));
-        float localTemp = baseTempK * (0.94 + 0.12 * granules - 0.18 * spots) * (0.75 + 0.25 * mu);
+        float localTemp = baseTempK * (0.94 + 0.12 * granules - 0.18 * spots);
         coverage = 1.0 - smoothstep(0.96, 1.0, rNorm);
         result += sampleBlackbodySensor(localTemp * doppler) * limbDarkening * coverage;
     }
@@ -401,18 +402,22 @@ vec3 renderSky(RelativisticRay ray) {
     // Sol atrás e alvo à frente; os discos opacos escondem as estrelas atrás deles.
     float sunCoverage;
     vec3 sun = renderRealisticStarDisk(ray.sourceDir, uSunDir, uSunRadiusRad, T_SUN, ray.doppler, sunCoverage);
+    // A estrela-alvo como o Sol: o disco sem diluição pela PSF e o ponto com a diluição uma vez só, no
+    // beaming (como as estrelas do catálogo). O ponto fica fora da oclusão do próprio disco, que é menor
+    // que um pixel enquanto ele aparece.
     float targetCoverage = 0.0;
-    vec3 target;
+    vec3 targetDisk;
+    vec3 targetPoint = vec3(0.0);
     if (uTargetType == 0) {
-        target = renderRealisticStarDisk(ray.sourceDir, uTargetDir, uTargetRadiusRad, uTargetTemp, ray.doppler, targetCoverage) * uTargetGain
-               + renderPointSource(ray, uTargetDir, uTargetPointAmp, uTargetTemp, uTargetRadiusRad);
+        targetDisk = renderRealisticStarDisk(ray.sourceDir, uTargetDir, uTargetRadiusRad, uTargetTemp, ray.doppler, targetCoverage) * uTargetGain;
+        targetPoint = renderPointSource(ray, uTargetDir, uTargetPointAmp, uTargetTemp, uTargetRadiusRad);
     } else if (uTargetType == 1) {
-        target = renderBlackHoleTarget(ray.sourceDir, uTargetDir, uTargetRadiusRad, uTargetTemp, ray.doppler, targetCoverage);
+        targetDisk = renderBlackHoleTarget(ray.sourceDir, uTargetDir, uTargetRadiusRad, uTargetTemp, ray.doppler, targetCoverage) * ray.psfDilution;
     } else {
-        target = renderGalaxyTarget(ray.sourceDir, uTargetDir, uTargetRadiusRad, uTargetTemp, ray.doppler) * uGalaxyGain;
+        targetDisk = renderGalaxyTarget(ray.sourceDir, uTargetDir, uTargetRadiusRad, uTargetTemp, ray.doppler) * uGalaxyGain * ray.psfDilution;
     }
     float occlusion = max(sunCoverage, targetCoverage);
-    return stars * (1.0 - occlusion) + sun + target * ray.psfDilution;
+    return stars * (1.0 - occlusion) + sun + targetDisk + targetPoint;
 }
 
 vec3 acesToneMapping(vec3 x) {

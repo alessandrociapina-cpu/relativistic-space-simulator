@@ -8,6 +8,7 @@
  * γ = 9 356, os marcos do vídeo de referência (11 065 e 10 796 lux).
  */
 import {
+  C,
   T_CMB_0,
   computeFlightState,
   computeShaderKinematics,
@@ -240,7 +241,7 @@ export interface PhotometryAndEyeState {
   readonly retinaStops: number;
   /** Na frenagem: quantas vezes a mesma luz do instante espelho da ida parece mais fraca agora. */
   readonly dimmerFactor: number;
-  /** Instante da ida com a mesma luz de agora (τ_total − τ), na frenagem. */
+  /** Instante da ida com a mesma luz de agora (τ_total − τ; com manobras, o da subida com a mesma η), na frenagem. */
   readonly whiteoutTau: number | null;
   readonly whiteoutRetinaStops: number | null;
   readonly whiteoutPupilMm: number | null;
@@ -267,9 +268,12 @@ export function computePhotometryAndEyeState(
   let whiteoutTau: number | null = null;
   let whiteoutRetinaStops: number | null = null;
   let whiteoutPupilMm: number | null = null;
-  if (flight.phase === 'decelerating') {
-    // E(τ) = E(τ_total − τ): a mesma luz da ida, vista com o olho de agora.
-    whiteoutTau = profile.tauTotal - flight.tau;
+  // O instante da ida com a mesma luz de agora: no plano, simétrico, E(τ) = E(τ_total − τ). Depois de
+  // um comando do piloto a simetria acaba (a frenagem de emergência usa a > α): vale o instante da subida
+  // inicial com a mesma rapidez, η = ατ/c, se ele existiu (até `burnEndTau`, que já para no primeiro comando).
+  const mirrorTau = profile.maneuvers ? (C / profile.properAccel) * flight.eta : profile.tauTotal - flight.tau;
+  if (flight.phase === 'decelerating' && mirrorTau <= profile.burnEndTau) {
+    whiteoutTau = mirrorTau;
     const mirrorStops = sample(timeline.stops, timeline, whiteoutTau);
     whiteoutPupilMm = sample(timeline.pupilMm, timeline, whiteoutTau);
     whiteoutRetinaStops = -mirrorStops;
