@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { formatAngle, formatEnergyEv, formatProse, formatSpan, formatWavelengthNm } from './format';
-import { texAngle, texDuration, texEnergyEv, texNumber, texSpeed, texWavelengthNm } from './tex';
+import { LIGHT_YEAR_M } from '../physics/RelativityEngine';
+import { texAngle, texDistance, texDuration, texEnergyEv, texNumber, texSpeed, texWavelengthNm } from './tex';
 
 describe('números em TeX', () => {
   it('vírgula decimal sem espaço e milhares com espaço fino', () => {
@@ -21,6 +22,11 @@ describe('números em TeX', () => {
     expect(texWavelengthNm(0.19)).toBe('190\\ \\mathrm{pm}');
     expect(texEnergyEv(3.7e3)).toBe('3{,}70\\ \\mathrm{keV}');
     expect(texDuration(598.8)).toBe('\\text{9 min 59 s}');
+  });
+
+  it('distâncias como nos visores; acima de 10⁷ anos-luz, a potência de 10 fora do \\text', () => {
+    expect(texDistance(26_700 * LIGHT_YEAR_M)).toBe('\\text{26 700 anos-luz}');
+    expect(texDistance(5.38e7 * LIGHT_YEAR_M)).toBe('5{,}380 \\times 10^{7}\\ \\text{anos-luz}');
   });
 
   it('ângulos entre chaves, para aceitar o sinal de minuto/segundo depois de uma potência', () => {

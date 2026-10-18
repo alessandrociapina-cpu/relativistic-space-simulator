@@ -165,7 +165,7 @@ export function SplashScreen() {
             icon={<ShipIcon />}
             kicker="Viagem interestelar"
             title="Quase à velocidade da luz"
-            text="Planeje uma missão até Alfa Centauri, Tau Ceti, Sirius, o centro da galáxia ou Andrômeda, com piloto humano ou sonda robótica, partindo da Terra ou de Erid. Veja da cabine a aberração da luz, o Doppler, a radiação cósmica de fundo e a dilatação do tempo."
+            text="Planeje uma missão até Alfa Centauri, Tau Ceti, Sirius, o centro da galáxia, Andrômeda ou o Aglomerado de Virgem, com piloto humano ou sonda robótica, partindo da Terra ou de Erid. Veja da cabine a aberração da luz, o Doppler, a radiação cósmica de fundo e a dilatação do tempo."
             action="Planejar a missão"
             onHover={setWarp}
           />

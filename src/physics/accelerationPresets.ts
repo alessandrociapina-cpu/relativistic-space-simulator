@@ -398,32 +398,59 @@ export const SCIFI_MISSIONS: readonly SciFiMission[] = [
   },
   {
     id: 'tau-zero',
-    label: 'Leonora Christine',
+    label: 'Leonora Christine · o plano',
     work: 'Tau Zero',
     credit: 'romance de Poul Anderson (1970)',
-    destinationId: 'andromeda',
+    destinationId: 'betaVirginis',
     crew: 'crewed',
     accelG: 1,
     coastEta: null,
     note:
-      'Tau Zero (Poul Anderson): um estatorreator de Bussard mantém 1 g contínuo; com a dilatação do tempo, os 2,5 ' +
-      'milhões de anos-luz até Andrômeda levam ~28,6 anos de bordo.',
+      'Tau Zero (Poul Anderson): o plano da Leonora Christine, um estatorreator de Bussard a 1 g até Beta Virginis, ' +
+      'com flip no meio do caminho: ~7,1 anos de bordo e ~37,5 na Terra.',
     story:
-      'Vinte e cinco homens e vinte e cinco mulheres partem para colonizar Beta Virginis, a pouco mais de 30 ' +
-      'anos-luz, numa nave que acelera sem parar, com o peso de sempre a bordo. No caminho, uma nebulosa avaria o ' +
-      'sistema de frenagem; sem poder desligar o motor, que também protege a nave do gás interestelar, a tripulação ' +
-      'segue acelerando. O fator τ = √(1 − v²/c²) = 1/γ, a razão entre o tempo de bordo e o da Terra, cai cada vez ' +
-      'mais: eles veem galáxias passarem e assistem ao fim do Universo.',
+      'Vinte e cinco homens e vinte e cinco mulheres partem para colonizar um planeta de Beta Virginis, a pouco mais ' +
+      'de 30 anos-luz, numa nave que acelera com o peso de sempre a bordo. O plano: acelerar a 1 g até o meio do ' +
+      'caminho, virar a nave e frear do mesmo jeito, chegando em poucos anos de bordo enquanto décadas passam na Terra.',
     physics:
       'O estatorreator recolhe com um campo magnético o hidrogênio do meio interestelar e o queima por fusão: quanto ' +
-      'mais rápido, mais combustível entra. Com aceleração constante, o tempo de bordo cresce só com o logaritmo da ' +
-      'distância, τ ≈ 2(c/α) ln(αD/c²): a 1 g, Andrômeda fica a ~28,6 anos de bordo, enquanto passam 2,5 milhões de ' +
-      'anos na Terra. O preço é o funil: para 1 g, o campo teria de varrer o gás de um círculo de ~3\u00a0500 km de raio ' +
-      '(estimativa de Peter Schattschneider).',
+      'mais rápido, mais combustível entra, e a nave não carrega o próprio propelente. A 1 g com flip no meio, os ' +
+      '35,65 anos-luz levam τ = (2c/α)·acosh(1 + αD/2c²) ≈ 7,09 anos de bordo e 37,5 na Terra, a 0,9987c no meio do ' +
+      'caminho (γ ≈ 19,4). Um foguete de fótons, que leva o combustível, precisaria de m₀/m₁ = e^(2η) ≈ 1\u00a0500.',
     simulator:
-      'Beta Virginis não está no catálogo, e no livro a nave nunca freia: aqui, a viagem que o mesmo motor tornaria ' +
-      'possível, com flip no meio do caminho e frenagem até Andrômeda. A 1 g, o corpo não precisa de descansos. Até ' +
-      'TRAPPIST-1, a 39,6 anos-luz, perto da distância de Beta Virginis, seriam 7,28 anos de bordo e 41,5 na Terra.',
+      'Pela paralaxe do Hipparcos, Beta Virginis fica a 35,65 anos-luz (no livro, ~32). A 1 g o corpo não precisa de ' +
+      'descansos. É a viagem que a Leonora Christine teria feito se o freio não tivesse falhado; a rota "sem freio" ' +
+      'mostra o que aconteceu.',
+  },
+  {
+    id: 'tau-zero-virgem',
+    label: 'Leonora Christine · sem freio',
+    work: 'Tau Zero',
+    credit: 'romance de Poul Anderson (1970)',
+    destinationId: 'virgoCluster',
+    crew: 'crewed',
+    accelG: 1,
+    coastEta: null,
+    note:
+      'Tau Zero: com o freio avariado, a Leonora Christine segue a 1 g para fora da Via Láctea. Até o Aglomerado de ' +
+      'Virgem, ~34,5 anos de bordo contra 54 milhões de anos na Terra.',
+    story:
+      'No caminho, uma nebulosa avaria o sistema de frenagem. Desligar o motor para consertá-lo seria a morte: o ' +
+      'mesmo campo magnético que recolhe o combustível protege a tripulação do gás interestelar, mortal àquela ' +
+      'velocidade. A saída é acelerar para fora da galáxia, até um vácuo quase perfeito. O fator τ = √(1 − v²/c²) = ' +
+      '1/γ, a razão entre o tempo de bordo e o da Terra, cai cada vez mais: a tripulação vê galáxias passarem e ' +
+      'chega a assistir ao fim do Universo.',
+    physics:
+      'Com aceleração constante, o tempo de bordo cresce só com o logaritmo da distância, τ ≈ 2(c/α) ln(αD/c²): a ' +
+      '1 g, os 54 milhões de anos-luz até M87, no centro do Aglomerado de Virgem, levam ~34,5 anos de bordo, com γ ≈ ' +
+      '2,8 × 10⁷ no meio do caminho. Um foguete de fótons precisaria de ~3 × 10¹⁵ vezes a própria massa em ' +
+      'combustível; o estatorreator escapa disso recolhendo o hidrogênio do caminho, mas para 1 g o campo teria de ' +
+      'varrer o gás de um círculo de ~3\u00a0500 km de raio (estimativa de Peter Schattschneider).',
+    simulator:
+      'No livro a nave não para em destino nenhum, e o vazio entre os aglomerados não é um ponto do mapa: aqui, a ' +
+      'escala da fuga é a distância até o Aglomerado de Virgem, com flip no meio do caminho e frenagem até M87. ' +
+      'Virgem fica perto do polo norte galáctico: a nave sai por cima do disco e vê a Via Láctea de fora, cada vez ' +
+      'menor atrás dela. A 1 g, sem descansos.',
   },
   {
     id: 'expanse',

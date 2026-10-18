@@ -68,6 +68,7 @@ function createSkyMaterial() {
     uSunPointAmp: { value: 0 },
     uSunTemp: { value: 5778 },
     uGalaxyGain: { value: GALAXY_SURFACE_GAIN },
+    uGalaxySpiral: { value: 1 },
     uTargetGain: { value: 1 },
     uBackgroundGain: { value: 1 },
     uSensorLut: { value: sensorLutTexture as THREE.Texture },
@@ -145,6 +146,7 @@ export function RelativisticSky({
     u.uEinsteinRadiusRad.value = bodies.einsteinRadiusRad;
     u.uTargetTemp.value = destination.temperatureK;
     u.uTargetType.value = TARGET_TYPE[destination.kind];
+    u.uGalaxySpiral.value = destination.elliptical ? 0 : 1;
     u.uTargetPointAmp.value = sky.targetPointAmp;
     u.uSunPointAmp.value = sky.sunPointAmp;
     u.uSunTemp.value = sky.sunTempK;

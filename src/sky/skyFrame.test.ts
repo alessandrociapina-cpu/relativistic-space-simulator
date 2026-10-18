@@ -18,6 +18,10 @@ describe('referenciais do céu', () => {
     const m31 = galacticLonLat(skyFrameFor(DESTINATIONS.andromeda).targetGalactic);
     expect(m31.l).toBeCloseTo(121.2, 0);
     expect(m31.b).toBeCloseTo(-21.6, 0);
+    // M87, no centro do Aglomerado de Virgem, fica perto do polo norte galáctico: a viagem sai por cima do disco.
+    const m87 = galacticLonLat(skyFrameFor(DESTINATIONS.virgoCluster).targetGalactic);
+    expect(m87.l).toBeCloseTo(283.8, 0);
+    expect(m87.b).toBeCloseTo(74.5, 0);
   });
 
   it('em todo destino, o alvo fica exatamente em −Z e o norte galáctico projetado em +Y', () => {

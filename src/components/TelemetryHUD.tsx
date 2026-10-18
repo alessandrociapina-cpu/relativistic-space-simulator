@@ -3,6 +3,7 @@ import { G0, flipTauOf, type FlightPhase } from '../physics/RelativityEngine';
 import { formatRelativisticSpeedPercent } from '../physics/EyeAndPhotometry';
 import { CREW_LABEL, findPreset } from '../physics/accelerationPresets';
 import { CMB_VISIBLE_GAMMA, activeWindowsAt } from '../physics/criticalEvents';
+import { towardName } from '../physics/destinations';
 import { useFlightStore } from '../store/useFlightStore';
 import { crewText, formatStrain, type CrewTone } from '../ui/crewStatus';
 import {
@@ -199,7 +200,7 @@ export function TelemetryHUD({ className = '' }: { className?: string }) {
         )}
         {/* Por último: quando os avisos ocupam as linhas, é o destino que sai de vista. */}
         <span className="font-display min-w-0 truncate text-[9px] tracking-[0.15em] text-slate-400 uppercase">
-          {origin.solarSystem ? '' : `${origin.homeName} → `}Rumo a {destination.name}
+          {origin.solarSystem ? '' : `${origin.homeName} → `}Rumo {towardName(destination)}
         </span>
       </div>
       {/* Três colunas no celular, cinco (duas fileiras) na tela média e uma fileira só
