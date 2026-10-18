@@ -1,3 +1,4 @@
+import '../quietThree';
 import { Html, OrbitControls } from '@react-three/drei';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { forwardRef, useEffect, useMemo, useRef } from 'react';
@@ -40,7 +41,7 @@ import {
   bodyRadiusAu,
   craftPoint,
   localPeriodDays,
-  trailPoints,
+  buildTrail,
   focusDisplay,
   focusPosition,
   frameBody,
@@ -54,6 +55,7 @@ import {
   viewDistance,
   type FocusId,
   type ScaleMode,
+  type Trail,
   type TrailPoint,
 } from './sceneMath';
 import { useProbeStore } from './useProbeStore';
@@ -71,6 +73,8 @@ const STAR_SPHERE = 20_000;
 const ORBIT_LINES_MIN_AU = 0.005;
 /** Pontos da volta recente desenhada a cada frame. */
 const RECENT_POINTS = 96;
+/** Tempo de cálculo dos rastros entre dois quadros (ms). */
+const TRAIL_SLICE_MS = 8;
 /** Altura de um rótulo na tela (px): um rótulo que encosta noutro desce ou sobe uma linha. */
 const LABEL_LINE_PX = 12;
 const LABEL_NUDGES_PX = [0, LABEL_LINE_PX, -LABEL_LINE_PX, 2 * LABEL_LINE_PX, -2 * LABEL_LINE_PX];
@@ -344,19 +348,27 @@ function SceneContent() {
   useEffect(() => {
     const first = useProbeStore.getState().selected;
     const order = CRAFTS.map((c, i) => ({ c, i })).sort((a, b) => Number(b.c.mission === first) - Number(a.c.mission === first));
-    let cancelled = false;
     let next = 0;
+    let current: { build: Generator<void, Trail>; index: number } | null = null;
+    // Fatias de ~8 ms entre os quadros: os rastros enchem sem travar a cena nem a câmera.
     const work = () => {
-      if (cancelled || next >= order.length) return;
-      const { c, i } = order[next++]!;
-      Object.assign(trails[i]!, trailPoints(c.trajectory), { builtFor: null });
-      setTimeout(work, 0);
+      const deadline = performance.now() + TRAIL_SLICE_MS;
+      while (performance.now() < deadline) {
+        if (!current) {
+          if (next >= order.length) return;
+          const { c, i } = order[next++]!;
+          current = { build: buildTrail(c.trajectory), index: i };
+        }
+        const step = current.build.next();
+        if (step.done) {
+          Object.assign(trails[current.index]!, step.value, { builtFor: null });
+          current = null;
+        }
+      }
+      id = setTimeout(work, 0);
     };
-    const id = setTimeout(work, 0);
-    return () => {
-      cancelled = true;
-      clearTimeout(id);
-    };
+    let id = setTimeout(work, 0);
+    return () => clearTimeout(id);
   }, [trails]);
   // A sonda escolhida (e as companheiras dela) em destaque; as demais, só o rastro, mais apagado.
   const selectedRef = useRef(selected);

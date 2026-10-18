@@ -176,7 +176,15 @@ const WINDOW_TRAIL_MAX_STEP_DAYS = 1;
 const RING_SPACING_DAYS = 10;
 const RING_PERIOD_DAYS = 5;
 const RING_WINDOW_DAYS = 60;
+/** Pontos do rastro calculados entre duas pausas de `buildTrail` (~1 ms). */
+const TRAIL_POINTS_PER_SLICE = 32;
 
+export interface Trail {
+  readonly times: number[];
+  readonly points: TrailPoint[];
+  /** gaps[k]: não há linha entre o ponto k − 1 e o ponto k. */
+  readonly gaps: boolean[];
+}
 
 /**
  * Pontos do rastro: o passo segue o giro da sonda em torno do corpo central
@@ -184,15 +192,31 @@ const RING_WINDOW_DAYS = 60;
  * um periélio da Parker ou uma passagem rente a Júpiter saem lisos sem
  * encher de pontos os anos de cruzeiro.
  */
-export function trailPoints(trajectory: ProbeTrajectory): { times: number[]; points: TrailPoint[]; gaps: boolean[] } {
+export function trailPoints(trajectory: ProbeTrajectory): Trail {
+  const build = buildTrail(trajectory);
+  for (;;) {
+    const step = build.next();
+    if (step.done) return step.value;
+  }
+}
+
+/**
+ * O mesmo cálculo de `trailPoints` em fatias: pausa a cada poucos pontos, para a cena distribuir os rastros
+ * (centenas de milissegundos numa órbita longa, como a da Dawn) por vários quadros sem travar.
+ */
+export function* buildTrail(trajectory: ProbeTrajectory): Generator<void, Trail> {
+  let sinceYield = 0;
   const times: number[] = [];
   const points: TrailPoint[] = [];
-  /** gaps[k]: não há linha entre o ponto k − 1 e o ponto k. */
   const gaps: boolean[] = [];
   let gapNext = false;
   /** Volta em andamento numa órbita rápida e longa: início e ângulo percorrido. */
   let ring: { start: number; angle: number } | null = null;
   for (let t = trajectory.launch; ; ) {
+    if (++sinceYield >= TRAIL_POINTS_PER_SLICE) {
+      sinceYield = 0;
+      yield;
+    }
     const point = craftPoint(trajectory, t);
     const state = probeState(trajectory, t);
     if (point && state) {

@@ -1,9 +1,12 @@
-import { TeX } from '../components/TeX';
+import { Suspense, lazy } from 'react';
 import { explainEvent } from './eventExplanations';
 import { MISSION_IMAGES, imageIndexNear } from './missionImages';
 import { ALL_EVENTS, MISSIONS } from './missions';
 import { formatDate, formatShortDate } from './time';
 import { useProbeStore } from './useProbeStore';
+
+// O KaTeX (JS, CSS e fontes) só carrega com o primeiro cartão de evento, não com o Sistema Solar.
+const TeX = lazy(() => import('../components/TeX').then((m) => ({ default: m.TeX })));
 
 /** Linha do tempo da sonda escolhida: um clique leva ao evento. */
 export function ProbeEventList({ className = '' }: { className?: string }) {
@@ -77,7 +80,9 @@ export function ProbeEventCard({ className = '' }: { className?: string }) {
         {explanation.formulas.map((f) => (
           <div key={f.tex}>
             <div className="overflow-x-auto overflow-y-hidden text-[13px] text-slate-100">
-              <TeX tex={f.tex} />
+              <Suspense fallback={<span className="text-slate-500">…</span>}>
+                <TeX tex={f.tex} />
+              </Suspense>
             </div>
             {f.note && <p className="text-[11px] text-slate-400">{f.note}</p>}
           </div>

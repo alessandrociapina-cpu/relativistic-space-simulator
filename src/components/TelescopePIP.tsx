@@ -1,3 +1,4 @@
+import '../quietThree';
 import { useState } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import type { PerspectiveCamera } from 'three';
