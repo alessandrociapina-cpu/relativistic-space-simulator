@@ -7,7 +7,7 @@ import { ALL_EVENTS, LIGHT_DAY_AU, MISSIONS, MISSION_LIST } from './missions';
 import { AU_KM, probePosition } from './probes';
 import { LOG_K, LOG_R0_AU, frameBody, localScale, toDisplay, trailPoints, viewDistance } from './sceneMath';
 import { daysToMs, formatLiveDateTime, isoToDays } from './time';
-import { FLYBY_SLOWDOWN, PROBE_TIME_RANGE, useProbeStore } from './useProbeStore';
+import { FLYBY_SLOWDOWN, MIN_PROBE_RATE, PROBE_RATES, PROBE_TIME_RANGE, useProbeStore } from './useProbeStore';
 import { norm, sub } from './vec3';
 
 const isoDay = (days: number) => new Date(daysToMs(days)).toISOString().slice(0, 10);
@@ -218,6 +218,17 @@ describe('loop de tempo das sondas', () => {
     expect(store()).toMatchObject({ focus: 'sun', scale: 'linear' });
     store().jumpToEvent('cassini-release');
     expect(store().focus).toBe('huygens');
+  });
+
+  it('ir a um evento ou escolher uma data volta ao ritmo mais lento', () => {
+    store().setRate(365.25);
+    store().jumpToEvent('voyager2-jupiter');
+    expect(store().rate).toBe(MIN_PROBE_RATE);
+    store().setRate(7);
+    store().togglePlay();
+    store().setT(isoToDays('1980-01-01'));
+    expect(store()).toMatchObject({ rate: MIN_PROBE_RATE, slowdown: null, playing: true });
+    expect(MIN_PROBE_RATE).toBe(Math.min(...PROBE_RATES.map((r) => r.value)));
   });
 
   it('para no fim do intervalo e recomeça do início', () => {

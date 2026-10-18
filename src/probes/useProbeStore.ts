@@ -29,6 +29,8 @@ export const PROBE_RATES: readonly ProbeRate[] = [
   { value: DAYS_PER_YEAR / 12, label: '1 mês/s' },
   { value: DAYS_PER_YEAR, label: '1 ano/s' },
 ];
+/** O ritmo mais lento: ir a um evento ou escolher uma data recomeça nele, e o usuário acelera se quiser. */
+export const MIN_PROBE_RATE = PROBE_RATES[0]!.value;
 
 /** Perto de cada encontro da sonda escolhida (±3 dias) o tempo desacelera para 6 h/s: o encontro dura ~24 s na tela. */
 export const FLYBY_SLOWDOWN = { windowDays: 3, rate: 0.25 } as const;
@@ -157,7 +159,7 @@ export const useProbeStore = create<ProbeStore>()((set, get) => ({
   eventsOpen: isWideScreen(),
   view: { distance: null, nonce: 0 },
 
-  setT: (t) => set({ t: clampT(t), slowdown: null }),
+  setT: (t) => set({ t: clampT(t), rate: MIN_PROBE_RATE, slowdown: null }),
   togglePlay: () => {
     const { playing, t } = get();
     set({ playing: !playing, t: !playing && t >= PROBE_TIME_RANGE.end ? PROBE_TIME_RANGE.start : t });
@@ -186,6 +188,7 @@ export const useProbeStore = create<ProbeStore>()((set, get) => ({
     set((s) => ({
       t: clampT(event.t),
       playing: false,
+      rate: MIN_PROBE_RATE,
       slowdown: null,
       eventId: id,
       selected: event.probeId,
