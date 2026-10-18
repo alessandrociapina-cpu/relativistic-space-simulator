@@ -74,10 +74,15 @@ export const MissionGallery = memo(function MissionGallery({
   const [index, setIndex] = useState(initialIndex);
   const image = images[Math.min(index, images.length - 1)]!;
   const closeButton = useRef<HTMLButtonElement>(null);
+  const thumbs = useRef<(HTMLButtonElement | null)[]>([]);
   const step = (delta: number) => setIndex((i) => (i + delta + images.length) % images.length);
 
   useEffect(() => setIndex(initialIndex), [missionId, initialIndex]);
   useEffect(() => closeButton.current?.focus(), []);
+  // Com dez fotos ou mais, a miniatura da foto aberta (pelas setas ou por um evento) pode estar fora da faixa.
+  useEffect(() => {
+    thumbs.current[index]?.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' });
+  }, [index]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -147,6 +152,9 @@ export const MissionGallery = memo(function MissionGallery({
           {images.map((img, i) => (
             <button
               key={img.file}
+              ref={(el) => {
+                thumbs.current[i] = el;
+              }}
               type="button"
               role="tab"
               aria-selected={i === index}
