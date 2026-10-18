@@ -43,11 +43,12 @@ export default defineConfig({
         // O bundle principal (Three.js + R3F) passa de 1 MB.
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         cleanupOutdatedCaches: true,
-        // Imagens das missões (galeria das sondas): vêm do Wikimedia Commons e ficam
-        // guardadas depois de vistas uma vez. Respostas opacas (sem CORS): status 0.
+        // Imagens das missões (galeria das sondas): vêm do Wikimedia Commons (o Special:FilePath
+        // redireciona as miniaturas para thumb.wikimedia.org) e ficam guardadas depois de vistas uma vez.
+        // Respostas opacas (sem CORS): status 0.
         runtimeCaching: [
           {
-            urlPattern: /^https:\/\/(commons\.wikimedia\.org\/wiki\/Special:FilePath\/|upload\.wikimedia\.org\/)/,
+            urlPattern: /^https:\/\/(commons\.wikimedia\.org\/wiki\/Special:FilePath\/|(upload|thumb)\.wikimedia\.org\/)/,
             handler: 'CacheFirst',
             options: {
               cacheName: 'mission-images',
