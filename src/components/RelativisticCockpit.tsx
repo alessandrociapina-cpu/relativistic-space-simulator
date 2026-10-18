@@ -1,8 +1,10 @@
 import { Suspense, lazy, useEffect } from 'react';
 import { useFlightAudio } from '../audio/useFlightAudio';
 import { useFlightLoop } from '../store/useFlightLoop';
+import { useFlightStore } from '../store/useFlightStore';
 import { useCockpitUi, useIsWideCockpit } from '../ui/cockpitUi';
 import { useEffectsPanelOnPause } from '../ui/explainSettings';
+import { parseMissionLink } from '../ui/missionLink';
 import { CenterHologramProjector } from './CenterHologramProjector';
 import { CockpitFrame } from './CockpitFrame';
 import { InstrumentPanel } from './InstrumentPanel';
@@ -20,6 +22,26 @@ const ExplanationCard = lazy(() => import('./ExplanationCard').then((m) => ({ de
 const ActiveEffectsPanel = lazy(() => import('./ActiveEffectsPanel').then((m) => ({ default: m.ActiveEffectsPanel })));
 
 /**
+ * Cada entrada na viagem começa pelo planejamento da missão, com a missão de um link `#viagem?…`
+ * carregada (também quando o link é colado com o cockpit aberto).
+ */
+function useMissionLink() {
+  useEffect(() => {
+    const apply = () => {
+      const link = parseMissionLink(window.location.hash);
+      if (link?.choice) useFlightStore.getState().configureMission(link.choice);
+      useCockpitUi.getState().openPlanner(link?.tab);
+    };
+    apply();
+    const onHash = () => {
+      if (parseMissionLink(window.location.hash)) apply();
+    };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+}
+
+/**
  * Cockpit da viagem relativística: o para-brisa ao fundo, o console de teto
  * com a telemetria, o telescópio e a rota pendurados, os hologramas e o painel
  * de instrumentos. O planejamento da missão abre por cima.
@@ -29,9 +51,7 @@ export function RelativisticCockpit() {
   useFlightAudio();
   useEffectsPanelOnPause();
   useCockpitShortcuts();
-  // Cada entrada na viagem começa pelo planejamento da missão.
-  const openPlanner = useCockpitUi((s) => s.openPlanner);
-  useEffect(openPlanner, [openPlanner]);
+  useMissionLink();
   // No celular não há telas penduradas: a rota vai para o painel e o telescópio abre por uma tecla.
   // Fora da tela, nem são montadas (um contexto WebGL a menos).
   const wide = useIsWideCockpit();

@@ -24,11 +24,17 @@ import { ORIGINS, ORIGIN_LIST, canTravel, missionDestination, type Origin } from
 import { useFlightStore, type MissionChoice } from '../store/useFlightStore';
 import { APP_HASH } from '../ui/appMode';
 import { useCockpitUi } from '../ui/cockpitUi';
+import {
+  MAX_ACCEL_G,
+  MIN_ACCEL_G,
+  absoluteLink,
+  missionHash,
+  sciFiChoice,
+  sciFiHash,
+  type PlannerTab,
+} from '../ui/missionLink';
 import { formatAccelG, formatCompact, formatGamma, formatProse, formatSpan, formatVelocity } from '../ui/format';
 
-/** Faixa da aceleração personalizada: 0,1 g a 10⁷ g. */
-const MIN_ACCEL_G = 0.1;
-const MAX_ACCEL_G = 1e7;
 /** Velocidade de cruzeiro sugerida ao ligar o perfil com inércia (fração de c). */
 const DEFAULT_COAST_BETA = 0.9;
 /** Menor rapidez de cruzeiro do slider (β ≈ 0,05). */
@@ -326,16 +332,37 @@ const profileLabel = (coastEta: number | null) =>
     ? 'Acelerar e frear'
     : `Cruzeiro a ${formatVelocity(Math.tanh(coastEta), Math.exp(-coastEta) / Math.cosh(coastEta))}`;
 
-/**
- * A missão da ficção como escolha do planejamento: o alvo visto da partida e o cruzeiro limitado à
- * aceleração.
- */
-function sciFiChoice(mission: SciFiMission, restRatio: number): MissionChoice {
-  const origin = ORIGINS[mission.originId ?? 'sol'];
-  const destination = missionDestination(origin, mission.destinationId);
-  const coastEta = plannedCoastEta(destination, mission.accelG, mission.coastEta, mission.crew, restRatio);
-  return { origin, destination, crew: mission.crew, accelG: mission.accelG, coastEta, restRatio };
+/** Copia o endereço da missão (ou o mostra para copiar, sem acesso à área de transferência). */
+function CopyLinkButton({ hash, className = '' }: { hash: string; className?: string }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 2000);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  const copy = async () => {
+    const link = absoluteLink(hash);
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+    } catch {
+      window.prompt('Copie o link da missão:', link);
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={() => void copy()}
+      title="O link abre o planejamento com esta missão carregada"
+      className={`text-[11px] text-cyan-300/90 underline-offset-2 hover:text-cyan-100 hover:underline ${className}`}
+    >
+      {copied ? '✓ Link copiado' : '🔗 Copiar o link da missão'}
+    </button>
+  );
 }
+
+/** Grava a missão embarcada no endereço, sem nova entrada no histórico: a barra de endereço a compartilha. */
+const rememberMission = (choice: MissionChoice) => window.history.replaceState(window.history.state, '', missionHash(choice));
 
 /** "Proxima Centauri", ou "de Erid a Tau Ceti" numa partida de outra estrela. */
 const routeName = (origin: Origin, destination: Destination) =>
@@ -428,6 +455,7 @@ function SciFiArticle({
             </div>
           )}
           <p className={`rounded-lg border px-3 py-2 text-[12px] leading-snug ${verdict.tone}`}>{verdict.text}</p>
+          <CopyLinkButton hash={sciFiHash(mission, restRatio)} className="self-start" />
           <div className="mt-auto grid grid-cols-2 gap-2">
             <button
               type="button"
@@ -484,8 +512,6 @@ function SciFiMenu({
   );
 }
 
-type PlannerView = 'plan' | 'scifi';
-
 const tabBase = 'flex min-w-0 flex-col items-start gap-0.5 rounded-lg border px-3 py-2 text-left transition-colors sm:px-4';
 
 const planTabClass = (active: boolean) =>
@@ -536,7 +562,8 @@ const pickChoice = ({ origin, destination, accelG, coastEta, crew, restRatio }: 
  */
 export function MissionPlanner() {
   const open = useCockpitUi((s) => s.plannerOpen);
-  return open ? <Planner /> : null;
+  const session = useCockpitUi((s) => s.plannerSession);
+  return open ? <Planner key={session} /> : null;
 }
 
 function Planner() {
@@ -563,8 +590,13 @@ function Planner() {
   const presetActive = presets.some((p) => p.accelG === draft.accelG);
   const [customOpen, setCustomOpen] = useState(!presetActive);
   const update = (patch: Partial<MissionChoice>) => setDraft((d) => ({ ...d, ...patch }));
-  const [view, setView] = useState<PlannerView>('plan');
-  const [sciFiSeen, setSciFiSeen] = useState(loadSciFiSeen);
+  const [view, setView] = useState<PlannerTab>(() => useCockpitUi.getState().plannerTab);
+  const [sciFiSeen, setSciFiSeen] = useState(() => {
+    // Aberto direto no menu da ficção (por um link): a aba já foi vista.
+    if (view !== 'scifi') return loadSciFiSeen();
+    saveSciFiSeen();
+    return true;
+  });
   const dialogRef = useRef<HTMLDivElement>(null);
   const activeSciFi =
     findSciFiMission({
@@ -584,11 +616,13 @@ function Planner() {
   }, [closePlanner]);
 
   const embark = () => {
-    configureMission({ ...draft, coastEta });
+    const choice = { ...draft, coastEta };
+    configureMission(choice);
+    rememberMission(choice);
     closePlanner();
   };
 
-  const showView = (next: PlannerView) => {
+  const showView = (next: PlannerTab) => {
     setView(next);
     dialogRef.current?.scrollTo({ top: 0 });
     if (next === 'scifi' && !sciFiSeen) {
@@ -610,7 +644,9 @@ function Planner() {
   };
 
   const embarkSciFi = (m: SciFiMission) => {
-    configureMission(sciFiChoice(m, draft.restRatio));
+    const choice = sciFiChoice(m, draft.restRatio);
+    configureMission(choice);
+    rememberMission(choice);
     closePlanner();
   };
 
@@ -839,6 +875,7 @@ function Planner() {
               <SummaryRow label="Foguete de fótons m₀/m₁" value={formatProse(rocketMassRatio(profile))} />
             </div>
             <p className={`rounded-lg border px-3 py-2 text-[12px] leading-snug ${verdict.tone}`}>{verdict.text}</p>
+            <CopyLinkButton hash={missionHash({ ...draft, coastEta })} className="self-start" />
             <button
               type="button"
               onClick={embark}

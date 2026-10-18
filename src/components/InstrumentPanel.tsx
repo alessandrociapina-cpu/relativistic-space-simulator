@@ -104,7 +104,7 @@ function MissionPlate() {
       <div className="flex gap-1">
         <button
           type="button"
-          onClick={openPlanner}
+          onClick={() => openPlanner()}
           className="font-display flex-1 rounded-md border border-cyan-300/50 bg-cyan-400/10 px-2 py-1 text-[9px] tracking-[0.18em] text-cyan-100 uppercase hover:bg-cyan-400/25"
         >
           ⚙ Planejar
