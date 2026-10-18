@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { G0, flipTauOf, type FlightPhase } from '../physics/RelativityEngine';
 import { formatRelativisticSpeedPercent } from '../physics/EyeAndPhotometry';
-import { findPreset } from '../physics/accelerationPresets';
+import { CREW_LABEL, findPreset } from '../physics/accelerationPresets';
 import { CMB_VISIBLE_GAMMA, activeWindowsAt } from '../physics/criticalEvents';
 import { useFlightStore } from '../store/useFlightStore';
 import { crewText, formatStrain, type CrewTone } from '../ui/crewStatus';
@@ -29,6 +29,8 @@ const PHASE_LABEL: Readonly<Record<FlightPhase, string>> = {
 
 interface ReadoutProps {
   label: string;
+  /** Rótulo no celular, onde as colunas são estreitas ("Nave" em vez de "Relógio nave"). */
+  shortLabel?: string;
   /** Símbolo grego fora do `uppercase` (que transformaria τ em Τ). */
   symbol?: string;
   /** O ⚠ que abre a explicação do indicador. */
@@ -45,14 +47,21 @@ interface ReadoutProps {
 }
 
 /** Um visor do console: rótulo gravado na chapa e o número luminoso no vidro. */
-function Readout({ label, symbol, help, value, sub, detail, className = '', primary = false, accent = false }: ReadoutProps) {
+function Readout({ label, shortLabel, symbol, help, value, sub, detail, className = '', primary = false, accent = false }: ReadoutProps) {
   return (
     <div className={`instrument-well relative min-w-0 rounded-md px-2 py-1 ${accent ? 'border-amber-400/40' : ''} ${className}`}>
       <InfoTip id={help} className="absolute top-0.5 right-0.5" />
       <div
         className={`font-display truncate pr-4 text-[8px] tracking-[0.1em] sm:text-[9px] sm:tracking-[0.2em] ${accent ? 'text-amber-300/80' : 'text-cyan-300/70'}`}
       >
-        <span className="uppercase">{label}</span>
+        {shortLabel ? (
+          <>
+            <span className="uppercase sm:hidden">{shortLabel}</span>
+            <span className="hidden uppercase sm:inline">{label}</span>
+          </>
+        ) : (
+          <span className="uppercase">{label}</span>
+        )}
         {symbol && (
           <span className={`font-readout ml-1 text-[10px] tracking-normal ${accent ? 'text-amber-200' : 'text-cyan-200'}`}>
             {symbol}
@@ -122,6 +131,8 @@ export function TelemetryHUD({ className = '' }: { className?: string }) {
   const flight = useFlightStore((s) => s.flight);
   const crew = useFlightStore((s) => s.crew);
   const destination = useFlightStore((s) => s.destination);
+  const origin = useFlightStore((s) => s.origin);
+  const playing = useFlightStore((s) => s.playing);
   const windows = useFlightStore((s) => s.criticalWindows);
   // O flip do plano ou o do piloto automático, depois de religar o motor.
   const brakeStartTau = useFlightStore((s) => flipTauOf(s.profile) ?? s.profile.brakeStartTau);
@@ -158,9 +169,16 @@ export function TelemetryHUD({ className = '' }: { className?: string }) {
       {/* Altura fixa (2 linhas no celular, 1 na tela larga): um aviso que muda de largura,
           como a contagem do flip, não empurra o resto do cockpit a cada segundo. */}
       <div className="mb-1.5 flex h-[2.6rem] flex-wrap content-start items-center gap-1 overflow-hidden sm:h-5 sm:gap-1.5">
-        <Chip className="border border-cyan-300/50 text-cyan-200">{flight.crewRest ? 'Descanso' : PHASE_LABEL[flight.phase]}</Chip>
+        <Chip className="border border-cyan-300/50 text-cyan-200">
+          {/* Parada em τ = 0 a nave ainda não acelera: só depois da partida. */}
+          {flight.tau <= 0 && !playing ? 'Pronta para partir' : flight.crewRest ? 'Descanso' : PHASE_LABEL[flight.phase]}
+        </Chip>
         {crew === 'crewed' ? (
           <CrewChip />
+        ) : crew === 'eridian' ? (
+          <Chip className="border border-orange-300/40 bg-orange-500/10 text-orange-100">
+            {CREW_LABEL.eridian.icon} {CREW_LABEL.eridian.label} · sem olhos
+          </Chip>
         ) : (
           <Chip className="border border-violet-300/40 bg-violet-500/10 text-violet-100">🤖 Sonda robótica · sem tripulação</Chip>
         )}
@@ -181,7 +199,7 @@ export function TelemetryHUD({ className = '' }: { className?: string }) {
         )}
         {/* Por último: quando os avisos ocupam as linhas, é o destino que sai de vista. */}
         <span className="font-display min-w-0 truncate text-[9px] tracking-[0.15em] text-slate-400 uppercase">
-          Rumo a {destination.name}
+          {origin.solarSystem ? '' : `${origin.homeName} → `}Rumo a {destination.name}
         </span>
       </div>
       {/* Três colunas no celular, cinco (duas fileiras) na tela média e uma fileira só
@@ -199,13 +217,19 @@ export function TelemetryHUD({ className = '' }: { className?: string }) {
         />
         <Readout label="Aceleração" symbol="α" help="acceleration" value={formatAccelG(flight.thrustAccel / G0)} detail={accelDetail} accent />
         <Readout label="Lorentz" symbol="γ" help="lorentz" value={formatGamma(flight.gamma)} detail={`η = ${formatFixed(flight.eta, 3)}`} />
-        <Readout label="Relógio nave" symbol="τ" help="shipClock" value={formatDuration(flight.tau)} />
-        <Readout label="Relógio Terra" symbol="t" help="earthClock" value={formatDuration(flight.earthTimeS)} />
+        <Readout label="Relógio nave" shortLabel="Nave" symbol="τ" help="shipClock" value={formatDuration(flight.tau)} />
+        <Readout
+          label={`Relógio ${origin.homeName}`}
+          shortLabel={origin.homeName}
+          symbol="t"
+          help="earthClock"
+          value={formatDuration(flight.earthTimeS)}
+        />
         <Readout
           label="Distância"
           help="distance"
           value={formatDistance(flight.restDistanceRemainingM)}
-          detail="referencial da Terra"
+          detail={`referencial ${origin.ofHome}`}
           className="lg:col-span-2 xl:col-span-1"
         />
         <Readout

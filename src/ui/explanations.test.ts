@@ -2,10 +2,11 @@ import katex from 'katex';
 import { describe, expect, it } from 'vitest';
 import { computeFlightState, flipTauOf, rocketMassRatio, type MissionProfile } from '../physics/RelativityEngine';
 import { cutEngine, relightEngine } from '../physics/maneuvers';
-import type { CrewKind } from '../physics/accelerationPresets';
+import { ERID_G, type CrewKind } from '../physics/accelerationPresets';
 import { missionProfileFor } from '../physics/crewRest';
 import { DESTINATIONS, DESTINATION_LIST, destinationMissionProfile, type Destination } from '../physics/destinations';
 import { computeEyeTimeline, computePhotometryAndEyeState } from '../physics/EyeAndPhotometry';
+import { ORIGINS, canTravel, missionDestination } from '../physics/origins';
 import { computeBodyAngularRadii } from '../physics/sky';
 import {
   EFFECT_ORDER,
@@ -226,6 +227,28 @@ describe('textos e fórmulas com os valores do instante', () => {
                 expect(() => katex.renderToString(tex, { throwOnError: true, strict: 'error' })).not.toThrow();
               }
             }
+          }
+        }
+      }
+    }
+  }, 60_000);
+
+  it('partindo de Erid com a tripulação eridiana: Erid nos textos, sem Sistema Solar, e TeX válido', () => {
+    const erid = ORIGINS.eridani40;
+    for (const destination of DESTINATION_LIST.filter((d) => canTravel(erid, d.id))) {
+      const target = missionDestination(erid, destination);
+      const base = profileContext(target, ERID_G, destinationMissionProfile(target, ERID_G));
+      const total = destinationMissionProfile(target, ERID_G).tauTotal;
+      for (let i = 0; i <= 8; i++) {
+        const ctx = { ...base((i / 8) * total, 'eridian'), origin: erid };
+        expect(activeEffects(ctx)).not.toContain('solar-system');
+        for (const id of EFFECT_ORDER) {
+          const { summary, details, formulas } = explainEffect(id, ctx);
+          const text = [summary, ...details, ...formulas.map((f) => f.tex)].join(' ');
+          expect(text).not.toMatch(/NaN|undefined|Infinity|null/);
+          if (id === 'time-dilation') expect(text).toContain('Erid');
+          for (const { tex } of formulas) {
+            expect(() => katex.renderToString(tex, { throwOnError: true, strict: 'error' })).not.toThrow();
           }
         }
       }

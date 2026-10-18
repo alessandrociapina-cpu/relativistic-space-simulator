@@ -17,16 +17,16 @@ const SENSORS = [
 ] as const;
 
 const DIRECTIONS = [
-  { value: 'rear', label: 'TRÁS', title: 'Telescópio voltado para o Sol, atrás da nave' },
+  { value: 'rear', label: 'TRÁS', title: 'Telescópio voltado para a estrela de partida (o Sol), atrás da nave' },
   { value: 'front', label: 'FRENTE', title: 'Telescópio voltado para o alvo, à frente' },
 ] as const;
 
 type FlightStoreState = ReturnType<typeof useFlightStore.getState>;
 
-/** Zoom do instante: à frente acompanha o cone e o alvo; atrás, enquadra o Sol. */
-function telescopeZoom({ flight, destination, photometry }: FlightStoreState, direction: TelescopeDirection): number {
+/** Zoom do instante: à frente acompanha o cone e o alvo; atrás, enquadra a estrela de partida. */
+function telescopeZoom({ flight, destination, origin, photometry }: FlightStoreState, direction: TelescopeDirection): number {
   if (direction === 'front') return photometry.recommendedTelescopeZoom;
-  return recommendedRearZoom(flight.eta, computeBodyAngularRadii(flight, destination).sunRadiusRad);
+  return recommendedRearZoom(flight.eta, computeBodyAngularRadii(flight, destination, origin).sunRadiusRad);
 }
 
 /**
@@ -70,11 +70,12 @@ export function TelescopePIP({ className = '' }: { className?: string }) {
   const direction = useCockpitUi((s) => s.telescopeDirection);
   const setDirection = useCockpitUi((s) => s.setTelescopeDirection);
   const target = useFlightStore((s) => s.destination.shortName);
+  const originStar = useFlightStore((s) => s.origin.starName);
 
   return (
     <CockpitMonitor
       title={<TelescopeTitle direction={direction} />}
-      subtitle={direction === 'rear' ? 'Sol' : target}
+      subtitle={direction === 'rear' ? originStar : target}
       className={className}
       tilt="left"
       footer={

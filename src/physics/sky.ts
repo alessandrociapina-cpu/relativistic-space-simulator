@@ -1,5 +1,5 @@
 /**
- * Geometria dos corpos no céu (Sol atrás, alvo à frente), calculada em 64 bits
+ * Geometria dos corpos no céu (a estrela de partida atrás, o alvo à frente), calculada em 64 bits
  * no referencial de repouso. A aberração é aplicada no shader.
  */
 import type { FlightState } from './RelativityEngine';
@@ -49,10 +49,23 @@ export function targetViewDistanceM(flight: FlightState, destination: Destinatio
   return Math.hypot(flight.restDistanceRemainingM, arrivalDistanceM(destination));
 }
 
-export function computeBodyAngularRadii(flight: FlightState, destination: Destination): BodyAngularRadii {
+/** A estrela de partida e a órbita do planeta de onde a nave sai (a `Origin` de origins.ts). */
+export interface DepartureStar {
+  readonly starRadiusM: number;
+  readonly homeOrbitM: number;
+}
+
+const SUN_DEPARTURE: DepartureStar = { starRadiusM: SOLAR_RADIUS_M, homeOrbitM: AU_M };
+
+export function computeBodyAngularRadii(
+  flight: FlightState,
+  destination: Destination,
+  departure: DepartureStar = SUN_DEPARTURE,
+): BodyAngularRadii {
   const targetDistanceM = targetViewDistanceM(flight, destination);
   return {
-    sunRadiusRad: angularRadius(SOLAR_RADIUS_M, AU_M + flight.positionM),
+    // A estrela de partida fica atrás, a uma órbita do planeta mais o caminho percorrido.
+    sunRadiusRad: angularRadius(departure.starRadiusM, departure.homeOrbitM + flight.positionM),
     targetRadiusRad: angularRadius(destination.radiusM, targetDistanceM),
     einsteinRadiusRad: destination.gravitationalRadiusM ? einsteinRadius(destination.gravitationalRadiusM, targetDistanceM) : 0,
   };

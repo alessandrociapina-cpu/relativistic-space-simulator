@@ -259,6 +259,7 @@ export function CenterHologramProjector() {
   const flight = useFlightStore((s) => s.flight);
   const profile = useFlightStore((s) => s.profile);
   const destination = useFlightStore((s) => s.destination);
+  const solarSystem = useFlightStore((s) => s.origin.solarSystem);
   const timeline = useFlightStore((s) => s.eyeTimeline);
   const p = useFlightStore((s) => s.photometry);
   // O painel de efeitos traz o mesmo conteúdo, com as fórmulas, e precisa da altura.
@@ -267,7 +268,8 @@ export function CenterHologramProjector() {
   const wide = useIsWideCockpit();
   const telescopeOpen = useCockpitUi((s) => s.telescopeOpen);
 
-  const sunDistanceAu = (AU_M + flight.positionM) / AU_M;
+  // Os anéis dos planetas só existem na partida do Sol.
+  const sunDistanceAu = solarSystem ? (AU_M + flight.positionM) / AU_M : Infinity;
   const hologram: HologramMode = selectHologramMode({
     flight,
     profile,

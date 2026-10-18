@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { useAudioSettings } from '../audio/audioSettings';
 import { G0, log10GammaFromRapidity } from '../physics/RelativityEngine';
-import { assessMission } from '../physics/accelerationPresets';
+import { CREW_LABEL, assessMission } from '../physics/accelerationPresets';
 import { CMB_VISIBLE_GAMMA, activeWindowsAt } from '../physics/criticalEvents';
 import { engineCommandAt } from '../physics/maneuvers';
 import { adjacentTimeScale, naturalTimeScale, timeScaleStep } from '../store/timeScales';
@@ -64,6 +64,7 @@ function KeySwitch({
 // ── Missão ───────────────────────────────────────────────────────────────────
 function MissionPlate() {
   const destination = useFlightStore((s) => s.destination);
+  const origin = useFlightStore((s) => s.origin);
   const accelG = useFlightStore((s) => s.accelG);
   const crew = useFlightStore((s) => s.crew);
   const profile = useFlightStore((s) => s.plannedProfile);
@@ -74,12 +75,15 @@ function MissionPlate() {
     <div className="flex min-w-0 flex-col gap-1.5">
       <Plate className="max-lg:hidden">Missão</Plate>
       <div className="instrument-well min-w-0 rounded-md px-2 py-1.5 max-lg:hidden">
-        <div className="font-display truncate text-[11px] font-bold tracking-wider text-cyan-50">{destination.name}</div>
+        <div className="font-display truncate text-[11px] font-bold tracking-wider text-cyan-50">
+          {origin.solarSystem ? '' : `${origin.homeName} → `}
+          {destination.name}
+        </div>
         <div className="font-readout truncate text-[11px] text-cyan-200">
           α {formatAccelG(accelG)} · {profile.coastEta === null ? 'acelerar e frear' : 'com cruzeiro'}
         </div>
         <div className="truncate text-[11px] text-slate-300">
-          {crew === 'crewed' ? '🧑‍🚀 Piloto humano' : '🤖 Sonda robótica'}
+          {CREW_LABEL[crew].icon} {CREW_LABEL[crew].label}
           {viability === 'hypothetical' && <span className="text-rose-300"> · hipotética</span>}
           {viability === 'over-limit' && <span className="text-amber-300"> · além do limite humano</span>}
           {rests && <span className="text-emerald-300/90"> · com descansos</span>}
@@ -88,7 +92,7 @@ function MissionPlate() {
           {manual ? (
             <span className="text-sky-300">rota alterada pelo piloto</span>
           ) : (
-            `${formatSpan(profile.tauTotal)} a bordo · ${formatSpan(profile.tTotal)} na Terra`
+            `${formatSpan(profile.tauTotal)} a bordo · ${formatSpan(profile.tTotal)} ${origin.solarSystem ? 'na Terra' : `em ${origin.homeName}`}`
           )}
         </div>
       </div>

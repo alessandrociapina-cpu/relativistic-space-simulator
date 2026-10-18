@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { rocketMassRatio, type MissionProfile } from '../physics/RelativityEngine';
 import {
+  CREW_LABEL,
   SCIFI_MISSIONS,
   assessMission,
   findSciFiMission,
@@ -19,6 +20,7 @@ import {
   destinationMissionProfile,
   type Destination,
 } from '../physics/destinations';
+import { ORIGINS, ORIGIN_LIST, canTravel, missionDestination, type Origin } from '../physics/origins';
 import { useFlightStore, type MissionChoice } from '../store/useFlightStore';
 import { APP_HASH } from '../ui/appMode';
 import { useCockpitUi } from '../ui/cockpitUi';
@@ -38,20 +40,18 @@ const KIND_LABEL: Readonly<Record<Destination['kind'], string>> = {
   galaxy: 'galáxia',
 };
 
-const CREW_OPTIONS: readonly { crew: CrewKind; icon: string; label: string; text: string }[] = [
+const CREW_OPTIONS: readonly { crew: CrewKind; text: string }[] = [
+  { crew: 'crewed', text: 'Você vê pelo para-brisa, com os olhos de um piloto: eles se ofuscam e se adaptam à luz.' },
+  { crew: 'robotic', text: 'Sem tripulação: as imagens vêm das câmeras de bordo, e o limite é a resistência dos materiais.' },
   {
-    crew: 'crewed',
-    icon: '🧑‍🚀',
-    label: 'Piloto humano',
-    text: 'Você vê pelo para-brisa, com os olhos de um piloto: eles se ofuscam e se adaptam à luz.',
-  },
-  {
-    crew: 'robotic',
-    icon: '🤖',
-    label: 'Sonda robótica',
-    text: 'Sem tripulação: as imagens vêm das câmeras de bordo, e o limite é a resistência dos materiais.',
+    crew: 'eridian',
+    text: 'Rocky e os seus: sem olhos, percebem tudo pelo som (no para-brisa, as câmeras); 2,09 g é o peso de casa.',
   },
 ];
+
+/** A tripulação eridiana aparece com a partida de Erid (ou quando já foi escolhida, numa missão da ficção). */
+const crewOptionsFor = (origin: Origin, crew: CrewKind) =>
+  CREW_OPTIONS.filter((o) => o.crew !== 'eridian' || origin.id === 'eridani40' || crew === 'eridian');
 
 function Section({ step, title, children }: { step: number; title: string; children: ReactNode }) {
   return (
@@ -288,9 +288,9 @@ function viabilityText(
     return {
       tone: 'border-rose-400/50 bg-rose-950/40 text-rose-100',
       text:
-        choice.crew === 'crewed'
-          ? `Hipotética: nenhum ser humano sobrevive a ${g}. O simulador mostra o que um piloto veria.`
-          : `Hipotética: nenhum material conhecido aguenta ${g}. É a sonda de demonstração, para ver os efeitos em minutos.`,
+        choice.crew === 'robotic'
+          ? `Hipotética: nenhum material conhecido aguenta ${g}. É a sonda de demonstração, para ver os efeitos em minutos.`
+          : `Hipotética: ${choice.crew === 'eridian' ? 'nenhum eridiano' : 'nenhum ser humano'} sobrevive a ${g}. O simulador mostra o que se veria a bordo.`,
     };
   }
   if (a.viability === 'over-limit') {
@@ -315,9 +315,9 @@ function viabilityText(
   return {
     tone,
     text:
-      choice.crew === 'crewed'
-        ? `Suportável: ${formatSpan(a.burnS)} de empuxo contínuo a ${g}, dentro do limite do corpo (${protection}).`
-        : `Suportável: a sonda aguenta ${g} contínuos (${protection}).`,
+      choice.crew === 'robotic'
+        ? `Suportável: a sonda aguenta ${g} contínuos (${protection}).`
+        : `Suportável: ${formatSpan(a.burnS)} de empuxo contínuo a ${g}, dentro do limite do corpo (${protection}).`,
   };
 }
 
@@ -326,12 +326,20 @@ const profileLabel = (coastEta: number | null) =>
     ? 'Acelerar e frear'
     : `Cruzeiro a ${formatVelocity(Math.tanh(coastEta), Math.exp(-coastEta) / Math.cosh(coastEta))}`;
 
-/** A missão da ficção como escolha do planejamento, com o cruzeiro limitado à aceleração. */
+/**
+ * A missão da ficção como escolha do planejamento: o alvo visto da partida e o cruzeiro limitado à
+ * aceleração.
+ */
 function sciFiChoice(mission: SciFiMission, restRatio: number): MissionChoice {
-  const destination = DESTINATIONS[mission.destinationId];
+  const origin = ORIGINS[mission.originId ?? 'sol'];
+  const destination = missionDestination(origin, mission.destinationId);
   const coastEta = plannedCoastEta(destination, mission.accelG, mission.coastEta, mission.crew, restRatio);
-  return { destination, crew: mission.crew, accelG: mission.accelG, coastEta, restRatio };
+  return { origin, destination, crew: mission.crew, accelG: mission.accelG, coastEta, restRatio };
 }
+
+/** "Proxima Centauri", ou "de Erid a Tau Ceti" numa partida de outra estrela. */
+const routeName = (origin: Origin, destination: Destination) =>
+  origin.solarSystem ? destination.name : `${origin.ofHome.replace(/^d/, 'D')} a ${destination.name}`;
 
 function SciFiParagraph({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -357,7 +365,7 @@ function SciFiArticle({
   onEmbark: () => void;
 }) {
   const choice = sciFiChoice(mission, restRatio);
-  const { destination, coastEta } = choice;
+  const { origin, destination, coastEta } = choice;
   const profile = useMemo(
     () => missionProfileFor(destination, mission.accelG, coastEta, mission.crew, restRatio),
     [destination, mission.accelG, coastEta, mission.crew, restRatio],
@@ -390,8 +398,8 @@ function SciFiArticle({
         </div>
         <aside className="flex min-w-0 flex-col gap-2">
           <div className="hull-panel rounded-lg px-3 py-2">
-            <SummaryRow label="Destino" value={`${destination.name} · ${formatCompact(destination.distanceLy)} anos-luz`} />
-            <SummaryRow label="A bordo" value={mission.crew === 'crewed' ? 'Piloto humano' : 'Sonda robótica'} />
+            <SummaryRow label="Destino" value={`${routeName(origin, destination)} · ${formatCompact(destination.distanceLy)} anos-luz`} />
+            <SummaryRow label="A bordo" value={CREW_LABEL[mission.crew].label} />
             <SummaryRow label="Aceleração α" value={formatAccelG(mission.accelG)} />
             <SummaryRow label="Perfil" value={profileLabel(coastEta)} />
             <SummaryRow label="Tempo de bordo" value={formatSpan(profile.tauTotal)} />
@@ -513,8 +521,9 @@ function saveSciFiSeen(): void {
   }
 }
 
-const pickChoice = ({ destination, accelG, coastEta, crew, restRatio }: MissionChoice): MissionChoice => ({
-  destination,
+const pickChoice = ({ origin, destination, accelG, coastEta, crew, restRatio }: MissionChoice): MissionChoice => ({
+  origin,
+  destination: DESTINATIONS[destination.id],
   accelG,
   coastEta,
   crew,
@@ -535,18 +544,20 @@ function Planner() {
   const configureMission = useFlightStore((s) => s.configureMission);
   const midFlight = useFlightStore((s) => s.tau > 0 && s.tau < s.profile.tauTotal);
   const closePlanner = useCockpitUi((s) => s.closePlanner);
+  // O alvo visto da partida: da Terra, o próprio catálogo; de Erid, outra distância e outra direção.
+  const target = useMemo(() => missionDestination(draft.origin, draft.destination), [draft.origin, draft.destination]);
   // O cruzeiro do slider fica guardado no rascunho; o que vale é o limitado à aceleração escolhida.
-  const coastEta = plannedCoastEta(draft.destination, draft.accelG, draft.coastEta, draft.crew, draft.restRatio);
+  const coastEta = plannedCoastEta(target, draft.accelG, draft.coastEta, draft.crew, draft.restRatio);
   const profile = useMemo(
-    () => missionProfileFor(draft.destination, draft.accelG, coastEta, draft.crew, draft.restRatio),
-    [draft.destination, draft.accelG, coastEta, draft.crew, draft.restRatio],
+    () => missionProfileFor(target, draft.accelG, coastEta, draft.crew, draft.restRatio),
+    [target, draft.accelG, coastEta, draft.crew, draft.restRatio],
   );
   const flipEta = useMemo(
-    () => missionProfileFor(draft.destination, draft.accelG, null, draft.crew, draft.restRatio).etaMax,
-    [draft.destination, draft.accelG, draft.crew, draft.restRatio],
+    () => missionProfileFor(target, draft.accelG, null, draft.crew, draft.restRatio).etaMax,
+    [target, draft.accelG, draft.crew, draft.restRatio],
   );
   const assessment = assessMission(draft.crew, draft.accelG, profile);
-  const continuousBurnS = longestBurnS(destinationMissionProfile(draft.destination, draft.accelG, coastEta));
+  const continuousBurnS = longestBurnS(destinationMissionProfile(target, draft.accelG, coastEta));
   const verdict = viabilityText(draft, assessment, profile, continuousBurnS);
   const presets = presetsFor(draft.crew);
   const presetActive = presets.some((p) => p.accelG === draft.accelG);
@@ -557,6 +568,7 @@ function Planner() {
   const dialogRef = useRef<HTMLDivElement>(null);
   const activeSciFi =
     findSciFiMission({
+      originId: draft.origin.id,
       destinationId: draft.destination.id,
       crew: draft.crew,
       accelG: draft.accelG,
@@ -587,13 +599,30 @@ function Planner() {
 
   const applySciFi = (m: SciFiMission) => {
     setCustomOpen(false);
-    update({ destination: DESTINATIONS[m.destinationId], crew: m.crew, accelG: m.accelG, coastEta: m.coastEta });
+    update({
+      origin: ORIGINS[m.originId ?? 'sol'],
+      destination: DESTINATIONS[m.destinationId],
+      crew: m.crew,
+      accelG: m.accelG,
+      coastEta: m.coastEta,
+    });
     showView('plan');
   };
 
   const embarkSciFi = (m: SciFiMission) => {
     configureMission(sciFiChoice(m, draft.restRatio));
     closePlanner();
+  };
+
+  const chooseOrigin = (origin: Origin) => {
+    if (origin.id === draft.origin.id) return;
+    // Não dá para partir e chegar na mesma estrela: de Erid, o destino padrão é Tau Ceti (a viagem de Rocky).
+    const destination = canTravel(origin, draft.destination.id) ? draft.destination : DESTINATIONS.tauCeti;
+    // A tripulação eridiana só existe partindo de Erid.
+    if (origin.id !== 'eridani40' && draft.crew === 'eridian') {
+      update({ origin, destination, crew: 'crewed', accelG: presetsFor('crewed')[0]!.accelG });
+      setCustomOpen(false);
+    } else update({ origin, destination });
   };
 
   const chooseCrew = (crew: CrewKind) => {
@@ -680,7 +709,28 @@ function Planner() {
 
         {/* Escondido, não desmontado, no menu da ficção: o campo da aceleração personalizada guarda o que foi digitado. */}
         <div className={`${view === 'plan' ? 'grid' : 'hidden'} gap-5 lg:grid-cols-[1fr_1.25fr_1fr]`}>
-          <Section step={1} title="Destino">
+          <Section step={1} title="Partida e destino">
+            <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Partida">
+              {ORIGIN_LIST.map((o) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={o.id === draft.origin.id}
+                  title={o.blurb}
+                  className={optionClass(o.id === draft.origin.id)}
+                  onClick={() => chooseOrigin(o)}
+                >
+                  <div className="text-[13px] font-semibold text-slate-50">
+                    <span aria-hidden className="mr-1">
+                      {o.solarSystem ? '🌍' : '🪐'}
+                    </span>
+                    {o.homeName}
+                  </div>
+                  <div className="text-[11px] leading-snug text-slate-400">em órbita {o.solarSystem ? 'do Sol' : `de ${o.starName}`}</div>
+                </button>
+              ))}
+            </div>
             <div className="flex flex-col gap-2" role="radiogroup" aria-label="Destino">
               {DESTINATION_LIST.map((d) => (
                 <button
@@ -688,12 +738,17 @@ function Planner() {
                   type="button"
                   role="radio"
                   aria-checked={d.id === draft.destination.id}
-                  className={optionClass(d.id === draft.destination.id)}
+                  disabled={!canTravel(draft.origin, d.id)}
+                  className={`${optionClass(d.id === draft.destination.id)} disabled:cursor-not-allowed disabled:opacity-40`}
                   onClick={() => update({ destination: d })}
                 >
                   <div className="flex items-baseline justify-between gap-2">
                     <span className="text-[14px] font-semibold text-slate-50">{d.name}</span>
-                    <span className="font-readout shrink-0 text-xs text-cyan-200">{formatCompact(d.distanceLy)} anos-luz</span>
+                    <span className="font-readout shrink-0 text-xs text-cyan-200">
+                      {canTravel(draft.origin, d.id)
+                        ? `${formatCompact(missionDestination(draft.origin, d).distanceLy)} anos-luz`
+                        : 'partida'}
+                    </span>
                   </div>
                   <div className="text-[11px] leading-snug text-slate-400">
                     <span className="text-slate-300">{KIND_LABEL[d.kind]}</span> · {d.blurb}
@@ -704,8 +759,12 @@ function Planner() {
           </Section>
 
           <Section step={2} title="Nave e aceleração">
-            <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Quem vai a bordo">
-              {CREW_OPTIONS.map((o) => (
+            <div
+              className={`grid gap-2 ${crewOptionsFor(draft.origin, draft.crew).length > 2 ? 'grid-cols-3' : 'grid-cols-2'}`}
+              role="radiogroup"
+              aria-label="Quem vai a bordo"
+            >
+              {crewOptionsFor(draft.origin, draft.crew).map((o) => (
                 <button
                   key={o.crew}
                   type="button"
@@ -716,9 +775,9 @@ function Planner() {
                 >
                   <div className="text-[14px] font-semibold text-slate-50">
                     <span aria-hidden className="mr-1">
-                      {o.icon}
+                      {CREW_LABEL[o.crew].icon}
                     </span>
-                    {o.label}
+                    {CREW_LABEL[o.crew].label}
                   </div>
                   <div className="text-[11px] leading-snug text-slate-400">{o.text}</div>
                 </button>
@@ -733,7 +792,7 @@ function Planner() {
                 <PresetCard
                   key={p.id}
                   preset={p}
-                  destination={draft.destination}
+                  destination={target}
                   coastEta={draft.coastEta}
                   restRatio={draft.restRatio}
                   active={!customOpen && p.accelG === draft.accelG}
@@ -758,8 +817,8 @@ function Planner() {
             <ProfileChoice flipEta={flipEta} coastEta={draft.coastEta} onChange={(coastEta) => update({ coastEta })} />
             {profile.crewRest && <RestChoice ratio={draft.restRatio} onChange={(restRatio) => update({ restRatio })} />}
             <div className="hull-panel mt-1 rounded-lg px-3 py-2">
-              <SummaryRow label="Destino" value={draft.destination.name} />
-              <SummaryRow label="A bordo" value={draft.crew === 'crewed' ? 'Piloto humano' : 'Sonda robótica'} />
+              <SummaryRow label="Destino" value={routeName(draft.origin, target)} />
+              <SummaryRow label="A bordo" value={CREW_LABEL[draft.crew].label} />
               <SummaryRow label="Aceleração α" value={formatAccelG(draft.accelG)} />
               <SummaryRow label="Tempo de bordo" value={formatSpan(profile.tauTotal)} />
               <SummaryRow label="Tempo na Terra" value={formatSpan(profile.tTotal)} />
@@ -797,8 +856,8 @@ function Planner() {
       >
         <div className="min-w-0 text-[11px] leading-tight text-slate-300">
           <div className="truncate font-semibold text-slate-50">
-            {draft.destination.shortName} · {formatAccelG(draft.accelG)} ·{' '}
-            {draft.crew === 'crewed' ? 'piloto humano' : 'sonda robótica'}
+            {draft.origin.solarSystem ? '' : `${draft.origin.homeName} → `}
+            {draft.destination.shortName} · {formatAccelG(draft.accelG)} · {CREW_LABEL[draft.crew].label.toLowerCase()}
           </div>
           <div className="font-readout truncate">
             <ViabilityMark viability={assessment.viability} /> {formatSpan(profile.tauTotal)} a bordo ·{' '}

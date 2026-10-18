@@ -24,6 +24,7 @@ import {
 import type { CrewKind } from '../physics/accelerationPresets';
 import { brakingDistance as restBrakingDistance, nextBurnAt } from '../physics/crewRest';
 import type { Destination } from '../physics/destinations';
+import { ORIGINS, type Origin } from '../physics/origins';
 import { CMB_VISIBLE_GAMMA, preFlipWindowS } from '../physics/criticalEvents';
 import { WIEN_NM_K, peakCmbLux, peakCmbLuxRapidity, type PhotometryAndEyeState } from '../physics/EyeAndPhotometry';
 import { AU_M } from '../physics/sky';
@@ -52,6 +53,8 @@ import {
 /** O que as explicações leem do estado do voo (o store satisfaz esta forma). */
 export interface ExplainContext {
   readonly crew: CrewKind;
+  /** Estrela e planeta de partida (padrão: o Sol e a Terra). */
+  readonly origin?: Origin;
   readonly destination: Destination;
   readonly accelG: number;
   readonly profile: MissionProfile;
@@ -147,7 +150,6 @@ export const EFFECT_THRESHOLDS = {
   ismGamma: 10,
 } as const;
 
-const T_SUN_K = 5778;
 /** Abaixo disso um corpo negro some no visível (o shader corta em 250 K). */
 const SUN_VISIBLE_K = 1000;
 const SUN_CORE_K = 1.57e7;
@@ -167,6 +169,8 @@ const tex = String.raw;
 
 /** Grandezas derivadas usadas por vários efeitos. */
 interface Scene extends ExplainContext {
+  /** A partida resolvida: os textos falam da Terra ou de Erid. */
+  readonly home: Origin;
   readonly crewed: boolean;
   readonly alpha: number;
   readonly sunDistanceAu: number;
@@ -175,11 +179,14 @@ interface Scene extends ExplainContext {
 }
 
 function scene(ctx: ExplainContext): Scene {
+  const home = ctx.origin ?? ORIGINS.sol;
   return {
     ...ctx,
+    home,
     crewed: ctx.crew === 'crewed',
     alpha: ctx.profile.properAccel,
-    sunDistanceAu: (AU_M + ctx.flight.positionM) / AU_M,
+    // Distância à estrela de partida (UA).
+    sunDistanceAu: (home.homeOrbitM + ctx.flight.positionM) / AU_M,
     dFront: Math.exp(ctx.flight.eta),
     dBack: Math.exp(-ctx.flight.eta),
   };
@@ -253,7 +260,7 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
     title: 'A missão',
     announce: false,
     isActive: () => true,
-    explain: ({ destination, accelG, alpha, profile, crewed }) => ({
+    explain: ({ destination, accelG, alpha, profile, crewed, home }) => ({
       summary:
         (profile.crewRest
           ? `Acelerar com α constante em queimas de até ${formatSpan(profile.crewRest.burnTau)}, separadas por ` +
@@ -266,10 +273,10 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
           ? 'Acelerar com α constante até o meio do caminho, girar a nave e frear com a mesma α até parar em '
           : `Acelerar com α constante até v = ${formatVelocity(Math.tanh(profile.etaMax), Math.exp(-profile.etaMax) / profile.gammaMax)}, ` +
             'desligar o motor e seguir por inércia, depois girar a nave e frear com a mesma α até parar em ') +
-        `${destination.name}: ${formatSpan(profile.tauTotal)} de bordo e ${formatSpan(profile.tTotal)} na Terra.`,
+        `${destination.name}: ${formatSpan(profile.tauTotal)} de bordo e ${formatSpan(profile.tTotal)} ${home.inHome}.`,
       details: [
-        'A aceleração própria α é a que um acelerômetro a bordo mede, e ela é constante. A aceleração medida da ' +
-          'Terra não é: cai como α/γ³ à medida que a nave se aproxima de c.',
+        'A aceleração própria α é a que um acelerômetro a bordo mede, e ela é constante. A aceleração medida ' +
+          `${home.ofHome} não é: cai como α/γ³ à medida que a nave se aproxima de c.`,
         !crewed
           ? accelG > 60_000
             ? `A bordo vai uma sonda robótica, mas nem ela aguentaria ${num(accelG)} g: o limite conhecido, de ` +
@@ -345,28 +352,28 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
     title: 'Aberração da luz',
     announce: true,
     isActive: (s) => s.flight.beta >= EFFECT_THRESHOLDS.aberrationBeta,
-    explain: ({ flight }) => {
-      // Estrela a 90° no referencial da Terra: cos θ′ = β, tan θ′ = 1/sinh η (estável perto de c).
+    explain: ({ flight, home }) => {
+      // Estrela a 90° no referencial da partida: cos θ′ = β, tan θ′ = 1/sinh η (estável perto de c).
       const theta90 = Math.atan(1 / Math.sinh(flight.eta));
       return {
         summary:
           'A luz das estrelas chega inclinada para a frente, como a chuva no para-brisa de um carro em movimento. ' +
-          `Toda a metade do céu que fica à frente da nave, no referencial da Terra, agora cabe num cone de ` +
+          `Toda a metade do céu que fica à frente da nave, no referencial ${home.ofHome}, agora cabe num cone de ` +
           `${formatAngle(theta90)} em torno do alvo.`,
         details: [
           'Para quem se move, a direção de onde a luz parece vir muda: as estrelas se aglomeram na direção do ' +
-            'movimento e se afastam da traseira. Uma estrela a 90° da rota, no referencial da Terra, aparece a ' +
+            `movimento e se afastam da traseira. Uma estrela a 90° da rota, no referencial ${home.ofHome}, aparece a ` +
             'θ′ = arccos β da proa.',
           'Na ignição o campo estelar inteiro escorrega para a frente, e a impressão é de que a nave anda para trás: ' +
             'é a ilusão óptica de recuo.',
           'O shader faz essa conta para cada pixel: a partir da direção observada, calcula de onde a luz partiu no ' +
-            'referencial da Terra. Para não perder precisão em 32 bits perto de c, usa 1 − β·cos θ = δ + β·(1 − cos θ), ' +
+            `referencial ${home.ofHome}. Para não perder precisão em 32 bits perto de c, usa 1 − β·cos θ = δ + β·(1 − cos θ), ` +
             'uma soma de termos positivos.',
         ],
         formulas: [
           {
             tex: tex`\cos\theta' = \frac{\cos\theta + \beta}{1 + \beta\cos\theta}`,
-            note: 'θ: direção no referencial da Terra; θ′: direção vista da nave.',
+            note: `θ: direção no referencial ${home.ofHome}; θ′: direção vista da nave.`,
           },
           { card: true, tex: tex`\theta'_{90^\circ} = \arccos\beta = \arctan\frac{1}{\sinh\eta} = ${texAngle(theta90)}` },
         ],
@@ -378,12 +385,13 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
     title: 'Efeito Doppler e beaming',
     announce: true,
     isActive: (s) => s.dFront >= EFFECT_THRESHOLDS.dopplerAhead,
-    explain: ({ dFront, dBack }) => {
-      const sunK = T_SUN_K * dBack;
+    explain: ({ dFront, dBack, home }) => {
+      const sunK = home.starTempK * dBack;
+      const star = home.solarSystem ? 'o Sol' : home.starName;
       return {
         summary:
           `À frente, a luz chega com a frequência multiplicada por D = e^η = ${num(dFront)}: as estrelas ` +
-          'ficam mais azuis e mais brilhantes. Atrás, ela é dividida pelo mesmo fator, e o Sol, no telescópio traseiro, ' +
+          `ficam mais azuis e mais brilhantes. Atrás, ela é dividida pelo mesmo fator, e ${star}, no telescópio traseiro, ` +
           (sunK >= SUN_VISIBLE_K
             ? `parece uma estrela de ${num(sunK)} K.`
             : `parece um corpo negro de ${num(sunK)} K, frio demais para ser visto.`),
@@ -397,7 +405,11 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
         formulas: [
           { tex: tex`D = \frac{1}{\gamma\,(1 - \beta\cos\theta')}` },
           { card: true, tex: tex`D_{\text{frente}} = e^{\eta} = ${n(dFront)}, \qquad D_{\text{trás}} = e^{-\eta} = ${n(dBack)}` },
-          { tex: tex`T_{\odot,\,\text{trás}} = ${n(T_SUN_K, 4)}\ \mathrm{K} \times e^{-\eta} = ${n(sunK)}\ \mathrm{K}` },
+          {
+            tex: home.solarSystem
+              ? tex`T_{\odot,\,\text{trás}} = ${n(home.starTempK, 4)}\ \mathrm{K} \times e^{-\eta} = ${n(sunK)}\ \mathrm{K}`
+              : tex`T_{\star,\,\text{trás}} = ${n(home.starTempK, 4)}\ \mathrm{K} \times e^{-\eta} = ${n(sunK)}\ \mathrm{K}`,
+          },
           { tex: tex`I' = D^4\,I, \qquad F'_{\text{estrela}} = D^2\,F` },
         ],
       };
@@ -408,7 +420,7 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
     title: 'Dilatação do tempo',
     announce: true,
     isActive: (s) => s.flight.gamma >= EFFECT_THRESHOLDS.timeDilationGamma,
-    explain: ({ flight, profile }) => {
+    explain: ({ flight, profile, home }) => {
       const { gamma, tau, earthTimeS, earthRadioTimeS, phase, eta } = flight;
       // Com descansos ou manobras, t não tem uma fórmula fechada só: vale a integral.
       const segmented = profile.crewRest !== undefined || profile.maneuvers !== undefined;
@@ -427,7 +439,7 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
       if (tau > 0) {
         formulas.push({ tex: tex`\frac{t}{\tau} = \frac{${texDuration(earthTimeS)}}{${texDuration(tau)}} = ${n(earthTimeS / tau)}` });
       }
-      // O rádio da Terra: a luz que chega agora partiu em t − x/c = ∫ e^(−η) dτ, com a frequência dividida por e^η.
+      // O rádio do planeta de partida: a luz que chega agora partiu em t − x/c = ∫ e^(−η) dτ, com a frequência dividida por e^η.
       formulas.push(
         { tex: tex`t_{\text{rádio}} = t - \frac{x}{c} = \int_0^{\tau} e^{-\eta}\,d\tau = ${texDuration(earthRadioTimeS)}` },
         { tex: tex`\frac{f_{\text{rec}}}{f_{\text{em}}} = e^{-\eta} = ${n(Math.exp(-eta))}` },
@@ -435,22 +447,23 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
       const radioTotal = profile.tTotal - profile.distanceM / C;
       return {
         summary:
-          `Cada segundo a bordo corresponde agora a ${formatSpan(gamma)} na Terra.` +
-          ` Desde a partida, passaram ${formatSpan(tau)} na nave e ${formatSpan(earthTimeS)} na Terra.`,
+          `Cada segundo a bordo corresponde agora a ${formatSpan(gamma)} ${home.inHome}.` +
+          ` Desde a partida, passaram ${formatSpan(tau)} na nave e ${formatSpan(earthTimeS)} ${home.inHome}.`,
         details: [
-          'Medido da Terra, um relógio em movimento anda mais devagar: dt = γ·dτ. Não é defeito dos relógios: tudo ' +
+          `Medido ${home.ofHome}, um relógio em movimento anda mais devagar: dt = γ·dτ. Não é defeito dos relógios: tudo ` +
             'a bordo, de corações a átomos, segue o tempo próprio τ.',
-          'Com aceleração constante, o tempo da Terra cresce como t = (c/α)·sinh η, exponencialmente com o tempo ' +
-            `de bordo. Por isso a viagem leva ${formatSpan(profile.tTotal)} na Terra e só ` +
+          `Com aceleração constante, o tempo ${home.ofHome} cresce como t = (c/α)·sinh η, exponencialmente com o tempo ` +
+            `de bordo. Por isso a viagem leva ${formatSpan(profile.tTotal)} ${home.inHome} e só ` +
             `${formatSpan(profile.tauTotal)} a bordo.`,
-          'Para a nave, é a Terra que se move. A assimetria vem de quem acelera: só a nave sente o empuxo, e é ela ' +
-            'que envelhece menos (o paradoxo dos gêmeos).',
-          `O que a nave vê da Terra é outra coisa: a luz (ou o rádio) que chega agora partiu ${formatSpan(earthRadioTimeS)} ` +
-            `depois da partida, enquanto o relógio da Terra já marca ${formatSpan(earthTimeS)}. Esse sinal chega com a ` +
-            `frequência dividida por e^η = ${num(Math.exp(eta))}: um vídeo da Terra passaria ${num(Math.exp(eta))} vezes mais ` +
-            'devagar. Na subida a Terra parece congelada; na frenagem η cai e o sinal volta a correr mais depressa, mas ' +
-            'nunca mais que um segundo da Terra por segundo de bordo.',
-          `Na chegada, o rádio mostra a Terra de ${formatSpan(Math.max(0, radioTotal))} depois da partida (t_total − D/c). ` +
+          `Para a nave, é ${home.homeName === 'Terra' ? 'a Terra' : home.homeName} que se move. A assimetria vem de quem ` +
+            'acelera: só a nave sente o empuxo, e é ela que envelhece menos (o paradoxo dos gêmeos).',
+          `O que a nave vê ${home.ofHome} é outra coisa: a luz (ou o rádio) que chega agora partiu ${formatSpan(earthRadioTimeS)} ` +
+            `depois da partida, enquanto o relógio ${home.ofHome} já marca ${formatSpan(earthTimeS)}. Esse sinal chega com a ` +
+            `frequência dividida por e^η = ${num(Math.exp(eta))}: um vídeo ${home.ofHome} passaria ${num(Math.exp(eta))} vezes mais ` +
+            `devagar. Na subida, ${home.homeName === 'Terra' ? 'a Terra' : home.homeName} parece congelada; na frenagem η cai ` +
+            `e o sinal volta a correr mais depressa, mas nunca mais que um segundo ${home.ofHome} por segundo de bordo.`,
+          `Na chegada, o rádio mostra ${home.homeName === 'Terra' ? 'a Terra' : home.homeName} de ` +
+            `${formatSpan(Math.max(0, radioTotal))} depois da partida (t_total − D/c). ` +
             `O resto da história, ${formatSpan(profile.distanceM / C)}, chega nos ${formatSpan(profile.distanceM / C)} ` +
             'seguintes, o tempo que a luz leva para cruzar a distância.',
         ],
@@ -504,16 +517,16 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
     title: 'Contração de Lorentz',
     announce: true,
     isActive: (s) => s.flight.gamma >= EFFECT_THRESHOLDS.contractionGamma,
-    explain: ({ flight, destination }) => {
+    explain: ({ flight, destination, home }) => {
       const { restDistanceRemainingM: rest, contractedDistanceRemainingM: contracted, gamma } = flight;
       return {
         summary:
           `Medida pela nave, a distância que falta encolhe por um fator γ: dos ${formatDistance(rest)} no ` +
-          `referencial da Terra, restam ${formatDistance(contracted)}.`,
+          `referencial ${home.ofHome}, restam ${formatDistance(contracted)}.`,
         details: [
           'Comprimentos na direção do movimento se contraem por 1/γ. Para a tripulação, é o espaço até ' +
             `${destination.name} que encolhe, e por isso a nave chega em minutos sem nunca passar da velocidade da luz.`,
-          'O HUD mostra as duas medidas: "Dist. repouso", no referencial da Terra, e "Dist. contraída", no da nave.',
+          `O HUD mostra as duas medidas: "Distância", no referencial ${home.ofHome}, e "Contraída", no da nave.`,
         ],
         formulas: [
           { tex: tex`L = \frac{L_0}{\gamma} = \frac{${texDistance(rest)}}{${n(gamma, 4)}} = ${texDistance(contracted)}` },
@@ -525,8 +538,9 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
   'solar-system': {
     title: 'Atravessando o Sistema Solar',
     announce: true,
+    // Os planetas e a Nuvem de Oort só existem na partida do Sol.
     isActive: (s) =>
-      isAscending(s.profile, s.flight) && inRange(s.sunDistanceAu, EFFECT_THRESHOLDS.solarSystemAu),
+      s.home.solarSystem && isAscending(s.profile, s.flight) && inRange(s.sunDistanceAu, EFFECT_THRESHOLDS.solarSystemAu),
     explain: ({ flight, sunDistanceAu, alpha }) => {
       const horizon = C2 / alpha;
       // Distância da frente de luz emitida na ignição: ct − x = (c²/α)(1 − e^(−η)).
@@ -867,7 +881,7 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
     title: 'Motor desligado: inércia',
     announce: true,
     isActive: (s) => s.flight.phase === 'coasting' && !s.flight.crewRest,
-    explain: ({ flight, profile }) => {
+    explain: ({ flight, profile, home }) => {
       const m = profile.maneuvers;
       if (m && flight.tau >= m.firstTau) {
         // Inércia depois de o piloto desligar o motor, até a frenagem automática.
@@ -884,7 +898,7 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
                 'frear com a aceleração planejada e parar no alvo. Religar antes acelera de novo e chega mais cedo.'
               : 'A nave está quase parada e não chega ao alvo. Religue o motor para o piloto automático refazer a rota.'),
           details: [
-            'Sem empuxo, a rapidez η fica constante: dx/dτ = c·sinh η e dt/dτ = cosh η. O relógio da Terra continua ' +
+            `Sem empuxo, a rapidez η fica constante: dx/dτ = c·sinh η e dt/dτ = cosh η. O relógio ${home.ofHome} continua ` +
               'correndo γ vezes mais depressa que o de bordo.',
             profile.crewRest
               ? 'A frenagem começa quando a distância que falta é a que a aceleração planejada leva para parar a nave, ' +
@@ -965,19 +979,19 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
     title: 'Chegada: o paradoxo dos gêmeos',
     announce: true,
     isActive: (s) => s.flight.phase === 'arrived',
-    explain: ({ profile }) => {
+    explain: ({ profile, home }) => {
       const ratio = profile.tTotal / profile.tauTotal;
       const lightTimeS = profile.distanceM / C;
       return {
         summary:
-          `A bordo passaram ${formatSpan(profile.tauTotal)}; na Terra, ${formatSpan(profile.tTotal)}. Quem ` +
+          `A bordo passaram ${formatSpan(profile.tauTotal)}; ${home.inHome}, ${formatSpan(profile.tTotal)}. Quem ` +
           'acelerou foi a nave, e por isso foi ela que envelheceu menos.',
         details: [
-          `Em média, cada segundo a bordo valeu ${formatSpan(ratio)} na Terra.`,
-          `Uma mensagem enviada agora leva ${formatSpan(lightTimeS)} para chegar à Terra: lá, a notícia da ` +
+          `Em média, cada segundo a bordo valeu ${formatSpan(ratio)} ${home.inHome}.`,
+          `Uma mensagem enviada agora leva ${formatSpan(lightTimeS)} para chegar ${home.toHome}: lá, a notícia da ` +
             `chegada só será recebida ${formatSpan(profile.tTotal + lightTimeS)} depois da partida.`,
           'Para voltar, seria preciso outra viagem igual. No reencontro teriam passado ' +
-            `${formatSpan(2 * profile.tTotal)} na Terra e só ${formatSpan(2 * profile.tauTotal)} a bordo.`,
+            `${formatSpan(2 * profile.tTotal)} ${home.inHome} e só ${formatSpan(2 * profile.tauTotal)} a bordo.`,
         ],
         formulas: [...missionTotalsFormulas(profile).slice(1), { card: true, tex: tex`\frac{t_{\text{total}}}{\tau_{\text{total}}} = ${n(ratio)}` }],
       };

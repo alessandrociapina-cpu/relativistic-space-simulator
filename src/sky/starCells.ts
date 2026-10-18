@@ -46,25 +46,54 @@ export const starHalo = (amp: number) => 1 + 0.8 * Math.max(0, Math.sqrt(Math.mi
 /** Ângulo (rad) e fração de distância dentro dos quais uma estrela do catálogo é o próprio alvo. */
 const TARGET_MATCH = { angle: 1e-3, distance: 0.05 } as const;
 
+/** Partida fora do Sol: a posição da estrela de partida (ICRS, anos-luz) e a luminosidade do Sol, que vira estrela do céu. */
+export interface CatalogOrigin {
+  readonly positionLy: Vec3;
+  readonly sunLuminosity: number;
+}
+
+/** Cor do Sol como estrela do céu (B − V = 0,65). */
+const SUN_BV = 0.65;
+
 /**
- * Lê o vetor plano do JSON (5 números por estrela) já no referencial da nave.
- * O alvo (Sirius, por exemplo) sai do catálogo: o shader o desenha à parte.
+ * Lê o vetor plano do JSON (5 números por estrela) já no referencial da nave, com as posições a partir da
+ * estrela de partida. O alvo (Sirius, por exemplo) e a estrela de partida saem do catálogo: o shader os
+ * desenha à parte. Partindo de outra estrela, o Sol entra no céu (de Erid, uma estrela de magnitude 3,3).
  */
-export function parseCatalog(flat: readonly number[], icrsToShip: Mat3, targetDistanceLy = Infinity): CatalogStar[] {
+export function parseCatalog(
+  flat: readonly number[],
+  icrsToShip: Mat3,
+  targetDistanceLy = Infinity,
+  origin: CatalogOrigin | null = null,
+): CatalogStar[] {
   const stars: CatalogStar[] = [];
+  const originLy = origin?.positionLy ?? null;
+  const originDistLy = originLy ? length(originLy) : 0;
   for (let i = 0; i + 4 < flat.length; i += 5) {
     const distPc = flat[i + 4]! > 0 ? flat[i + 4]! : UNKNOWN_DIST_PC;
     const distLy = distPc * PARSEC_LY;
-    const dir = apply(icrsToShip, equatorialUnit(flat[i]!, flat[i + 1]!));
+    const helio = scale(equatorialUnit(flat[i]!, flat[i + 1]!), distLy);
+    const rel = originLy ? sub(helio, originLy) : helio;
+    const relLy = length(rel);
+    // A própria estrela de partida (a posição do catálogo difere da do destino por arredondamento).
+    if (originLy && relLy < TARGET_MATCH.distance * originDistLy) continue;
+    const dir = apply(icrsToShip, scale(rel, 1 / relLy));
     const isTarget =
       Math.hypot(dir[0], dir[1]) < TARGET_MATCH.angle &&
       dir[2] < 0 &&
-      Math.abs(distLy - targetDistanceLy) < TARGET_MATCH.distance * targetDistanceLy;
+      Math.abs(relLy - targetDistanceLy) < TARGET_MATCH.distance * targetDistanceLy;
     if (isTarget) continue;
     stars.push({
-      position: scale(dir, distLy),
+      position: scale(dir, relLy),
       luminosity: 10 ** (-0.4 * flat[i + 2]!) * distLy * distLy,
       temperatureK: bvToTemperature(flat[i + 3]!),
+    });
+  }
+  if (origin && originLy) {
+    stars.push({
+      position: apply(icrsToShip, scale(originLy, -1)),
+      luminosity: origin.sunLuminosity,
+      temperatureK: bvToTemperature(SUN_BV),
     });
   }
   return stars;
@@ -90,7 +119,7 @@ export function packStar(temperatureK: number, luminosity: number): number {
 export interface StarCellsBuild {
   /** RGBA32F: largura N, altura 6N (face f ocupa as linhas f·N a f·N + N − 1). */
   readonly data: Float32Array;
-  /** Posição da nave (anos-luz, ao longo de −Z) usada como origem das posições. */
+  /** Posição da nave (anos-luz desde a estrela de partida, ao longo de −Z) usada como origem das posições. */
   readonly shipDistanceLy: number;
   /** Distância da estrela mais próxima (anos-luz): decide quando remontar. */
   readonly nearestLy: number;
@@ -98,7 +127,7 @@ export interface StarCellsBuild {
 }
 
 /**
- * Monta a grade para a nave a `shipDistanceLy` do Sol rumo ao alvo (−Z).
+ * Monta a grade para a nave a `shipDistanceLy` da estrela de partida rumo ao alvo (−Z).
  * Cada célula fica com a estrela que mais contribui no seu centro.
  */
 export function buildStarCells(stars: readonly CatalogStar[], shipDistanceLy: number, n = STAR_CELLS_N): StarCellsBuild {

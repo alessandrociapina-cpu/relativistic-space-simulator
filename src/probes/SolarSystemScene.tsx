@@ -12,6 +12,7 @@ import {
   Points,
   PointsMaterial,
   Vector3,
+  type Camera,
   type Group,
   type Mesh,
   type PerspectiveCamera,
@@ -70,6 +71,53 @@ const STAR_SPHERE = 20_000;
 const ORBIT_LINES_MIN_AU = 0.005;
 /** Pontos da volta recente desenhada a cada frame. */
 const RECENT_POINTS = 96;
+/** Altura de um rótulo na tela (px): um rótulo que encosta noutro desce ou sobe uma linha. */
+const LABEL_LINE_PX = 12;
+const LABEL_NUDGES_PX = [0, LABEL_LINE_PX, -LABEL_LINE_PX, 2 * LABEL_LINE_PX, -2 * LABEL_LINE_PX];
+/** Distância do rótulo ao ponto (a margem `ml-2` do botão). */
+const LABEL_OFFSET_PX = 8;
+
+/** Um rótulo da cena: o botão, o grupo que ele acompanha e a prioridade (menor = mais importante). */
+interface LabelSlot {
+  readonly el: HTMLElement | null | undefined;
+  readonly group: Group | null | undefined;
+  readonly priority: number;
+}
+
+const labelWidths = new WeakMap<HTMLElement, number>();
+const labelAnchor = new Vector3();
+
+/**
+ * Rótulos que se sobrepõem na tela (Mercúrio e a Mariner 10, por exemplo): na ordem de prioridade, cada um
+ * fica no lugar, desce ou sobe uma linha até achar espaço; sem espaço, some até o próximo frame.
+ */
+function declutterLabels(slots: LabelSlot[], camera: Camera, width: number, height: number) {
+  const placed: (readonly [number, number, number, number])[] = [];
+  slots.sort((a, b) => a.priority - b.priority);
+  for (const { el, group } of slots) {
+    if (!el || !group || el.style.display === 'none' || !group.visible) continue;
+    group.getWorldPosition(labelAnchor).project(camera);
+    if (labelAnchor.z > 1 || Math.abs(labelAnchor.x) > 1.2 || Math.abs(labelAnchor.y) > 1.2) continue;
+    let w = labelWidths.get(el);
+    if (!w) {
+      w = el.offsetWidth;
+      if (w) labelWidths.set(el, w);
+    }
+    const x0 = ((labelAnchor.x + 1) / 2) * width + LABEL_OFFSET_PX;
+    const x1 = x0 + (w || 40);
+    const y = ((1 - labelAnchor.y) / 2) * height;
+    const nudge = LABEL_NUDGES_PX.find((dy) => {
+      const y0 = y + dy - LABEL_LINE_PX / 2;
+      const y1 = y0 + LABEL_LINE_PX;
+      return !placed.some(([a0, a1, b0, b1]) => x0 < a1 && x1 > a0 && y0 < b1 && y1 > b0);
+    });
+    el.style.visibility = nudge === undefined ? 'hidden' : '';
+    if (nudge === undefined) continue;
+    // `transform` se soma ao `translate` do Tailwind (-translate-y-1/2), que centra o rótulo no ponto.
+    el.style.transform = nudge ? `translateY(${nudge}px)` : '';
+    placed.push([x0, x1, y + nudge - LABEL_LINE_PX / 2, y + nudge + LABEL_LINE_PX / 2]);
+  }
+}
 
 /** Linha simples (o JSX `<line>` colide com o do SVG; aqui é o objeto do three). */
 function makeLine(color: string, opacity: number): Line {
@@ -236,6 +284,8 @@ function SceneContent() {
   const planetMeshes = useRef<(Mesh | null)[]>([]);
   const moonGroups = useRef<(Group | null)[]>([]);
   const moonMeshes = useRef<(Mesh | null)[]>([]);
+  const sunLabel = useRef<HTMLButtonElement | null>(null);
+  const planetLabels = useRef<(HTMLButtonElement | null)[]>([]);
   const moonLabels = useRef<(HTMLButtonElement | null)[]>([]);
   const smallGroups = useRef<(Group | null)[]>([]);
   const smallMeshes = useRef<(Mesh | null)[]>([]);
@@ -484,6 +534,24 @@ function SceneContent() {
     if (lines.current) lines.current.visible = mode === 'log' || cam.position.length() > ORBIT_LINES_MIN_AU;
     stars.current?.position.copy(cam.position);
 
+    const selectedNow = selectedRef.current;
+    declutterLabels(
+      [
+        { el: sunLabel.current, group: sun.current, priority: focus === 'sun' ? 0 : 2 },
+        ...PLANET_LIST.map((p, i) => ({ el: planetLabels.current[i], group: planetGroups.current[i], priority: focus === p.id ? 0 : 3 })),
+        ...MOON_LIST.map((m, i) => ({ el: moonLabels.current[i], group: moonGroups.current[i], priority: focus === m.id ? 0 : 4 })),
+        ...SMALL_BODY_LIST.map((b, i) => ({ el: smallLabels.current[i], group: smallGroups.current[i], priority: focus === b.id ? 0 : 5 })),
+        ...CRAFTS.map((c, i) => ({
+          el: craftLabels.current[i],
+          group: craftGroups.current[i],
+          priority: focus === c.id ? 0 : c.mission === selectedNow ? 1 : 6,
+        })),
+      ],
+      cam,
+      size.width,
+      size.height,
+    );
+
     // Planos de recorte proporcionais à distância (com depth buffer logarítmico).
     const d = cam.position.length();
     const near = Math.max(d * 1e-4, 1e-11);
@@ -506,7 +574,7 @@ function SceneContent() {
           <spriteMaterial map={glow} blending={AdditiveBlending} depthWrite={false} transparent />
         </sprite>
         <pointLight intensity={2.6} decay={0} />
-        <Label id="sun" name="Sol" color="#fde68a" />
+        <Label ref={sunLabel} id="sun" name="Sol" color="#fde68a" />
       </group>
       {PLANET_LIST.map((planet, i) => (
         <group key={planet.id} ref={(g) => void (planetGroups.current[i] = g)}>
@@ -514,7 +582,7 @@ function SceneContent() {
             <sphereGeometry args={[1, 64, 32]} />
             <meshStandardMaterial color={planet.color} roughness={0.85} />
           </mesh>
-          <Label id={planet.id} name={planet.name} color={planet.color} />
+          <Label ref={(el) => void (planetLabels.current[i] = el)} id={planet.id} name={planet.name} color={planet.color} />
         </group>
       ))}
       {MOON_LIST.map((moon, i) => (
