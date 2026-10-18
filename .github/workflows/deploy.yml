@@ -31,6 +31,18 @@ jobs:
       - run: npm test
       - run: npm run build
 
+      # Teste de fumaça no navegador: abertura, viagem relativística e sondas no build de produção.
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+
+      - name: Guarda os traços do Playwright
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: test-results
+          retention-days: 7
+
       - name: Configura o GitHub Pages
         if: github.event_name != 'pull_request'
         uses: actions/configure-pages@v5

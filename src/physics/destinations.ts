@@ -17,7 +17,7 @@ export const PARSEC_M = 3.0856775814913673e16;
 /** Aceleração padrão sugerida: 1,61×10⁶ G (≈ 10 min de bordo até Proxima). */
 export const DEFAULT_ACCEL_G = 1.61e6;
 
-export type DestinationId = 'proxima' | 'sirius' | 'trappist1' | 'sgrA' | 'andromeda';
+export type DestinationId = 'proxima' | 'alphaCenA' | 'sirius' | 'tauCeti' | 'eridani40' | 'trappist1' | 'sgrA' | 'andromeda';
 
 /** Como o alvo é desenhado no shader (`uTargetType`: 0, 1, 2). */
 export type TargetKind = 'star' | 'blackHole' | 'galaxy';
@@ -62,6 +62,20 @@ export const DESTINATIONS: Readonly<Record<DestinationId, Destination>> = {
     blurb: 'A estrela mais próxima do Sol: uma anã vermelha em Centauro, ao lado de Alfa Centauri A e B.',
     visualMag: 11.13,
   },
+  alphaCenA: {
+    id: 'alphaCenA',
+    name: 'Alfa Centauri A',
+    shortName: 'ALFA CEN A',
+    kind: 'star',
+    distanceLy: 4.37,
+    temperatureK: 5790,
+    radiusM: 1.2234 * SOLAR_RADIUS_M,
+    defaultAccelG: DEFAULT_ACCEL_G,
+    raDeg: 219.9021,
+    decDeg: -60.8340,
+    blurb: 'Uma gêmea um pouco maior do Sol, com Alfa Centauri B a ~23 UA; é a estrela de Pandora, em Avatar.',
+    visualMag: 0.01,
+  },
   sirius: {
     id: 'sirius',
     name: 'Sirius A',
@@ -75,6 +89,34 @@ export const DESTINATIONS: Readonly<Record<DestinationId, Destination>> = {
     decDeg: -16.7161,
     blurb: 'A estrela mais brilhante do céu noturno, branco-azulada, no Cão Maior.',
     visualMag: -1.46,
+  },
+  tauCeti: {
+    id: 'tauCeti',
+    name: 'Tau Ceti',
+    shortName: 'TAU CETI',
+    kind: 'star',
+    distanceLy: 11.912,
+    temperatureK: 5320,
+    radiusM: 0.793 * SOLAR_RADIUS_M,
+    defaultAccelG: DEFAULT_ACCEL_G,
+    raDeg: 26.0170,
+    decDeg: -15.9375,
+    blurb: 'Uma estrela parecida com o Sol, na Baleia, com planetas candidatos; o destino do Hail Mary.',
+    visualMag: 3.5,
+  },
+  eridani40: {
+    id: 'eridani40',
+    name: '40 Eridani A',
+    shortName: '40 ERI A',
+    kind: 'star',
+    distanceLy: 16.34,
+    temperatureK: 5126,
+    radiusM: 0.804 * SOLAR_RADIUS_M,
+    defaultAccelG: DEFAULT_ACCEL_G,
+    raDeg: 63.8180,
+    decDeg: -7.6529,
+    blurb: 'Anã laranja num sistema triplo, em Erídano; em Project Hail Mary, a estrela de Erid, o planeta de Rocky.',
+    visualMag: 4.43,
   },
   trappist1: {
     id: 'trappist1',

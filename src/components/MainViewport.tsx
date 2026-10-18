@@ -1,3 +1,4 @@
+import '../quietThree';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import { WINDSHIELD_FOV_DEG } from '../physics/EyeAndPhotometry';

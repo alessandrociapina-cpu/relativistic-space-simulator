@@ -20,9 +20,10 @@ uniform vec3  uForward;
 uniform float uTime;             // anima a convecção estelar e o disco de acreção
 
 // --- Corpos ---
-uniform vec3  uSunDir;
+uniform vec3  uSunDir;           // a estrela de partida, atrás da nave (o Sol, ou 40 Eridani A)
 uniform float uSunRadiusRad;
-uniform float uSunPointAmp;      // o Sol como estrela pontual, quando o disco fica menor que um pixel
+uniform float uSunPointAmp;      // a estrela de partida como ponto, quando o disco fica menor que um pixel
+uniform float uSunTemp;          // temperatura da estrela de partida (K)
 uniform vec3  uTargetDir;
 uniform float uTargetRadiusRad;
 uniform float uEinsteinRadiusRad; // raio de Einstein físico do buraco negro, 2√(GM/(c²D)); 0 nos outros alvos
@@ -55,7 +56,6 @@ uniform float uGlareIntensity;   // véu de espalhamento (display-referred), 0 n
 uniform vec3  uGlareColor;       // cor linear do corpo negro de T_pico, luminância 1
 
 const float T_CMB_0 = 2.72548;
-const float T_SUN   = 5778.0;
 const float PI      = 3.14159265358979;
 const float LOG2_10 = 3.32192809;
 // Teto do σ da PSF no referencial de repouso (rad): o mesmo da grade de estrelas na CPU.
@@ -418,11 +418,11 @@ vec3 renderSky(RelativisticRay ray) {
     float glowLevel = dot(glow, vec3(0.2126, 0.7152, 0.0722)) * uExposure;
     glow *= 1.0 / (1.0 + 1.5 * max(glowLevel - 0.25, 0.0));
     vec3 stars = (glow + renderCatalogStar(bgRay) + renderBackgroundStars(bgRay, eps / 0.07)) * uBackgroundGain
-               + renderPointSource(ray, uSunDir, uSunPointAmp, T_SUN, uSunRadiusRad);
+               + renderPointSource(ray, uSunDir, uSunPointAmp, uSunTemp, uSunRadiusRad);
 
     // Sol atrás e alvo à frente; os discos opacos escondem as estrelas atrás deles.
     float sunCoverage;
-    vec3 sun = renderRealisticStarDisk(ray.sourceDir, uSunDir, uSunRadiusRad, T_SUN, ray.doppler, sunCoverage);
+    vec3 sun = renderRealisticStarDisk(ray.sourceDir, uSunDir, uSunRadiusRad, uSunTemp, ray.doppler, sunCoverage);
     // A estrela-alvo como o Sol: o disco sem diluição pela PSF e o ponto com a diluição uma vez só, no
     // beaming (como as estrelas do catálogo). O ponto fica fora da oclusão do próprio disco, que é menor
     // que um pixel enquanto ele aparece.

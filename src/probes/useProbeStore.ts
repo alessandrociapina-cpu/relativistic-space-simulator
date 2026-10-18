@@ -60,6 +60,8 @@ interface ProbeStore {
   readonly frameMode: FrameMode;
   /** Evento cujo cartão está aberto (alcançado na reprodução ou escolhido na lista). */
   readonly eventId: string | null;
+  /** Galeria de imagens aberta: a missão e a foto mostrada primeiro. */
+  readonly gallery: { readonly missionId: ProbeId; readonly index: number } | null;
   readonly view: ViewRequest;
 
   setT: (t: number) => void;
@@ -72,6 +74,8 @@ interface ProbeStore {
   setShowOthers: (on: boolean) => void;
   setFrameMode: (frameMode: FrameMode) => void;
   showEvent: (id: string | null) => void;
+  openGallery: (missionId: ProbeId, index?: number) => void;
+  closeGallery: () => void;
   /** Vai para o evento: pausa, foca o corpo certo e abre o cartão. */
   jumpToEvent: (id: string) => void;
   tick: (dtRealS: number) => void;
@@ -143,6 +147,7 @@ export const useProbeStore = create<ProbeStore>()((set, get) => ({
   showOthers: loadShowOthers(),
   frameMode: loadFrameMode(),
   eventId: null,
+  gallery: null,
   view: { distance: null, nonce: 0 },
 
   setT: (t) => set({ t: clampT(t), slowdown: null }),
@@ -164,6 +169,8 @@ export const useProbeStore = create<ProbeStore>()((set, get) => ({
     set({ frameMode });
   },
   showEvent: (eventId) => set({ eventId }),
+  openGallery: (missionId, index = 0) => set({ gallery: { missionId, index } }),
+  closeGallery: () => set({ gallery: null }),
   jumpToEvent: (id) => {
     const event = ALL_EVENTS.find((e) => e.id === id);
     if (!event) return;

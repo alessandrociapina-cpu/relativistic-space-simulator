@@ -18,6 +18,7 @@ import {
   type PhotometryAndEyeState,
 } from '../physics/EyeAndPhotometry';
 import { cutEngine, engineCommandAt, engineRampTau, relightEngine } from '../physics/maneuvers';
+import { ORIGINS, canTravel, missionDestination, type Origin } from '../physics/origins';
 import { computeBodyAngularRadii } from '../physics/sky';
 import { activeEffects, newAnnouncements, type EffectId } from '../ui/explanations';
 import { stepDownTimeScale } from './timeScales';
@@ -38,6 +39,9 @@ import {
 
 /** O que define uma missão no planejamento. */
 export interface MissionChoice {
+  /** Estrela e planeta de partida (o Sol e a Terra, ou 40 Eridani A e Erid). */
+  readonly origin: Origin;
+  /** O alvo; no store, visto da partida (`missionDestination`: distância e direção a partir dela). */
   readonly destination: Destination;
   /** Aceleração própria em múltiplos de g₀. */
   readonly accelG: number;
@@ -134,10 +138,14 @@ function flightPlan(profile: MissionProfile) {
 }
 
 /** Nova missão parada no instante da partida. */
-function newMission({ destination, accelG, coastEta, crew, restRatio }: MissionChoice) {
+function newMission({ origin, destination: chosen, accelG, coastEta, crew, restRatio }: MissionChoice) {
+  // Partida e chegada na mesma estrela não existem: volta à partida da Terra.
+  const from = canTravel(origin, chosen.id) ? origin : ORIGINS.sol;
+  const destination = missionDestination(from, chosen);
   // Com piloto humano além da tolerância contínua, o plano alterna queimas e descansos.
   const profile = missionProfileFor(destination, accelG, coastEta, crew, restRatio);
   return {
+    origin: from,
     destination,
     accelG,
     coastEta,
@@ -169,6 +177,7 @@ export const useFlightStore = create<FlightStore>()((set, get) => {
 
   // A demonstração clássica: Proxima a 1,61×10⁶ g, com o olho de um piloto (hipotético).
   const initial = newMission({
+    origin: ORIGINS.sol,
     destination: DESTINATIONS.proxima,
     accelG: DESTINATIONS.proxima.defaultAccelG,
     coastEta: null,
@@ -177,8 +186,8 @@ export const useFlightStore = create<FlightStore>()((set, get) => {
   });
   /** Troca de missão: começa sempre em tempo real (1 s/s); o painel sugere acelerar. */
   const remission = (patch: Partial<MissionChoice>) => {
-    const { destination, accelG, coastEta, crew, restRatio } = get();
-    update({ ...newMission({ destination, accelG, coastEta, crew, restRatio, ...patch }), timeScale: 1 });
+    const { origin, destination, accelG, coastEta, crew, restRatio } = get();
+    update({ ...newMission({ origin, destination, accelG, coastEta, crew, restRatio, ...patch }), timeScale: 1 });
   };
   const initialFlight = computeFlightState(initial.profile, 0);
 

@@ -51,10 +51,11 @@ export const INDICATOR_HELP: Readonly<Record<IndicatorId, IndicatorHelp>> = {
       'que o da Terra: cada segundo a bordo vale γ segundos na Terra.',
   },
   earthClock: {
-    title: 'Relógio da Terra t',
+    title: 'Relógio do planeta de partida t',
     text:
-      'O tempo que passa na Terra (e no alvo, que está no mesmo referencial) desde a partida. Na chegada, é quanto ' +
-      'esperou quem ficou: muito mais que o relógio da nave nas viagens rápidas.',
+      'O tempo que passa no planeta de partida (a Terra, ou Erid na viagem de Rocky) e no alvo, que está no mesmo ' +
+      'referencial, desde a partida. Na chegada, é quanto esperou quem ficou: muito mais que o relógio da nave nas ' +
+      'viagens rápidas.',
   },
   distance: {
     title: 'Distância até o alvo',
@@ -109,7 +110,7 @@ export const INDICATOR_HELP: Readonly<Record<IndicatorId, IndicatorHelp>> = {
   route: {
     title: 'Rota',
     text:
-      'O caminho do Sol ao alvo em escala logarítmica até a metade, espelhada até o alvo: o começo e o fim da ' +
+      'O caminho da estrela de partida (o Sol, ou 40 Eridani A) ao alvo em escala logarítmica até a metade, espelhada até o alvo: o começo e o fim da ' +
       'viagem, perto das estrelas, aparecem tão detalhados quanto o meio. O triângulo âmbar é a nave.',
   },
 };

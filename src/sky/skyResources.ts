@@ -7,8 +7,9 @@
 import * as THREE from 'three';
 import { LIGHT_YEAR_M, type FlightState } from '../physics/RelativityEngine';
 import type { Destination } from '../physics/destinations';
+import { ORIGINS, originDistanceLy, originLuminosity, originPositionLy, type Origin } from '../physics/origins';
 import { SENSOR_LUT, buildSensorLut } from '../physics/sensorResponse';
-import { AU_M, targetViewDistanceM } from '../physics/sky';
+import { targetViewDistanceM } from '../physics/sky';
 import { SKY_MAP_SIZE, relativeStarDensity, shipPositionKpc, skyMapKeyframes } from './galaxyModel';
 import { skyFrameFor, type SkyFrame } from './skyFrame';
 import type { SkyMapRequest, SkyMapResult, StarBuildMessage, StarBuildResult, StarSetupMessage } from './skyMapMessages';
@@ -57,19 +58,27 @@ function getStarWorker(): Worker {
   return starWorker;
 }
 
-function updateStars(destination: Destination, frame: SkyFrame, shipLy: number) {
+/** A viagem: partida e destino (o mesmo destino visto de outra estrela é outro céu). */
+const tripKey = (origin: Origin, destination: Destination) => `${origin.id}>${destination.id}`;
+
+/** Luminosidade do Sol na unidade do catálogo, para o Sol como estrela do céu numa partida de outra estrela. */
+const SUN_LUMINOSITY = originLuminosity(ORIGINS.sol);
+
+function updateStars(destination: Destination, origin: Origin, frame: SkyFrame, shipLy: number) {
   const worker = getStarWorker();
-  if (stars.destinationId !== destination.id) {
-    stars.destinationId = destination.id;
+  const trip = tripKey(origin, destination);
+  if (stars.destinationId !== trip) {
+    stars.destinationId = trip;
     stars.built = null;
     stars.pending = false;
     (starCellsTexture.image.data as Float32Array).fill(0);
     starCellsTexture.needsUpdate = true;
     const setup: StarSetupMessage = {
       type: 'setup',
-      destinationId: destination.id,
+      destinationId: trip,
       icrsToShip: frame.icrsToShip,
       targetDistanceLy: destination.kind === 'star' ? destination.distanceLy : Infinity,
+      origin: origin.destinationId ? { positionLy: originPositionLy(origin), sunLuminosity: SUN_LUMINOSITY } : null,
     };
     worker.postMessage(setup);
   }
@@ -78,7 +87,7 @@ function updateStars(destination: Destination, frame: SkyFrame, shipLy: number) 
   if (stale && !stars.pending && now - stars.lastRequest > STAR_REBUILD_MS) {
     stars.pending = true;
     stars.lastRequest = now;
-    const build: StarBuildMessage = { type: 'build', destinationId: destination.id, shipDistanceLy: shipLy };
+    const build: StarBuildMessage = { type: 'build', destinationId: trip, shipDistanceLy: shipLy };
     worker.postMessage(build);
   }
 }
@@ -118,8 +127,9 @@ let mapWorker: Worker | null = null;
 let mapPending = false;
 let mapDemand: { keys: string[]; origins: Map<string, SkyMapRequest> } = { keys: [], origins: new Map() };
 
-const keyframeKey = (destinationId: string, distanceLy: number) =>
-  distanceLy === 0 ? EARTH_KEY : `${destinationId}:${distanceLy}`;
+// A Via Láctea vista da partida é a da Terra: 16 anos-luz (Erid) não mudam o céu difuso, que varia
+// na escala de centenas de anos-luz.
+const keyframeKey = (trip: string, distanceLy: number) => (distanceLy === 0 ? EARTH_KEY : `${trip}:${distanceLy}`);
 
 function requestNextMap() {
   if (mapPending) return;
@@ -139,16 +149,16 @@ function requestNextMap() {
 }
 
 /** Ordena os mapas pela utilidade: o da Terra primeiro, depois os mais próximos da nave. */
-function demandMaps(destination: Destination, frame: SkyFrame, keyframes: readonly number[], shipLy: number) {
+function demandMaps(trip: string, frame: SkyFrame, keyframes: readonly number[], shipLy: number) {
   const origins = new Map<string, SkyMapRequest>();
   for (const d of keyframes) {
-    const key = keyframeKey(destination.id, d);
+    const key = keyframeKey(trip, d);
     const size = d === 0 ? SKY_MAP_SIZE : KEYFRAME_SIZE;
     origins.set(key, { key, origin: shipPositionKpc(frame.targetGalactic, d), ...size });
   }
   const keys = [...keyframes]
     .sort((a, b) => (a === 0 ? -1 : b === 0 ? 1 : Math.abs(a - shipLy) - Math.abs(b - shipLy)))
-    .map((d) => keyframeKey(destination.id, d));
+    .map((d) => keyframeKey(trip, d));
   mapDemand = { keys, origins };
   requestNextMap();
 }
@@ -165,9 +175,11 @@ export interface SkyUniforms {
   readonly shipToGalactic: THREE.Matrix3;
   /** Densidade de estrelas na posição da nave, relativa à vizinhança solar. */
   readonly starDensity: number;
-  /** Brilho de exibição do alvo e do Sol como estrelas pontuais (antes de virarem disco). */
+  /** Brilho de exibição do alvo e da estrela de partida como estrelas pontuais (antes de virarem disco). */
   readonly targetPointAmp: number;
   readonly sunPointAmp: number;
+  /** Temperatura da estrela de partida (o Sol, ou 40 Eridani A). */
+  readonly sunTempK: number;
 }
 
 interface DestinationSky {
@@ -182,17 +194,12 @@ let lastKey = '';
 let lastUniforms: SkyUniforms | null = null;
 let lastDemandAt = -Infinity;
 
-/** Magnitude do Sol vista de 1 UA. */
-const SUN_MAG_1AU = -26.74;
-const AU_LY = AU_M / LIGHT_YEAR_M;
-const SUN_LUMINOSITY = 10 ** (-0.4 * SUN_MAG_1AU) * AU_LY * AU_LY;
-
-function destinationSky(destination: Destination): DestinationSky {
-  if (current?.id !== destination.id) {
+function destinationSky(destination: Destination, trip: string): DestinationSky {
+  if (current?.id !== trip) {
     const frame = skyFrameFor(destination);
     const m = frame.shipToGalactic;
     current = {
-      id: destination.id,
+      id: trip,
       frame,
       keyframes: skyMapKeyframes(frame.targetGalactic, destination.distanceLy),
       shipToGalactic: new THREE.Matrix3().set(m[0][0], m[0][1], m[0][2], m[1][0], m[1][1], m[1][2], m[2][0], m[2][1], m[2][2]),
@@ -218,19 +225,23 @@ function milkyWayPair(sky: DestinationSky, shipLy: number) {
   return { milkyWayA: a.tex, milkyWayB: b.tex, milkyWayMix: b.d > a.d ? (shipLy - a.d) / (b.d - a.d) : 0 };
 }
 
-/** Uniforms do céu real para o instante do voo (uma vez por instante, para todos os monitores). */
-export function skyUniforms(flight: FlightState, destination: Destination): SkyUniforms {
-  const key = `${destination.id}:${flight.positionM}:${resultsVersion}`;
+/**
+ * Uniforms do céu real para o instante do voo (uma vez por instante, para todos os monitores). `destination`
+ * é o alvo visto da partida (`missionDestination`).
+ */
+export function skyUniforms(flight: FlightState, destination: Destination, origin: Origin = ORIGINS.sol): SkyUniforms {
+  const trip = tripKey(origin, destination);
+  const key = `${trip}:${flight.positionM}:${resultsVersion}`;
   if (key === lastKey && lastUniforms) return lastUniforms;
-  const sky = destinationSky(destination);
+  const sky = destinationSky(destination, trip);
   const shipLy = flight.positionM / LIGHT_YEAR_M;
 
-  updateStars(destination, sky.frame, shipLy);
+  updateStars(destination, origin, sky.frame, shipLy);
   // Reordena os mapas pedidos de vez em quando, conforme a nave anda (ou o scrub salta).
   const now = performance.now();
   if (now - lastDemandAt > 1000) {
     lastDemandAt = now;
-    demandMaps(destination, sky.frame, sky.keyframes, shipLy);
+    demandMaps(trip, sky.frame, sky.keyframes, shipLy);
   }
 
   const built = stars.built;
@@ -246,7 +257,8 @@ export function skyUniforms(flight: FlightState, destination: Destination): SkyU
     shipToGalactic: sky.shipToGalactic,
     starDensity: relativeStarDensity(shipPositionKpc(sky.frame.targetGalactic, shipLy)),
     targetPointAmp: targetLuminosity > 0 ? displayAmplitude(targetLuminosity, targetLy) : 0,
-    sunPointAmp: displayAmplitude(SUN_LUMINOSITY, AU_LY + shipLy),
+    sunPointAmp: displayAmplitude(originLuminosity(origin), originDistanceLy(origin, flight.positionM)),
+    sunTempK: origin.starTempK,
   };
   return lastUniforms;
 }

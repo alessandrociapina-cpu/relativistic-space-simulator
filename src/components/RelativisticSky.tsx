@@ -66,6 +66,7 @@ function createSkyMaterial() {
     uTargetType: { value: 0 },
     uTargetPointAmp: { value: 0 },
     uSunPointAmp: { value: 0 },
+    uSunTemp: { value: 5778 },
     uGalaxyGain: { value: GALAXY_SURFACE_GAIN },
     uTargetGain: { value: 1 },
     uBackgroundGain: { value: 1 },
@@ -116,9 +117,9 @@ export function RelativisticSky({
   useEffect(() => () => material.dispose(), [material]);
 
   useFrame(({ camera, gl, clock }) => {
-    const { flight, destination, photometry } = useFlightStore.getState();
-    const bodies = computeBodyAngularRadii(flight, destination);
-    const sky = skyUniforms(flight, destination);
+    const { flight, destination, origin, photometry } = useFlightStore.getState();
+    const bodies = computeBodyAngularRadii(flight, destination, origin);
+    const sky = skyUniforms(flight, destination, origin);
     const cam = camera as THREE.PerspectiveCamera;
 
     // Base da câmera em 64 bits (colunas da matriz de mundo).
@@ -146,6 +147,7 @@ export function RelativisticSky({
     u.uTargetType.value = TARGET_TYPE[destination.kind];
     u.uTargetPointAmp.value = sky.targetPointAmp;
     u.uSunPointAmp.value = sky.sunPointAmp;
+    u.uSunTemp.value = sky.sunTempK;
     u.uStarCells.value = sky.starCells;
     u.uStarGain.value = sky.starGain;
     u.uShipOffset.value.set(...sky.shipOffset);

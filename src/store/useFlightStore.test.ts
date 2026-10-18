@@ -340,7 +340,7 @@ describe('modos e missão', () => {
 describe('descansos da tripulação no loop', () => {
   it('a 10 g, o aviso de cabine toca no começo e no fim do primeiro descanso (a 1 dia/s)', () => {
     const DAY = 86_400;
-    store().configureMission({ destination: store().destination, accelG: 10, coastEta: null, crew: 'crewed', restRatio: 3 });
+    store().configureMission({ origin: store().origin, destination: store().destination, accelG: 10, coastEta: null, crew: 'crewed', restRatio: 3 });
     const rest = store().profile.crewRest!;
     expect(store().crewStatus?.condition).toBe('ready');
     store().setAutoStepDown(false);

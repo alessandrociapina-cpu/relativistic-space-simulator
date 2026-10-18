@@ -19,7 +19,7 @@ scope.onmessage = (event) => {
   const message = event.data;
   if (message.type === 'setup') {
     destinationId = message.destinationId;
-    stars = parseCatalog(catalog.stars, message.icrsToShip as unknown as Mat3, message.targetDistanceLy);
+    stars = parseCatalog(catalog.stars, message.icrsToShip as unknown as Mat3, message.targetDistanceLy, message.origin);
     return;
   }
   if (message.destinationId !== destinationId) return;

@@ -8,9 +8,22 @@
  */
 import type { MissionProfile } from './RelativityEngine';
 import { DEFAULT_ACCEL_G, type DestinationId } from './destinations';
+import type { OriginId } from './origins';
 
-/** Quem vai a bordo: piloto humano ou sonda robótica. */
-export type CrewKind = 'crewed' | 'robotic';
+/**
+ * Quem vai a bordo: piloto humano, sonda robótica ou a tripulação eridiana de Project Hail Mary (sem olhos:
+ * percebem o mundo pelo som; no para-brisa, a vista das câmeras, como na sonda).
+ */
+export type CrewKind = 'crewed' | 'robotic' | 'eridian';
+
+export const CREW_LABEL: Readonly<Record<CrewKind, { readonly icon: string; readonly label: string }>> = {
+  crewed: { icon: '🧑‍🚀', label: 'Piloto humano' },
+  robotic: { icon: '🤖', label: 'Sonda robótica' },
+  eridian: { icon: '🪨', label: 'Tripulação eridiana' },
+};
+
+/** Gravidade na superfície de Erid (20,48 m/s²): o peso de sempre para um eridiano. */
+export const ERID_G = 2.09;
 
 const MINUTE = 60;
 const HOUR = 3600;
@@ -179,6 +192,18 @@ export const ACCELERATION_PRESETS: readonly AccelerationPreset[] = [
     enduranceText: 'nenhum material aguenta',
     hypothetical: true,
   },
+  {
+    id: 'eridian-erid-g',
+    crew: 'eridian',
+    accelG: ERID_G,
+    label: '2,09 g',
+    title: 'Gravidade de Erid',
+    protection: 'Nenhuma: o peso de casa para um eridiano',
+    detail:
+      'Erid tem 2,09 g na superfície: para Rocky, acelerar assim é como 1 g para nós, e dá para viver anos a bordo.',
+    enduranceS: Infinity,
+    enduranceText: 'suportável por anos',
+  },
 ];
 
 export const presetsFor = (crew: CrewKind) => ACCELERATION_PRESETS.filter((p) => p.crew === crew);
@@ -215,6 +240,8 @@ export interface Endurance {
 export function enduranceFor(crew: CrewKind, accelG: number): Endurance {
   const preset = findPreset(crew, accelG);
   if (preset) return { enduranceS: preset.enduranceS, text: preset.enduranceText, protection: preset.protection };
+  // Estimativa: as faixas humanas na escala da gravidade de Erid (2,09 g para eles é o 1 g para nós).
+  if (crew === 'eridian') return enduranceFor('crewed', accelG / ERID_G);
   if (crew === 'crewed') {
     const band = CREW_BANDS.find((b) => accelG <= b.maxG);
     return band
@@ -264,6 +291,8 @@ export interface SciFiMission {
   readonly work: string;
   /** Autor, meio e ano: "romance de Poul Anderson (1970)". */
   readonly credit: string;
+  /** Partida (padrão: a Terra). */
+  readonly originId?: OriginId;
   readonly destinationId: DestinationId;
   readonly crew: CrewKind;
   readonly accelG: number;
@@ -289,7 +318,7 @@ export const SCIFI_MISSIONS: readonly SciFiMission[] = [
     label: 'ISV Venture Star',
     work: 'Avatar',
     credit: 'filme de James Cameron (2009)',
-    destinationId: 'proxima',
+    destinationId: 'alphaCenA',
     crew: 'crewed',
     accelG: 1.5,
     coastEta: Math.atanh(0.7),
@@ -306,11 +335,66 @@ export const SCIFI_MISSIONS: readonly SciFiMission[] = [
       'citados saem da conta de Newton, v = at, que ignora a relatividade. O que cresce na proporção do tempo de bordo ' +
       'é a rapidez η = atanh(v/c), não a velocidade.',
     simulator:
-      'O destino aqui é Proxima, 0,12 ano-luz mais perto que Alfa Centauri A. Um piloto acordado aguenta 1,5 g por ' +
-      'semanas, não por meses: com piloto humano, o simulador divide a aceleração e a frenagem em queimas com ' +
-      'descansos sem peso, e a viagem fica mais longa que a do filme. Sem os descansos, como no filme, os números ' +
-      'ficam perto dos da ficção.',
+      'O destino é a própria Alfa Centauri A. Sem descansos, como no filme, a viagem dá 5,05 anos de bordo, perto dos ' +
+      '5 anos e 9 meses de Jake. Um piloto acordado aguenta 1,5 g por semanas, não por meses: com piloto humano, o ' +
+      'simulador divide a aceleração e a frenagem em queimas com descansos sem peso, e a viagem fica mais longa.',
     withoutRests: 'Como no filme, sem descansos (todos em criossono)',
+  },
+  {
+    id: 'hail-mary',
+    label: 'Hail Mary',
+    work: 'Project Hail Mary',
+    credit: 'romance de Andy Weir (2021), filmado em 2026',
+    destinationId: 'tauCeti',
+    crew: 'crewed',
+    accelG: 1.5,
+    coastEta: null,
+    note:
+      'Project Hail Mary (Andy Weir): motor de Astrophage a 1,5 g até Tau Ceti, com flip no meio e a tripulação em ' +
+      'coma induzido: ~3,9 anos de bordo e ~13 na Terra.',
+    story:
+      'Um micróbio, a Astrophage, está apagando o Sol, e só Tau Ceti parece imune a ele. A Terra manda o Hail Mary com ' +
+      'três tripulantes em coma induzido; só Ryland Grace acorda, sem memória, já em Tau Ceti. Lá ele encontra a ' +
+      'Blip-A, a nave de Rocky, um eridiano que veio pelo mesmo motivo.',
+    physics:
+      'A Astrophage guarda energia como massa e a devolve como luz infravermelha: o motor de rotação (spin drive) é um ' +
+      'foguete de fótons quase perfeito, com velocidade de exaustão c. A 1,5 g contínuos, com o flip no meio do ' +
+      'caminho, a nave chega a 0,995c; o tempo de bordo, (2c/α)·acosh(1 + αD/2c²), dá 3,9 anos, enquanto 13,1 anos ' +
+      'passam na Terra. A equação do foguete de fótons pede m₀/m₁ = e^(2η) ≈ 416: para cada tonelada que chega, 415 ' +
+      'de Astrophage queimadas.',
+    simulator:
+      'Sem descansos, os números batem com os do livro: cerca de 4 anos de bordo e 13 na Terra. Acordado, um piloto ' +
+      'aguentaria 1,5 g por semanas, não por anos: com piloto humano, o simulador intercala descansos sem peso e a ' +
+      'viagem fica bem mais longa. O quadro "Como no livro" mostra a viagem com a tripulação em coma.',
+    withoutRests: 'Como no livro, sem descansos (tripulação em coma induzido)',
+  },
+  {
+    id: 'blip-a',
+    label: 'Blip-A',
+    work: 'Project Hail Mary',
+    credit: 'a nave de Rocky, no romance de Andy Weir (2021)',
+    originId: 'eridani40',
+    destinationId: 'tauCeti',
+    crew: 'eridian',
+    accelG: ERID_G,
+    coastEta: null,
+    note:
+      'Project Hail Mary: a nave de Rocky sai de Erid, em 40 Eridani A, e cruza ~10 anos-luz até Tau Ceti à ' +
+      'gravidade de Erid (2,09 g), com flip no meio do caminho.',
+    story:
+      'Erid, o planeta de Rocky, é uma super-Terra perto de 40 Eridani A: 2,09 g na superfície, uma atmosfera de amônia ' +
+      '29 vezes mais densa que a nossa e um ano de ~42 dias. Nenhuma luz chega ao chão, e os eridianos não têm olhos: ' +
+      'percebem o mundo pelo som e falam em acordes. A Astrophage também ameaçava a estrela deles, e a Blip-A partiu ' +
+      'para Tau Ceti; a tripulação morreu de radiação no caminho, e só Rocky chegou.',
+    physics:
+      'Os eridianos não conheciam a relatividade. Pela conta de Newton, acelerar a 2,09 g até a metade dos 10,1 ' +
+      'anos-luz e frear levaria 4,3 anos, a nave passaria de 4,6c e precisaria de e^9,3 ≈ 11 000 vezes a própria massa ' +
+      'em Astrophage. Pela relatividade, são 2,9 anos de bordo e 0,996c no meio do caminho, com razão de massa de ' +
+      '~560: a nave chega muito antes do previsto e com combustível de sobra.',
+    simulator:
+      'A partida é de Erid: atrás da nave fica 40 Eridani A, e o Sol aparece no céu como uma estrela de magnitude 3,3. ' +
+      'Sem olhos a bordo, o para-brisa mostra a vista das câmeras, sem o olho de um piloto. 40 Eridani A b, o planeta ' +
+      'real que inspirou Erid, hoje é considerado improvável: o sinal parece vir da própria estrela.',
   },
   {
     id: 'tau-zero',
@@ -424,6 +508,7 @@ export const SCIFI_MISSIONS: readonly SciFiMission[] = [
 
 /** A missão da ficção que a escolha reproduz (o cruzeiro com tolerância de 10⁻³ em η), se houver. */
 export const findSciFiMission = (choice: {
+  readonly originId: OriginId;
   readonly destinationId: DestinationId;
   readonly crew: CrewKind;
   readonly accelG: number;
@@ -431,6 +516,7 @@ export const findSciFiMission = (choice: {
 }): SciFiMission | undefined =>
   SCIFI_MISSIONS.find(
     (m) =>
+      (m.originId ?? 'sol') === choice.originId &&
       m.destinationId === choice.destinationId &&
       m.crew === choice.crew &&
       m.accelG === choice.accelG &&

@@ -10,6 +10,7 @@
     "typecheck": "tsc -b",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
     "fetch:horizons": "node scripts/fetch-horizons.mjs",
     "reconstruct": "node scripts/reconstruct.mjs",
     "build:stars": "node scripts/build-star-catalog.mjs"
@@ -27,6 +28,7 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@playwright/test": "^1.56.1",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^22.20.5",
     "@types/react": "^18.3.31",

@@ -59,6 +59,19 @@ export default defineConfig({
       },
     }),
   ],
+  build: {
+    // O three.js (~900 kB) e as tabelas das sondas (~1,3 MB, só no modo Sondas) são grandes por natureza.
+    chunkSizeWarningLimit: 1400,
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          // As tabelas das sondas num pedaço próprio: baixam em paralelo com o código e continuam no
+          // cache do service worker quando só o código muda.
+          groups: [{ name: 'probe-data', test: /src[\\/]probes[\\/]data[\\/]/ }],
+        },
+      },
+    },
+  },
   test: {
     include: ['src/**/*.test.ts'],
     environment: 'node',

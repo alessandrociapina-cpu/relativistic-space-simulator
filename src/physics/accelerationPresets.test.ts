@@ -10,6 +10,7 @@ import {
   presetsFor,
 } from './accelerationPresets';
 import { missionProfileFor } from './crewRest';
+import { ORIGINS, missionDestination } from './origins';
 
 const proxima = DESTINATIONS.proxima;
 const assess = (crew: 'crewed' | 'robotic', g: number, coastEta: number | null = null) =>
@@ -81,14 +82,28 @@ describe('acelerações por tipo de nave', () => {
 
 const YEAR = 365.25 * 86_400;
 const scifi = (id: string) => SCIFI_MISSIONS.find((m) => m.id === id)!;
+/** O alvo da missão visto da partida dela. */
+const scifiTarget = (id: string) => {
+  const m = scifi(id);
+  return missionDestination(ORIGINS[m.originId ?? 'sol'], m.destinationId);
+};
 const scifiProfile = (id: string, restRatio?: number) => {
   const m = scifi(id);
-  return missionProfileFor(DESTINATIONS[m.destinationId], m.accelG, m.coastEta, m.crew, restRatio);
+  return missionProfileFor(scifiTarget(id), m.accelG, m.coastEta, m.crew, restRatio);
 };
+const choiceOf = (id: string) => ({ ...scifi(id), originId: scifi(id).originId ?? ('sol' as const) });
 
 describe('missões da ficção científica hard e projetos reais', () => {
   it('cada missão usa um preset de aceleração e um destino do catálogo, com textos completos', () => {
-    expect(SCIFI_MISSIONS.map((m) => m.id)).toEqual(['venture-star', 'tau-zero', 'expanse', 'deep-sea', 'starshot']);
+    expect(SCIFI_MISSIONS.map((m) => m.id)).toEqual([
+      'venture-star',
+      'hail-mary',
+      'blip-a',
+      'tau-zero',
+      'expanse',
+      'deep-sea',
+      'starshot',
+    ]);
     for (const m of SCIFI_MISSIONS) {
       expect(findPreset(m.crew, m.accelG)).toBeDefined();
       expect(DESTINATIONS[m.destinationId]).toBeDefined();
@@ -98,32 +113,59 @@ describe('missões da ficção científica hard e projetos reais', () => {
     }
   });
 
-  it('todas são suportáveis (com descansos, quando a tripulação precisa deles)', () => {
+  it('todas são suportáveis (com descansos, quando a tripulação humana precisa deles)', () => {
     for (const m of SCIFI_MISSIONS) {
       for (const restRatio of [3, 5]) {
         const profile = scifiProfile(m.id, restRatio);
         expect(assessMission(m.crew, m.accelG, profile).viability, m.id).toBe('ok');
       }
     }
-    expect(scifiProfile('venture-star').crewRest).toBeDefined();
-    expect(scifiProfile('expanse').crewRest).toBeDefined();
-    expect(scifiProfile('deep-sea').crewRest).toBeDefined();
-    expect(scifiProfile('tau-zero').crewRest).toBeUndefined();
-    expect(scifiProfile('starshot').crewRest).toBeUndefined();
+    for (const id of ['venture-star', 'hail-mary', 'expanse', 'deep-sea']) expect(scifiProfile(id).crewRest, id).toBeDefined();
+    for (const id of ['blip-a', 'tau-zero', 'starshot']) expect(scifiProfile(id).crewRest, id).toBeUndefined();
   });
 
-  it('Venture Star: como no filme, ~5 anos de bordo e ~6,6 na Terra; com piloto acordado, descansos alongam a viagem', () => {
+  it('Venture Star: até Alfa Centauri A, como no filme, ~5 anos de bordo; com piloto acordado, descansos alongam a viagem', () => {
     const m = scifi('venture-star');
-    const film = destinationMissionProfile(DESTINATIONS.proxima, m.accelG, m.coastEta);
-    expect(film.tauTotal / YEAR).toBeCloseTo(4.93, 2);
-    expect(film.tTotal / YEAR).toBeCloseTo(6.6, 2);
+    expect(m.destinationId).toBe('alphaCenA');
+    const film = destinationMissionProfile(DESTINATIONS.alphaCenA, m.accelG, m.coastEta);
+    expect(film.tauTotal / YEAR).toBeCloseTo(5.05, 2);
+    expect(film.tTotal / YEAR).toBeCloseTo(6.77, 2);
     expect(Math.tanh(film.etaMax)).toBeCloseTo(0.7, 12);
     // 6,7 meses de bordo até 0,7c (Newton daria 5,4).
     expect(film.burnEndTau / (YEAR / 12)).toBeCloseTo(6.72, 2);
     const awake = scifiProfile('venture-star');
     expect(awake.crewRest!.burns).toBe(22);
-    expect(awake.tauTotal / YEAR).toBeCloseTo(6.55, 2);
-    expect(awake.tTotal / YEAR).toBeCloseTo(8.03, 2);
+    expect(awake.tauTotal / YEAR).toBeCloseTo(6.68, 2);
+    expect(awake.tTotal / YEAR).toBeCloseTo(8.2, 2);
+  });
+
+  it('Hail Mary: 1,5 g até Tau Ceti em 3,9 anos de bordo e 13,1 na Terra, a 0,995c, razão de massa ~416', () => {
+    const m = scifi('hail-mary');
+    const book = destinationMissionProfile(DESTINATIONS.tauCeti, m.accelG, m.coastEta);
+    expect(book.tauTotal / YEAR).toBeCloseTo(3.9, 1);
+    expect(book.tTotal / YEAR).toBeCloseTo(13.14, 2);
+    expect(Math.tanh(book.etaMax)).toBeCloseTo(0.995, 3);
+    expect(Math.exp(2 * book.etaMax)).toBeCloseTo(416, -1);
+    // Acordado, com descansos, a viagem passa de 9 anos de bordo.
+    expect(scifiProfile('hail-mary').tauTotal / YEAR).toBeGreaterThan(9);
+  });
+
+  it('Blip-A: de Erid a Tau Ceti (10,1 anos-luz) a 2,09 g, 2,9 anos de bordo, contra 4,3 anos e 4,6c pela conta de Newton', () => {
+    const m = scifi('blip-a');
+    expect(m.originId).toBe('eridani40');
+    expect(m.crew).toBe('eridian');
+    const target = scifiTarget('blip-a');
+    expect(target.distanceLy).toBeCloseTo(10.08, 2);
+    const profile = scifiProfile('blip-a');
+    expect(profile.tauTotal / YEAR).toBeCloseTo(2.93, 2);
+    expect(Math.tanh(profile.etaMax)).toBeCloseTo(0.9964, 4);
+    expect(Math.exp(2 * profile.etaMax)).toBeCloseTo(561, -1);
+    // Newton: metade do caminho com d/2 = ½·a·t², v = a·t.
+    const a = m.accelG * 9.80665;
+    const halfS = Math.sqrt((target.distanceLy * 9.4607304725808e15) / a);
+    expect((2 * halfS) / YEAR).toBeCloseTo(4.32, 2);
+    expect((a * halfS) / 299_792_458).toBeCloseTo(4.66, 2);
+    expect(Math.exp((2 * a * halfS) / 299_792_458)).toBeGreaterThan(11_000);
   });
 
   it('Tau Zero: 1 g até Andrômeda em ~28,6 anos de bordo; até TRAPPIST-1, 7,28 anos de bordo e 41,5 na Terra', () => {
@@ -155,13 +197,23 @@ describe('missões da ficção científica hard e projetos reais', () => {
     expect(scifiProfile('expanse').crewRest!.burns).toBeGreaterThan(1000);
   });
 
-  it('a escolha do planejamento reconhece a missão carregada, e só ela', () => {
-    for (const m of SCIFI_MISSIONS) expect(findSciFiMission(m)?.id).toBe(m.id);
-    const venture = scifi('venture-star');
+  it('a escolha do planejamento reconhece a missão carregada, e só ela (com a partida certa)', () => {
+    for (const m of SCIFI_MISSIONS) expect(findSciFiMission(choiceOf(m.id))?.id).toBe(m.id);
+    const venture = choiceOf('venture-star');
     expect(findSciFiMission({ ...venture, coastEta: venture.coastEta! + 5e-4 })?.id).toBe('venture-star');
     expect(findSciFiMission({ ...venture, coastEta: venture.coastEta! + 0.01 })).toBeUndefined();
     expect(findSciFiMission({ ...venture, coastEta: null })).toBeUndefined();
     expect(findSciFiMission({ ...venture, crew: 'robotic' })).toBeUndefined();
-    expect(findSciFiMission({ destinationId: 'proxima', crew: 'crewed', accelG: 1.61e6, coastEta: null })).toBeUndefined();
+    // A Blip-A só com a partida de Erid.
+    expect(findSciFiMission({ ...choiceOf('blip-a'), originId: 'sol' })).toBeUndefined();
+    expect(findSciFiMission({ originId: 'sol', destinationId: 'proxima', crew: 'crewed', accelG: 1.61e6, coastEta: null })).toBeUndefined();
+  });
+
+  it('tripulação eridiana: 2,09 g é o peso de casa; acima, as faixas humanas na escala de Erid', () => {
+    expect(presetsFor('eridian').map((p) => p.label)).toEqual(['2,09 g']);
+    expect(enduranceFor('eridian', 2.09).enduranceS).toBe(Infinity);
+    expect(enduranceFor('eridian', 2.4).enduranceS).toBe(Infinity);
+    expect(enduranceFor('eridian', 6).enduranceS).toBe(enduranceFor('crewed', 6 / 2.09).enduranceS);
+    expect(enduranceFor('eridian', 200).enduranceS).toBe(0);
   });
 });

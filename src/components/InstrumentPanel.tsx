@@ -1,19 +1,20 @@
 import type { ReactNode } from 'react';
 import { useAudioSettings } from '../audio/audioSettings';
 import { G0, log10GammaFromRapidity } from '../physics/RelativityEngine';
-import { assessMission } from '../physics/accelerationPresets';
+import { CREW_LABEL, assessMission } from '../physics/accelerationPresets';
 import { CMB_VISIBLE_GAMMA, activeWindowsAt } from '../physics/criticalEvents';
 import { engineCommandAt } from '../physics/maneuvers';
 import { adjacentTimeScale, naturalTimeScale, timeScaleStep } from '../store/timeScales';
 import { useFlightStore } from '../store/useFlightStore';
 import { APP_HASH } from '../ui/appMode';
-import { useCockpitUi } from '../ui/cockpitUi';
+import { SKY_IN_A_POINT_GAMMA, useCockpitUi } from '../ui/cockpitUi';
 import { crewText, formatStrain, type CrewTone } from '../ui/crewStatus';
 import { useExplainSettings } from '../ui/explainSettings';
 import { formatAccelG, formatDuration, formatGamma, formatSpan } from '../ui/format';
 import type { IndicatorId } from '../ui/indicatorHelp';
 import { InfoTip } from './InfoTip';
 import { RouteStrip } from './RouteMonitor';
+import { useShortcutHelp } from './useCockpitShortcuts';
 
 /** Rótulo gravado na chapa do painel, com o ⚠ que explica o instrumento. */
 function Plate({ children, className = '', help }: { children: ReactNode; className?: string; help?: IndicatorId }) {
@@ -25,7 +26,7 @@ function Plate({ children, className = '', help }: { children: ReactNode; classN
   );
 }
 
-/** Tecla de hardware com LED: acesa quando ligada. */
+/** Tecla de hardware com LED: acesa quando ligada; `beckon` pulsa para chamar a atenção. */
 function KeySwitch({
   on,
   label,
@@ -33,6 +34,7 @@ function KeySwitch({
   title,
   onClick,
   disabled = false,
+  beckon = false,
 }: {
   on: boolean;
   label: string;
@@ -40,6 +42,7 @@ function KeySwitch({
   title: string;
   onClick: () => void;
   disabled?: boolean;
+  beckon?: boolean;
 }) {
   return (
     <button
@@ -49,7 +52,9 @@ function KeySwitch({
       title={title}
       onClick={onClick}
       disabled={disabled}
-      className="flex min-w-0 flex-col items-center gap-0.5 rounded-md border border-slate-600/70 bg-gradient-to-b from-slate-700/80 to-slate-900 px-2 py-1 text-slate-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] hover:from-slate-600 disabled:opacity-45"
+      className={`flex min-w-0 flex-col items-center gap-0.5 rounded-md border border-slate-600/70 bg-gradient-to-b from-slate-700/80 to-slate-900 px-2 py-1 text-slate-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] hover:from-slate-600 disabled:opacity-45 ${
+        beckon ? 'animate-beacon ring-2 ring-amber-300/80' : ''
+      }`}
     >
       <span
         aria-hidden
@@ -64,6 +69,7 @@ function KeySwitch({
 // ── Missão ───────────────────────────────────────────────────────────────────
 function MissionPlate() {
   const destination = useFlightStore((s) => s.destination);
+  const origin = useFlightStore((s) => s.origin);
   const accelG = useFlightStore((s) => s.accelG);
   const crew = useFlightStore((s) => s.crew);
   const profile = useFlightStore((s) => s.plannedProfile);
@@ -74,12 +80,15 @@ function MissionPlate() {
     <div className="flex min-w-0 flex-col gap-1.5">
       <Plate className="max-lg:hidden">Missão</Plate>
       <div className="instrument-well min-w-0 rounded-md px-2 py-1.5 max-lg:hidden">
-        <div className="font-display truncate text-[11px] font-bold tracking-wider text-cyan-50">{destination.name}</div>
+        <div className="font-display truncate text-[11px] font-bold tracking-wider text-cyan-50">
+          {origin.solarSystem ? '' : `${origin.homeName} → `}
+          {destination.name}
+        </div>
         <div className="font-readout truncate text-[11px] text-cyan-200">
           α {formatAccelG(accelG)} · {profile.coastEta === null ? 'acelerar e frear' : 'com cruzeiro'}
         </div>
         <div className="truncate text-[11px] text-slate-300">
-          {crew === 'crewed' ? '🧑‍🚀 Piloto humano' : '🤖 Sonda robótica'}
+          {CREW_LABEL[crew].icon} {CREW_LABEL[crew].label}
           {viability === 'hypothetical' && <span className="text-rose-300"> · hipotética</span>}
           {viability === 'over-limit' && <span className="text-amber-300"> · além do limite humano</span>}
           {rests && <span className="text-emerald-300/90"> · com descansos</span>}
@@ -88,14 +97,14 @@ function MissionPlate() {
           {manual ? (
             <span className="text-sky-300">rota alterada pelo piloto</span>
           ) : (
-            `${formatSpan(profile.tauTotal)} a bordo · ${formatSpan(profile.tTotal)} na Terra`
+            `${formatSpan(profile.tauTotal)} a bordo · ${formatSpan(profile.tTotal)} ${origin.solarSystem ? 'na Terra' : `em ${origin.homeName}`}`
           )}
         </div>
       </div>
       <div className="flex gap-1">
         <button
           type="button"
-          onClick={openPlanner}
+          onClick={() => openPlanner()}
           className="font-display flex-1 rounded-md border border-cyan-300/50 bg-cyan-400/10 px-2 py-1 text-[9px] tracking-[0.18em] text-cyan-100 uppercase hover:bg-cyan-400/25"
         >
           ⚙ Planejar
@@ -114,6 +123,15 @@ function MissionPlate() {
         >
           ⌂
         </a>
+        <button
+          type="button"
+          onClick={() => useShortcutHelp.getState().setOpen(true)}
+          title="Atalhos do teclado (?)"
+          aria-label="Atalhos do teclado"
+          className="rounded-md border border-slate-600/70 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800 max-lg:hidden"
+        >
+          ⌨
+        </button>
       </div>
     </div>
   );
@@ -429,6 +447,8 @@ function Switches() {
   const toggleSound = useAudioSettings((s) => s.toggle);
   const telescope = useCockpitUi((s) => s.telescopeOpen);
   const toggleTelescope = useCockpitUi((s) => s.toggleTelescope);
+  // O céu inteiro à frente num ponto: só o telescópio da frente mostra alguma coisa.
+  const skyInAPoint = useFlightStore((s) => s.flight.gamma >= SKY_IN_A_POINT_GAMMA);
   const engine = useEngine();
   return (
     <div className="grid grid-cols-5 gap-1 lg:grid-cols-3">
@@ -446,8 +466,15 @@ function Switches() {
           on={telescope}
           label="Telescópio"
           icon="🔭"
-          title={telescope ? 'Fechar o telescópio' : 'Abrir o telescópio (atrás: o Sol; à frente: o alvo)'}
+          title={
+            telescope
+              ? 'Fechar o telescópio'
+              : skyInAPoint
+                ? 'O céu à frente cabe num ponto: abra o telescópio e vire para a FRENTE'
+                : 'Abrir o telescópio (atrás: a estrela de partida; à frente: o alvo)'
+          }
           onClick={toggleTelescope}
+          beckon={skyInAPoint && !telescope}
         />
       </div>
       <KeySwitch

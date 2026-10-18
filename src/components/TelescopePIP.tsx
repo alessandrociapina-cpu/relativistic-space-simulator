@@ -1,3 +1,4 @@
+import '../quietThree';
 import { useState } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import type { PerspectiveCamera } from 'three';
@@ -17,16 +18,35 @@ const SENSORS = [
 ] as const;
 
 const DIRECTIONS = [
-  { value: 'rear', label: 'TRÁS', title: 'Telescópio voltado para o Sol, atrás da nave' },
+  { value: 'rear', label: 'TRÁS', title: 'Telescópio voltado para a estrela de partida (o Sol), atrás da nave' },
   { value: 'front', label: 'FRENTE', title: 'Telescópio voltado para o alvo, à frente' },
 ] as const;
 
 type FlightStoreState = ReturnType<typeof useFlightStore.getState>;
 
-/** Zoom do instante: à frente acompanha o cone e o alvo; atrás, enquadra o Sol. */
-function telescopeZoom({ flight, destination, photometry }: FlightStoreState, direction: TelescopeDirection): number {
+/** Quanto cada sensor desloca o espectro (o mesmo `scaleFactor` do shader). */
+const SENSOR_SCALE: Readonly<Record<SensorMode, number>> = {
+  [SensorMode.Visible]: 1,
+  [SensorMode.Infrared]: 12,
+  [SensorMode.Ultraviolet]: 0.15,
+  [SensorMode.XRay]: 0.01,
+};
+/** Abaixo disso, na escala do sensor, um corpo negro fica escuro demais para aparecer. */
+const SENSOR_DARK_K = 1000;
+
+/**
+ * Atrás, a estrela de partida vista com o Doppler e^(−η): "ir" se ela sumiu deste sensor mas o infravermelho
+ * ainda a pega, "front" se sumiu de todos (só resta virar para a frente), null se aparece.
+ */
+function rearHint(apparentK: number, sensor: SensorMode): 'ir' | 'front' | null {
+  if (apparentK * SENSOR_SCALE[sensor] >= SENSOR_DARK_K) return null;
+  return sensor !== SensorMode.Infrared && apparentK * SENSOR_SCALE[SensorMode.Infrared] >= SENSOR_DARK_K ? 'ir' : 'front';
+}
+
+/** Zoom do instante: à frente acompanha o cone e o alvo; atrás, enquadra a estrela de partida. */
+function telescopeZoom({ flight, destination, origin, photometry }: FlightStoreState, direction: TelescopeDirection): number {
   if (direction === 'front') return photometry.recommendedTelescopeZoom;
-  return recommendedRearZoom(flight.eta, computeBodyAngularRadii(flight, destination).sunRadiusRad);
+  return recommendedRearZoom(flight.eta, computeBodyAngularRadii(flight, destination, origin).sunRadiusRad);
 }
 
 /**
@@ -70,17 +90,32 @@ export function TelescopePIP({ className = '' }: { className?: string }) {
   const direction = useCockpitUi((s) => s.telescopeDirection);
   const setDirection = useCockpitUi((s) => s.setTelescopeDirection);
   const target = useFlightStore((s) => s.destination.shortName);
+  const originStar = useFlightStore((s) => s.origin.starName);
+  const starSubject = originStar === 'Sol' ? 'O Sol' : originStar;
+  const hint = useFlightStore((s) => (direction === 'rear' ? rearHint(s.origin.starTempK * Math.exp(-s.flight.eta), sensorMode) : null));
 
   return (
     <CockpitMonitor
       title={<TelescopeTitle direction={direction} />}
-      subtitle={direction === 'rear' ? 'Sol' : target}
+      subtitle={direction === 'rear' ? originStar : target}
       className={className}
       tilt="left"
       footer={
         <>
-          <MonitorButtons label="Direção do telescópio" options={DIRECTIONS} value={direction} onChange={setDirection} />
-          <MonitorButtons label="Sensor do telescópio" options={SENSORS} value={sensorMode} onChange={setSensorMode} />
+          <MonitorButtons
+            label="Direção do telescópio"
+            options={DIRECTIONS}
+            value={direction}
+            onChange={setDirection}
+            highlight={hint ? 'front' : null}
+          />
+          <MonitorButtons
+            label="Sensor do telescópio"
+            options={SENSORS}
+            value={sensorMode}
+            onChange={setSensorMode}
+            highlight={hint === 'ir' ? SensorMode.Infrared : null}
+          />
         </>
       }
     >
@@ -93,6 +128,13 @@ export function TelescopePIP({ className = '' }: { className?: string }) {
         <Aim direction={direction} />
         <RelativisticSky sensorMode={sensorMode} autoExposure={direction === 'front'} />
       </Canvas>
+      {hint && (
+        <p className="pointer-events-none absolute inset-x-2 bottom-2 rounded-sm bg-black/70 px-2 py-1 text-center text-[10px] leading-snug text-amber-100">
+          {hint === 'ir'
+            ? `${starSubject} já não aparece neste sensor: o desvio para o vermelho baixou demais a temperatura aparente. Tente o IV, ou vire para a FRENTE.`
+            : `${starSubject} não aparece em nenhum sensor. Vire para a FRENTE: o céu inteiro está concentrado à frente.`}
+        </p>
+      )}
     </CockpitMonitor>
   );
 }

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { APP_HASH } from '../ui/appMode';
+// Só as âncoras: a física e o catálogo da ficção ficam no pedaço do cockpit, carregado à parte.
+import { APP_HASH, SCIFI_TAB_HASH } from '../ui/appMode';
 
 const STAR_COUNT = 700;
 
@@ -164,7 +165,7 @@ export function SplashScreen() {
             icon={<ShipIcon />}
             kicker="Viagem interestelar"
             title="Quase à velocidade da luz"
-            text="Planeje uma missão até Proxima Centauri, Sirius, o centro da galáxia ou Andrômeda, com piloto humano ou sonda robótica. Veja da cabine a aberração da luz, o Doppler, a radiação cósmica de fundo e a dilatação do tempo."
+            text="Planeje uma missão até Alfa Centauri, Tau Ceti, Sirius, o centro da galáxia ou Andrômeda, com piloto humano ou sonda robótica, partindo da Terra ou de Erid. Veja da cabine a aberração da luz, o Doppler, a radiação cósmica de fundo e a dilatação do tempo."
             action="Planejar a missão"
             onHover={setWarp}
           />
@@ -177,6 +178,27 @@ export function SplashScreen() {
             action="Abrir o Sistema Solar"
           />
         </div>
+        <a
+          href={SCIFI_TAB_HASH}
+          onMouseEnter={() => setWarp(true)}
+          onMouseLeave={() => setWarp(false)}
+          onFocus={() => setWarp(true)}
+          onBlur={() => setWarp(false)}
+          className="group -mt-4 flex flex-col gap-2 rounded-xl border border-violet-300/60 bg-violet-950/40 px-5 py-4 text-left shadow-[0_0_24px_rgba(167,139,250,0.25)] backdrop-blur-sm transition-colors outline-none hover:bg-violet-900/45 focus-visible:ring-2 focus-visible:ring-violet-300 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:px-6"
+        >
+          <div className="min-w-0">
+            <div className="font-display flex items-center gap-2 text-[10px] tracking-[0.3em] text-violet-200/80 uppercase">
+              <span aria-hidden>📚</span> Ficção científica hard
+            </div>
+            <p className="mt-1 text-sm leading-relaxed text-slate-200">
+              Avatar, Project Hail Mary (com a Blip-A de Rocky), Tau Zero, The Expanse, A Floresta Sombria e a Starshot:
+              as viagens das obras com a física de verdade, em um clique.
+            </p>
+          </div>
+          <span className="font-display inline-flex shrink-0 items-center gap-2 self-start rounded-md border border-violet-300/50 bg-violet-400/15 px-3 py-2 text-xs tracking-[0.2em] text-violet-100 uppercase transition-colors group-hover:bg-violet-400/30 sm:self-center">
+            Ver as missões <span aria-hidden>›</span>
+          </span>
+        </a>
         <footer className="font-display text-center text-[10px] tracking-[0.25em] text-slate-500 uppercase">
           Cinemática em 64 bits · funciona offline
         </footer>

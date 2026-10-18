@@ -55,17 +55,19 @@ const keyClass = (active: boolean) =>
       : 'border-slate-600/70 bg-gradient-to-b from-slate-700/80 to-slate-900/90 text-slate-300 hover:from-slate-600'
   }`;
 
-/** Fileira de teclas exclusivas abaixo de um monitor. */
+/** Fileira de teclas exclusivas abaixo de um monitor; `highlight` pulsa uma tecla sugerida. */
 export function MonitorButtons<T extends string | number>({
   label,
   options,
   value,
   onChange,
+  highlight = null,
 }: {
   label: string;
   options: readonly { value: T; label: string; title?: string }[];
   value: T;
   onChange: (value: T) => void;
+  highlight?: T | null;
 }) {
   return (
     <div
@@ -82,7 +84,7 @@ export function MonitorButtons<T extends string | number>({
           aria-checked={o.value === value}
           title={o.title}
           onClick={() => onChange(o.value)}
-          className={keyClass(o.value === value)}
+          className={`${keyClass(o.value === value)} ${o.value === highlight && o.value !== value ? 'animate-beacon ring-2 ring-amber-300/80' : ''}`}
         >
           {o.label}
         </button>

@@ -16,14 +16,19 @@ function useRoute() {
   const flight = useFlightStore((s) => s.flight);
   const profile = useFlightStore((s) => s.profile);
   const destination = useFlightStore((s) => s.destination);
+  const origin = useFlightStore((s) => s.origin);
   const playing = useFlightStore((s) => s.playing);
 
-  const geometry = routeGeometry(profile, arrivalDistanceM(destination));
+  const geometry = routeGeometry(profile, arrivalDistanceM(destination), origin.homeOrbitM);
   const halfwayAu = geometry.halfwaySunDistanceM / AU_M;
-  const markers = [
-    { au: SATURN_AU, label: 'DISTÂNCIA DE SATURNO' },
-    { au: OORT_CLOUD_AU, label: 'NUVEM DE OORT' },
-  ]
+  // Saturno e a Nuvem de Oort só na partida do Sol.
+  const markers = (origin.solarSystem
+    ? [
+        { au: SATURN_AU, label: 'DISTÂNCIA DE SATURNO' },
+        { au: OORT_CLOUD_AU, label: 'NUVEM DE OORT' },
+      ]
+    : []
+  )
     .filter((m) => m.au < halfwayAu)
     .map((m) => ({ ...m, u: sunMarkerPosition(m.au, geometry) }));
 
@@ -46,16 +51,17 @@ function useRoute() {
 
   return {
     destination,
+    origin,
     markers,
     status,
     shipU: routePosition(flight, profile, geometry),
-    fromSun: formatRouteDistance(AU_M + flight.positionM),
+    fromSun: formatRouteDistance(origin.homeOrbitM + flight.positionM),
     toTarget: formatRouteDistance(targetViewDistanceM(flight, destination)),
   };
 }
 
 function RouteMap() {
-  const { destination, markers, status, shipU, fromSun, toTarget } = useRoute();
+  const { destination, origin, markers, status, shipU, fromSun, toTarget } = useRoute();
   const shipX = xAt(shipU);
 
   return (
@@ -85,9 +91,9 @@ function RouteMap() {
         METADE
       </text>
 
-      <circle cx={X0} cy={LINE_Y} r="6" fill="#fde047" />
-      <text x={X0} y={LINE_Y + 20} fill="#fde047" fontSize="8.5" textAnchor="middle">
-        SOL
+      <circle cx={X0} cy={LINE_Y} r="6" fill={blackbodyCssColor(origin.starTempK)} />
+      <text x={X0 - 4} y={LINE_Y + 20} fill="#fde047" fontSize="8.5" textAnchor="start">
+        {origin.shortName}
       </text>
       <circle cx={X1} cy={LINE_Y} r="6" fill={blackbodyCssColor(destination.temperatureK)} />
       <text x={X1 + 4} y={LINE_Y + 20} fill="#fca5a5" fontSize="8.5" textAnchor="end">
@@ -109,7 +115,7 @@ function RouteMap() {
       </text>
 
       <text x="24" y="196" fill="#94a3b8" fontSize="8.5" letterSpacing="1">
-        DO SOL
+        {origin.solarSystem ? 'DO SOL' : `DE ${origin.shortName}`}
       </text>
       <text x="24" y="214" fill="#e2e8f0" fontSize="14">
         {fromSun}
@@ -134,7 +140,7 @@ const stripX = (u: number) => STRIP_X0 + (STRIP_X1 - STRIP_X0) * u;
  * do monitor numa faixa, com o estado do motor e as distâncias.
  */
 export function RouteStrip({ className = '' }: { className?: string }) {
-  const { destination, markers, status, shipU, fromSun, toTarget } = useRoute();
+  const { destination, origin, markers, status, shipU, fromSun, toTarget } = useRoute();
   const shipX = stripX(shipU);
   return (
     <div className={`instrument-well min-w-0 rounded-md px-2 py-1 ${className}`}>
@@ -152,14 +158,14 @@ export function RouteStrip({ className = '' }: { className?: string }) {
           </line>
         ))}
         <line x1={stripX(0.5)} y1={STRIP_Y - 5} x2={stripX(0.5)} y2={STRIP_Y + 5} stroke="#e2e8f0" strokeOpacity="0.7" />
-        <circle cx={STRIP_X0} cy={STRIP_Y} r="4" fill="#fde047" />
+        <circle cx={STRIP_X0} cy={STRIP_Y} r="4" fill={blackbodyCssColor(origin.starTempK)} />
         <circle cx={STRIP_X1} cy={STRIP_Y} r="4" fill={blackbodyCssColor(destination.temperatureK)} />
         <path d={`M ${shipX} ${STRIP_Y - 2} l -4.5 -8 h 9 z`} fill="#f59e0b" />
       </svg>
       {/* Colunas iguais nas pontas: METADE fica exatamente sob o tique do meio. */}
       <div className="font-readout grid grid-cols-[1fr_auto_1fr] items-baseline gap-2 text-[10px] tabular-nums">
         <span className="min-w-0 truncate">
-          <span className="text-yellow-300">SOL</span> <span className="text-slate-200">{fromSun}</span>
+          <span className="text-yellow-300">{origin.shortName}</span> <span className="text-slate-200">{fromSun}</span>
         </span>
         <span className="text-slate-400">METADE</span>
         <span className="min-w-0 truncate text-right">
@@ -184,21 +190,24 @@ function RouteFooter() {
   const distance = useFlightStore((s) => Math.round((100 * s.flight.positionM) / s.profile.distanceM));
   const time = useFlightStore((s) => Math.round((100 * s.flight.tau) / s.profile.tauTotal));
   const earth = useFlightStore((s) => Math.round((100 * s.flight.earthTimeS) / s.profile.tTotal));
+  const home = useFlightStore((s) => s.origin.homeName);
   return (
     <div className="hidden grid-cols-3 gap-1 px-0.5 pt-1 sm:grid">
       <Gauge label="Percurso" value={`${distance} %`} />
       <Gauge label="Bordo" value={`${time} %`} />
-      <Gauge label="Terra" value={`${earth} %`} />
+      <Gauge label={home} value={`${earth} %`} />
     </div>
   );
 }
 
-/** Monitor direito: a rota em escala logarítmica, do Sol ao alvo. */
+/** Monitor direito: a rota em escala logarítmica, da estrela de partida ao alvo. */
 export function RouteMonitor({ className = '' }: { className?: string }) {
+  const origin = useFlightStore((s) => s.origin);
+  const destination = useFlightStore((s) => s.destination);
   return (
     <CockpitMonitor
       title="Rota · escala log"
-      subtitle="Sol → metade → alvo"
+      subtitle={`${origin.homeName} → ${destination.shortName.toLowerCase()}`}
       className={className}
       tilt="right"
       help="route"
