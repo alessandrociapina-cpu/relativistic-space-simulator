@@ -1,5 +1,6 @@
 import { TeX } from '../components/TeX';
 import { explainEvent } from './eventExplanations';
+import { MISSION_IMAGES, imageIndexNear } from './missionImages';
 import { ALL_EVENTS, MISSIONS } from './missions';
 import { formatDate, formatShortDate } from './time';
 import { useProbeStore } from './useProbeStore';
@@ -45,6 +46,7 @@ export function ProbeEventList({ className = '' }: { className?: string }) {
 export function ProbeEventCard({ className = '' }: { className?: string }) {
   const eventId = useProbeStore((s) => s.eventId);
   const showEvent = useProbeStore((s) => s.showEvent);
+  const openGallery = useProbeStore((s) => s.openGallery);
   const event = ALL_EVENTS.find((e) => e.id === eventId);
   if (!event) return null;
   const explanation = explainEvent(event);
@@ -81,6 +83,15 @@ export function ProbeEventCard({ className = '' }: { className?: string }) {
           </div>
         ))}
       </div>
+      {MISSION_IMAGES[event.probeId].length > 0 && (
+        <button
+          type="button"
+          onClick={() => openGallery(event.probeId, imageIndexNear(event.probeId, event.t))}
+          className="mt-1.5 rounded-sm border border-amber-300/60 bg-amber-400/10 px-2 py-0.5 text-[12px] text-amber-100 hover:bg-amber-400/25"
+        >
+          📷 Ver as imagens da {mission.name}
+        </button>
+      )}
       {explanation.details.length > 0 && (
         <details className="mt-1.5">
           <summary className="cursor-pointer text-[12px] text-cyan-300 select-none hover:text-cyan-100">Saiba mais</summary>

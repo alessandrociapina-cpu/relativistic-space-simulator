@@ -9,8 +9,10 @@ import { InstrumentPanel } from './InstrumentPanel';
 import { MainViewport } from './MainViewport';
 import { MissionPlanner } from './MissionPlanner';
 import { RouteMonitor } from './RouteMonitor';
+import { ShortcutHelp } from './ShortcutHelp';
 import { TelemetryHUD } from './TelemetryHUD';
 import { TelescopePIP } from './TelescopePIP';
+import { useCockpitShortcuts } from './useCockpitShortcuts';
 
 // As explicações trazem o KaTeX (JS, CSS e fontes): carregadas à parte, sem
 // atrasar o primeiro quadro do cockpit.
@@ -26,6 +28,7 @@ export function RelativisticCockpit() {
   useFlightLoop();
   useFlightAudio();
   useEffectsPanelOnPause();
+  useCockpitShortcuts();
   // Cada entrada na viagem começa pelo planejamento da missão.
   const openPlanner = useCockpitUi((s) => s.openPlanner);
   useEffect(openPlanner, [openPlanner]);
@@ -63,6 +66,7 @@ export function RelativisticCockpit() {
         </div>
       </div>
       <MissionPlanner />
+      <ShortcutHelp />
     </div>
   );
 }

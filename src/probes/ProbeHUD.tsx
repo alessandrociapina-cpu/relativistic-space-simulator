@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { formatReadout as num, formatSpaceNumber, formatSpan } from '../ui/format';
 import { BODIES, bodyState } from './bodies';
 import { MissionGallery } from './MissionGallery';
@@ -183,9 +183,9 @@ export function ProbeHUD({ className = '' }: { className?: string }) {
   const { trajectory } = mission;
   // Com a lista aberta, o painel sobe acima do cartão do evento.
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [galleryOpen, setGalleryOpen] = useState(false);
-  // Estável: o painel se redesenha a cada quadro e a galeria não precisa acompanhar.
-  const closeGallery = useCallback(() => setGalleryOpen(false), []);
+  const gallery = useProbeStore((s) => s.gallery);
+  const openGallery = useProbeStore((s) => s.openGallery);
+  const closeGallery = useProbeStore((s) => s.closeGallery);
   const imageCount = MISSION_IMAGES[selected].length;
   const state = probeState(trajectory, t);
   const next = mission.events.find((e) => e.t > t);
@@ -269,13 +269,13 @@ export function ProbeHUD({ className = '' }: { className?: string }) {
           type="button"
           aria-label={`Imagens da missão (${imageCount})`}
           title="As imagens mais marcantes da missão (Wikimedia Commons)"
-          className="shrink-0 rounded-sm bg-slate-800/90 px-2 py-1 text-[12px] text-slate-100 hover:bg-slate-700"
-          onClick={() => setGalleryOpen(true)}
+          className="shrink-0 rounded-sm border border-amber-300/70 bg-amber-400/15 px-2 py-1 text-[12px] font-semibold text-amber-100 shadow-[0_0_12px_rgba(251,191,36,0.25)] hover:bg-amber-400/30"
+          onClick={() => openGallery(selected)}
         >
-          📷<span className="ml-1 text-[10px] text-slate-400 tabular-nums">{imageCount}</span>
+          📷 Imagens<span className="ml-1 rounded-full bg-amber-300 px-1.5 text-[10px] font-bold text-black tabular-nums">{imageCount}</span>
         </button>
       </div>
-      {galleryOpen && <MissionGallery missionId={selected} onClose={closeGallery} />}
+      {gallery && <MissionGallery missionId={gallery.missionId} initialIndex={gallery.index} onClose={closeGallery} />}
       {body}
       {next && (
         <button

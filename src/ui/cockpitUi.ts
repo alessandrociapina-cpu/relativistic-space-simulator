@@ -1,7 +1,14 @@
 import { useEffect, useState } from 'react';
 import { create } from 'zustand';
 
-/** Para onde aponta o telescópio: atrás (o Sol, padrão) ou à frente (o alvo). */
+/**
+ * A partir deste γ, a luz do céu inteiro à frente (a CMB quente e as estrelas) chega num cone de ~1/γ rad, bem
+ * menor que um pixel do para-brisa, e o brilho difuso já passou: o para-brisa fica quase preto, com um ponto
+ * no centro, e só o telescópio voltado para a frente mostra alguma coisa.
+ */
+export const SKY_IN_A_POINT_GAMMA = 2e4;
+
+/** Para onde aponta o telescópio: atrás (a estrela de partida, padrão) ou à frente (o alvo). */
 export type TelescopeDirection = 'rear' | 'front';
 
 interface CockpitUi {

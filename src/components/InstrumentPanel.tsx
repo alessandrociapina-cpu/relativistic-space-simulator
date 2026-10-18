@@ -7,13 +7,14 @@ import { engineCommandAt } from '../physics/maneuvers';
 import { adjacentTimeScale, naturalTimeScale, timeScaleStep } from '../store/timeScales';
 import { useFlightStore } from '../store/useFlightStore';
 import { APP_HASH } from '../ui/appMode';
-import { useCockpitUi } from '../ui/cockpitUi';
+import { SKY_IN_A_POINT_GAMMA, useCockpitUi } from '../ui/cockpitUi';
 import { crewText, formatStrain, type CrewTone } from '../ui/crewStatus';
 import { useExplainSettings } from '../ui/explainSettings';
 import { formatAccelG, formatDuration, formatGamma, formatSpan } from '../ui/format';
 import type { IndicatorId } from '../ui/indicatorHelp';
 import { InfoTip } from './InfoTip';
 import { RouteStrip } from './RouteMonitor';
+import { useShortcutHelp } from './useCockpitShortcuts';
 
 /** Rótulo gravado na chapa do painel, com o ⚠ que explica o instrumento. */
 function Plate({ children, className = '', help }: { children: ReactNode; className?: string; help?: IndicatorId }) {
@@ -25,7 +26,7 @@ function Plate({ children, className = '', help }: { children: ReactNode; classN
   );
 }
 
-/** Tecla de hardware com LED: acesa quando ligada. */
+/** Tecla de hardware com LED: acesa quando ligada; `beckon` pulsa para chamar a atenção. */
 function KeySwitch({
   on,
   label,
@@ -33,6 +34,7 @@ function KeySwitch({
   title,
   onClick,
   disabled = false,
+  beckon = false,
 }: {
   on: boolean;
   label: string;
@@ -40,6 +42,7 @@ function KeySwitch({
   title: string;
   onClick: () => void;
   disabled?: boolean;
+  beckon?: boolean;
 }) {
   return (
     <button
@@ -49,7 +52,9 @@ function KeySwitch({
       title={title}
       onClick={onClick}
       disabled={disabled}
-      className="flex min-w-0 flex-col items-center gap-0.5 rounded-md border border-slate-600/70 bg-gradient-to-b from-slate-700/80 to-slate-900 px-2 py-1 text-slate-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] hover:from-slate-600 disabled:opacity-45"
+      className={`flex min-w-0 flex-col items-center gap-0.5 rounded-md border border-slate-600/70 bg-gradient-to-b from-slate-700/80 to-slate-900 px-2 py-1 text-slate-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] hover:from-slate-600 disabled:opacity-45 ${
+        beckon ? 'animate-beacon ring-2 ring-amber-300/80' : ''
+      }`}
     >
       <span
         aria-hidden
@@ -118,6 +123,15 @@ function MissionPlate() {
         >
           ⌂
         </a>
+        <button
+          type="button"
+          onClick={() => useShortcutHelp.getState().setOpen(true)}
+          title="Atalhos do teclado (?)"
+          aria-label="Atalhos do teclado"
+          className="rounded-md border border-slate-600/70 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800 max-lg:hidden"
+        >
+          ⌨
+        </button>
       </div>
     </div>
   );
@@ -433,6 +447,8 @@ function Switches() {
   const toggleSound = useAudioSettings((s) => s.toggle);
   const telescope = useCockpitUi((s) => s.telescopeOpen);
   const toggleTelescope = useCockpitUi((s) => s.toggleTelescope);
+  // O céu inteiro à frente num ponto: só o telescópio da frente mostra alguma coisa.
+  const skyInAPoint = useFlightStore((s) => s.flight.gamma >= SKY_IN_A_POINT_GAMMA);
   const engine = useEngine();
   return (
     <div className="grid grid-cols-5 gap-1 lg:grid-cols-3">
@@ -450,8 +466,15 @@ function Switches() {
           on={telescope}
           label="Telescópio"
           icon="🔭"
-          title={telescope ? 'Fechar o telescópio' : 'Abrir o telescópio (atrás: o Sol; à frente: o alvo)'}
+          title={
+            telescope
+              ? 'Fechar o telescópio'
+              : skyInAPoint
+                ? 'O céu à frente cabe num ponto: abra o telescópio e vire para a FRENTE'
+                : 'Abrir o telescópio (atrás: a estrela de partida; à frente: o alvo)'
+          }
           onClick={toggleTelescope}
+          beckon={skyInAPoint && !telescope}
         />
       </div>
       <KeySwitch

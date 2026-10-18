@@ -7,6 +7,7 @@
  * página do arquivo no Commons, que a galeria também abre.
  */
 import type { ProbeId } from './missions';
+import { isoToDays } from './time';
 
 export type ImageLicense = 'pd' | 'cc-by-sa-igo' | 'commons';
 
@@ -32,6 +33,41 @@ const COMMONS = 'https://commons.wikimedia.org/wiki/';
 /** A imagem na largura pedida, em pixels (o original, se for menor). */
 export const commonsImageUrl = (file: string, width: number) =>
   `${COMMONS}Special:FilePath/${encodeURIComponent(file)}?width=${width}`;
+
+const MONTHS = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+
+/**
+ * A data da foto em dias desde J2000 (o meio do mês, do ano ou do intervalo, quando só eles são dados);
+ * null nas fotos sem data.
+ */
+export function imageDays(date: string | undefined): number | null {
+  if (!date) return null;
+  const full = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(date);
+  if (full) return isoToDays(`${full[3]}-${full[2]}-${full[1]}`);
+  const month = /^([a-z]{3})\/(\d{4})$/.exec(date);
+  if (month && MONTHS.includes(month[1]!)) {
+    return isoToDays(`${month[2]}-${String(MONTHS.indexOf(month[1]!) + 1).padStart(2, '0')}-15`);
+  }
+  const years = /^(\d{4})(?:–(\d{4}))?$/.exec(date);
+  if (years) {
+    const from = isoToDays(`${years[1]}-07-01`);
+    return years[2] ? (from + isoToDays(`${years[2]}-07-01`)) / 2 : from;
+  }
+  return null;
+}
+
+/** A foto da missão mais próxima de um instante (dias desde J2000): a galeria abre nela a partir de um evento. */
+export function imageIndexNear(missionId: ProbeId, t: number): number {
+  let best = 0;
+  let bestGap = Infinity;
+  MISSION_IMAGES[missionId].forEach((image, i) => {
+    const days = imageDays(image.date);
+    if (days === null) return;
+    const gap = Math.abs(days - t);
+    if (gap < bestGap) [best, bestGap] = [i, gap];
+  });
+  return best;
+}
 
 /** A página do arquivo no Commons: autor, licença e o original em resolução máxima. */
 export const commonsPageUrl = (file: string) => `${COMMONS}File:${encodeURIComponent(file)}`;

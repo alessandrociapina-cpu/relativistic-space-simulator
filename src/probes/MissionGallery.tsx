@@ -59,15 +59,24 @@ function Thumb({ image }: { image: MissionImage }) {
  * Janela com as imagens marcantes da missão: a foto grande, a legenda com o
  * crédito e a licença e as miniaturas. As imagens vêm do Wikimedia Commons.
  */
-export const MissionGallery = memo(function MissionGallery({ missionId, onClose }: { missionId: ProbeId; onClose: () => void }) {
+export const MissionGallery = memo(function MissionGallery({
+  missionId,
+  initialIndex = 0,
+  onClose,
+}: {
+  missionId: ProbeId;
+  /** A foto mostrada primeiro (a mais próxima do evento, quando a galeria abre de um cartão). */
+  initialIndex?: number;
+  onClose: () => void;
+}) {
   const mission = MISSIONS[missionId];
   const images = MISSION_IMAGES[missionId];
-  const [index, setIndex] = useState(0);
+  const [index, setIndex] = useState(initialIndex);
   const image = images[Math.min(index, images.length - 1)]!;
   const closeButton = useRef<HTMLButtonElement>(null);
   const step = (delta: number) => setIndex((i) => (i + delta + images.length) % images.length);
 
-  useEffect(() => setIndex(0), [missionId]);
+  useEffect(() => setIndex(initialIndex), [missionId, initialIndex]);
   useEffect(() => closeButton.current?.focus(), []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
