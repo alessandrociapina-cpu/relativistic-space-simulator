@@ -22,7 +22,6 @@ import {
 } from '../physics/destinations';
 import { ORIGINS, ORIGIN_LIST, canTravel, missionDestination, type Origin } from '../physics/origins';
 import { useFlightStore, type MissionChoice } from '../store/useFlightStore';
-import { APP_HASH } from '../ui/appMode';
 import { useCockpitUi } from '../ui/cockpitUi';
 import {
   MAX_ACCEL_G,
@@ -590,13 +589,10 @@ function Planner() {
   const presetActive = presets.some((p) => p.accelG === draft.accelG);
   const [customOpen, setCustomOpen] = useState(!presetActive);
   const update = (patch: Partial<MissionChoice>) => setDraft((d) => ({ ...d, ...patch }));
-  const [view, setView] = useState<PlannerTab>(() => useCockpitUi.getState().plannerTab);
-  const [sciFiSeen, setSciFiSeen] = useState(() => {
-    // Aberto direto no menu da ficção (por um link): a aba já foi vista.
-    if (view !== 'scifi') return loadSciFiSeen();
-    saveSciFiSeen();
-    return true;
-  });
+  // A aba fica no estado da interface: a barra de navegação ("Viagem" e "Ficção") também a troca.
+  const view = useCockpitUi((s) => s.plannerTab);
+  const setView = useCockpitUi((s) => s.setPlannerTab);
+  const [sciFiSeen, setSciFiSeen] = useState(loadSciFiSeen);
   const dialogRef = useRef<HTMLDivElement>(null);
   const activeSciFi =
     findSciFiMission({
@@ -622,14 +618,16 @@ function Planner() {
     closePlanner();
   };
 
-  const showView = (next: PlannerTab) => {
-    setView(next);
+  const showView = (next: PlannerTab) => setView(next);
+  // Ao trocar de aba (por aqui, pela barra de navegação ou por um link), volta ao topo; o menu da ficção visto
+  // uma vez para de pulsar.
+  useEffect(() => {
     dialogRef.current?.scrollTo({ top: 0 });
-    if (next === 'scifi' && !sciFiSeen) {
+    if (view === 'scifi' && !sciFiSeen) {
       setSciFiSeen(true);
       saveSciFiSeen();
     }
-  };
+  }, [view, sciFiSeen]);
 
   const applySciFi = (m: SciFiMission) => {
     setCustomOpen(false);
@@ -677,7 +675,7 @@ function Planner() {
       aria-label="Planejamento da missão"
       className="absolute inset-0 z-40 flex flex-col overflow-y-auto overscroll-contain bg-black/80 backdrop-blur-md select-text"
     >
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-4 sm:px-6 lg:pb-6">
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 pt-4 pb-4 sm:px-6 lg:pb-6">
         <header className="flex items-start justify-between gap-3">
           <div>
             <div className="font-display text-[10px] tracking-[0.4em] text-cyan-300/70 uppercase">Viagem interestelar</div>
@@ -686,9 +684,6 @@ function Planner() {
             </h1>
           </div>
           <div className="flex shrink-0 gap-2 text-xs">
-            <a href={APP_HASH.home} className="rounded-md border border-slate-700 px-2 py-1.5 text-slate-300 hover:bg-slate-800">
-              ⌂ Início
-            </a>
             <button
               type="button"
               onClick={closePlanner}

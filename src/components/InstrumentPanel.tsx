@@ -6,7 +6,6 @@ import { CMB_VISIBLE_GAMMA, activeWindowsAt } from '../physics/criticalEvents';
 import { engineCommandAt } from '../physics/maneuvers';
 import { adjacentTimeScale, naturalTimeScale, timeScaleStep } from '../store/timeScales';
 import { useFlightStore } from '../store/useFlightStore';
-import { APP_HASH } from '../ui/appMode';
 import { SKY_IN_A_POINT_GAMMA, useCockpitUi } from '../ui/cockpitUi';
 import { crewText, formatStrain, type CrewTone } from '../ui/crewStatus';
 import { useExplainSettings } from '../ui/explainSettings';
@@ -109,20 +108,6 @@ function MissionPlate() {
         >
           ⚙ Planejar
         </button>
-        <a
-          href={APP_HASH.probes}
-          title="Simulador de sondas: as trajetórias reais do JPL no Sistema Solar"
-          className="rounded-md border border-slate-600/70 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800"
-        >
-          🛰
-        </a>
-        <a
-          href={APP_HASH.home}
-          title="Tela de abertura"
-          className="rounded-md border border-slate-600/70 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-800"
-        >
-          ⌂
-        </a>
         <button
           type="button"
           onClick={() => useShortcutHelp.getState().setOpen(true)}

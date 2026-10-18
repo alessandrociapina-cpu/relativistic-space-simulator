@@ -62,6 +62,8 @@ interface ProbeStore {
   readonly eventId: string | null;
   /** Galeria de imagens aberta: a missão e a foto mostrada primeiro. */
   readonly gallery: { readonly missionId: ProbeId; readonly index: number } | null;
+  /** Lista de eventos da missão aberta (na tela larga, aberta de início; no celular, pelo botão do painel). */
+  readonly eventsOpen: boolean;
   readonly view: ViewRequest;
 
   setT: (t: number) => void;
@@ -76,6 +78,7 @@ interface ProbeStore {
   showEvent: (id: string | null) => void;
   openGallery: (missionId: ProbeId, index?: number) => void;
   closeGallery: () => void;
+  setEventsOpen: (open: boolean) => void;
   /** Vai para o evento: pausa, foca o corpo certo e abre o cartão. */
   jumpToEvent: (id: string) => void;
   tick: (dtRealS: number) => void;
@@ -135,6 +138,9 @@ function save(key: string, value: string) {
   }
 }
 
+/** Tela larga (breakpoint `lg`): a lista de eventos cabe ao lado da cena. Fora do navegador (testes), não. */
+export const isWideScreen = () => typeof window !== 'undefined' && window.matchMedia?.('(min-width: 1024px)').matches === true;
+
 export const useProbeStore = create<ProbeStore>()((set, get) => ({
   t: INITIAL_T,
   playing: false,
@@ -148,6 +154,7 @@ export const useProbeStore = create<ProbeStore>()((set, get) => ({
   frameMode: loadFrameMode(),
   eventId: null,
   gallery: null,
+  eventsOpen: isWideScreen(),
   view: { distance: null, nonce: 0 },
 
   setT: (t) => set({ t: clampT(t), slowdown: null }),
@@ -171,6 +178,7 @@ export const useProbeStore = create<ProbeStore>()((set, get) => ({
   showEvent: (eventId) => set({ eventId }),
   openGallery: (missionId, index = 0) => set({ gallery: { missionId, index } }),
   closeGallery: () => set({ gallery: null }),
+  setEventsOpen: (eventsOpen) => set({ eventsOpen }),
   jumpToEvent: (id) => {
     const event = ALL_EVENTS.find((e) => e.id === id);
     if (!event) return;

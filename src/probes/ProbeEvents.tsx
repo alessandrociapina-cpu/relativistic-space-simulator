@@ -3,7 +3,7 @@ import { explainEvent } from './eventExplanations';
 import { MISSION_IMAGES, imageIndexNear } from './missionImages';
 import { ALL_EVENTS, MISSIONS } from './missions';
 import { formatDate, formatShortDate } from './time';
-import { useProbeStore } from './useProbeStore';
+import { isWideScreen, useProbeStore } from './useProbeStore';
 
 // O KaTeX (JS, CSS e fontes) só carrega com o primeiro cartão de evento, não com o Sistema Solar.
 const TeX = lazy(() => import('../components/TeX').then((m) => ({ default: m.TeX })));
@@ -14,13 +14,24 @@ export function ProbeEventList({ className = '' }: { className?: string }) {
   const selected = useProbeStore((s) => s.selected);
   const eventId = useProbeStore((s) => s.eventId);
   const jumpToEvent = useProbeStore((s) => s.jumpToEvent);
+  const setEventsOpen = useProbeStore((s) => s.setEventsOpen);
   const mission = MISSIONS[selected];
 
   return (
-    <nav aria-label="Eventos da missão" className={`rounded-md border border-cyan-400/30 bg-black/75 py-1.5 font-mono backdrop-blur-sm ${className}`}>
-      <h2 className="px-3 pb-1 text-[10px] tracking-widest text-cyan-300 uppercase">
-        Eventos · <span style={{ color: mission.color }}>{mission.name}</span>
-      </h2>
+    <nav aria-label="Eventos da missão" className={`rounded-md border border-cyan-400/30 bg-black/85 py-1.5 font-mono backdrop-blur-sm ${className}`}>
+      <div className="flex items-center justify-between gap-2 px-3 pb-1">
+        <h2 className="text-[10px] tracking-widest text-cyan-300 uppercase">
+          Eventos · <span style={{ color: mission.color }}>{mission.name}</span>
+        </h2>
+        <button
+          type="button"
+          aria-label="Fechar a lista de eventos"
+          className="-mr-1 shrink-0 px-1 text-slate-400 hover:text-slate-100"
+          onClick={() => setEventsOpen(false)}
+        >
+          ✕
+        </button>
+      </div>
       <ol>
         {mission.events.map((e) => {
           const past = e.t <= t;
@@ -29,7 +40,11 @@ export function ProbeEventList({ className = '' }: { className?: string }) {
             <li key={e.id}>
               <button
                 type="button"
-                onClick={() => jumpToEvent(e.id)}
+                onClick={() => {
+                  jumpToEvent(e.id);
+                  // No celular a lista cobre a cena: fecha para mostrar o evento e o cartão.
+                  if (!isWideScreen()) setEventsOpen(false);
+                }}
                 className={`flex w-full gap-2 px-3 py-1 text-left text-[11px] hover:bg-slate-800/80 ${
                   active ? 'bg-amber-400/15 text-amber-200' : past ? 'text-slate-200' : 'text-slate-500'
                 }`}

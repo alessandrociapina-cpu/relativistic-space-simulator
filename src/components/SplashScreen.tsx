@@ -149,7 +149,7 @@ export function SplashScreen() {
     <main className="relative h-full w-full overflow-y-auto bg-black text-slate-100">
       <Starfield warp={warp} />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_30%,rgba(0,0,0,0.75)_100%)]" />
-      <div className="relative mx-auto flex min-h-full max-w-5xl flex-col justify-center gap-8 px-4 pt-[max(2rem,env(safe-area-inset-top))] pb-[max(2rem,env(safe-area-inset-bottom))] sm:px-8">
+      <div className="relative mx-auto flex min-h-full max-w-5xl flex-col justify-center gap-8 px-4 pt-8 pb-[max(2rem,env(safe-area-inset-bottom))] sm:px-8">
         <header className="text-center">
           <div className="font-display text-[11px] tracking-[0.5em] text-cyan-300/80 uppercase">Projeto Minda</div>
           <h1 className="font-display glow-text mt-3 text-3xl font-bold tracking-wider text-white sm:text-5xl">

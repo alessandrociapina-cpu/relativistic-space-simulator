@@ -162,7 +162,7 @@ export function TelemetryHUD({ className = '' }: { className?: string }) {
   return (
     <section
       aria-label="Telemetria"
-      className={`hull-panel rounded-b-2xl px-2 pt-[max(0.375rem,env(safe-area-inset-top))] pb-2 transition-[filter] duration-500 sm:px-4 ${
+      className={`hull-panel rounded-b-2xl px-2 pt-1.5 pb-2 transition-[filter] duration-500 sm:px-4 ${
         whiteout ? 'brightness-110 backdrop-blur-md' : ''
       } ${className}`}
     >

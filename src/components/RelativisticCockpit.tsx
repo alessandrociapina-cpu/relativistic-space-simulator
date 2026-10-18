@@ -77,7 +77,7 @@ export function RelativisticCockpit() {
           )}
           <Suspense fallback={null}>
             <ExplanationCard className="pointer-events-auto mx-auto w-full max-w-md select-text lg:mx-0 lg:mt-8 lg:min-w-0 lg:flex-1" />
-            <ActiveEffectsPanel className="pointer-events-auto fixed inset-0 z-30 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] select-text lg:absolute lg:inset-y-0 lg:right-0 lg:left-auto lg:w-[30rem] lg:rounded-md lg:border lg:border-cyan-400/30 lg:p-0" />
+            <ActiveEffectsPanel className="pointer-events-auto fixed inset-0 z-[60] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] select-text lg:absolute lg:z-30 lg:inset-y-0 lg:right-0 lg:left-auto lg:w-[30rem] lg:rounded-md lg:border lg:border-cyan-400/30 lg:p-0" />
           </Suspense>
         </div>
         <div className="flex w-full flex-col items-center gap-1">
