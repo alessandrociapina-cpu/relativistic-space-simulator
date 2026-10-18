@@ -50,6 +50,9 @@ describe('catálogo de estrelas reais', () => {
   it('o alvo sai do catálogo (o shader o desenha à parte)', () => {
     const sirius = skyFrameFor(DESTINATIONS.sirius);
     expect(parseCatalog(catalog.stars, sirius.icrsToShip, DESTINATIONS.sirius.distanceLy).length).toBe(8919);
+    // Beta Virginis (V = 3,6), o destino da Leonora Christine, também.
+    const betaVir = skyFrameFor(DESTINATIONS.betaVirginis);
+    expect(parseCatalog(catalog.stars, betaVir.icrsToShip, DESTINATIONS.betaVirginis.distanceLy).length).toBe(8919);
     expect(stars.length).toBe(8920); // Proxima (V = 11) nem está no catálogo
   });
 

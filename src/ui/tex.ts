@@ -3,6 +3,7 @@
  * explicações: vírgula decimal como `{,}` (sem o espaço que o TeX põe depois
  * de vírgulas) e milhares separados por espaço fino.
  */
+import { LIGHT_YEAR_M } from '../physics/RelativityEngine';
 import { formatDistance, formatSpan } from './format';
 
 const groupThousands = (digits: string) => digits.replace(/\B(?=(\d{3})+(?!\d))/g, '\\,');
@@ -30,7 +31,9 @@ export function texNumber(x: number, significant = 3): string {
 export const texText = (text: string) => `\\text{${text}}`;
 
 export const texDuration = (seconds: number) => texText(formatSpan(seconds));
-export const texDistance = (meters: number) => texText(formatDistance(meters));
+/** Distância como nos visores; acima de 10⁷ anos-luz, a potência de 10 em TeX (o "×" e os expoentes do visor não entram em \text). */
+export const texDistance = (meters: number) =>
+  meters >= 1e7 * LIGHT_YEAR_M ? `${texNumber(meters / LIGHT_YEAR_M, 4)}\\ \\text{anos-luz}` : texText(formatDistance(meters));
 
 /** Escala por unidade, do maior para o menor; a última vale para todo o resto. */
 function withUnit(value: number, units: readonly (readonly [number, string])[], significant = 3): string {

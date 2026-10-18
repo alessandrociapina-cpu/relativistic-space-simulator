@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DESTINATIONS, destinationMissionProfile } from './destinations';
+import { rocketMassRatio } from './RelativityEngine';
 import {
   ACCELERATION_PRESETS,
   SCIFI_MISSIONS,
@@ -100,6 +101,7 @@ describe('missões da ficção científica hard e projetos reais', () => {
       'hail-mary',
       'blip-a',
       'tau-zero',
+      'tau-zero-virgem',
       'expanse',
       'deep-sea',
       'starshot',
@@ -121,7 +123,7 @@ describe('missões da ficção científica hard e projetos reais', () => {
       }
     }
     for (const id of ['venture-star', 'hail-mary', 'expanse', 'deep-sea']) expect(scifiProfile(id).crewRest, id).toBeDefined();
-    for (const id of ['blip-a', 'tau-zero', 'starshot']) expect(scifiProfile(id).crewRest, id).toBeUndefined();
+    for (const id of ['blip-a', 'tau-zero', 'tau-zero-virgem', 'starshot']) expect(scifiProfile(id).crewRest, id).toBeUndefined();
   });
 
   it('Venture Star: até Alfa Centauri A, como no filme, ~5 anos de bordo; com piloto acordado, descansos alongam a viagem', () => {
@@ -168,13 +170,27 @@ describe('missões da ficção científica hard e projetos reais', () => {
     expect(Math.exp((2 * a * halfS) / 299_792_458)).toBeGreaterThan(11_000);
   });
 
-  it('Tau Zero: 1 g até Andrômeda em ~28,6 anos de bordo; até TRAPPIST-1, 7,28 anos de bordo e 41,5 na Terra', () => {
+  it('Tau Zero, o plano: 1 g até Beta Virginis (35,65 anos-luz) em 7,09 anos de bordo e 37,5 na Terra', () => {
+    expect(scifi('tau-zero').destinationId).toBe('betaVirginis');
     const profile = scifiProfile('tau-zero');
-    expect(profile.tauTotal / YEAR).toBeCloseTo(28.6, 1);
-    expect(profile.tTotal / YEAR / 1e6).toBeCloseTo(2.537, 3);
-    const trappist = destinationMissionProfile(DESTINATIONS.trappist1, 1, null);
-    expect(trappist.tauTotal / YEAR).toBeCloseTo(7.28, 2);
-    expect(trappist.tTotal / YEAR).toBeCloseTo(41.5, 1);
+    expect(profile.tauTotal / YEAR).toBeCloseTo(7.09, 2);
+    expect(profile.tTotal / YEAR).toBeCloseTo(37.5, 1);
+    expect(profile.gammaMax).toBeCloseTo(19.4, 1);
+    expect(Math.tanh(profile.etaMax)).toBeCloseTo(0.9987, 4);
+    expect(rocketMassRatio(profile)).toBeCloseTo(1500, -2);
+  });
+
+  it('Tau Zero, sem freio: 1 g até o Aglomerado de Virgem em ~34,5 anos de bordo e 54 milhões de anos na Terra', () => {
+    expect(scifi('tau-zero-virgem').destinationId).toBe('virgoCluster');
+    const profile = scifiProfile('tau-zero-virgem');
+    expect(profile.tauTotal / YEAR).toBeCloseTo(34.5, 1);
+    expect(profile.tTotal / YEAR / 1e6).toBeCloseTo(53.8, 1);
+    expect(profile.gammaMax / 1e7).toBeCloseTo(2.78, 2);
+    // O tempo de bordo cresce com o logaritmo da distância: τ ≈ 2(c/α) ln(αD/c²).
+    const a = 9.80665;
+    const approx = ((2 * 299_792_458) / a) * Math.log((a * DESTINATIONS.virgoCluster.distanceLy * 9.4607304725808e15) / 299_792_458 ** 2);
+    expect(profile.tauTotal / approx).toBeCloseTo(1, 6);
+    expect(rocketMassRatio(profile) / 1e15).toBeCloseTo(3.08, 2);
   });
 
   it('Starshot: queima de ~3,4 min até 0,2c e ~21 anos de viagem', () => {

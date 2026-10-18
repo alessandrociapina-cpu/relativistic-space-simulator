@@ -17,7 +17,17 @@ export const PARSEC_M = 3.0856775814913673e16;
 /** Aceleração padrão sugerida: 1,61×10⁶ G (≈ 10 min de bordo até Proxima). */
 export const DEFAULT_ACCEL_G = 1.61e6;
 
-export type DestinationId = 'proxima' | 'alphaCenA' | 'sirius' | 'tauCeti' | 'eridani40' | 'trappist1' | 'sgrA' | 'andromeda';
+export type DestinationId =
+  | 'proxima'
+  | 'alphaCenA'
+  | 'sirius'
+  | 'tauCeti'
+  | 'eridani40'
+  | 'betaVirginis'
+  | 'trappist1'
+  | 'sgrA'
+  | 'andromeda'
+  | 'virgoCluster';
 
 /** Como o alvo é desenhado no shader (`uTargetType`: 0, 1, 2). */
 export type TargetKind = 'star' | 'blackHole' | 'galaxy';
@@ -45,6 +55,10 @@ export interface Destination {
   readonly visualMag?: number;
   /** Buraco negro: GM/c² (m), que dá a sombra (3√3·GM/c²) e o raio de Einstein da lente gravitacional. */
   readonly gravitationalRadiusM?: number;
+  /** Galáxia elíptica (M87): o shader desenha o halo quase redondo de estrelas velhas, sem braços. */
+  readonly elliptical?: boolean;
+  /** Artigo do nome ("o Centro Galáctico", "a Galáxia de Andrômeda"); as estrelas vão sem artigo. */
+  readonly article?: 'o' | 'a';
 }
 
 export const DESTINATIONS: Readonly<Record<DestinationId, Destination>> = {
@@ -118,6 +132,21 @@ export const DESTINATIONS: Readonly<Record<DestinationId, Destination>> = {
     blurb: 'Anã laranja num sistema triplo, em Erídano; em Project Hail Mary, a estrela de Erid, o planeta de Rocky.',
     visualMag: 4.43,
   },
+  betaVirginis: {
+    id: 'betaVirginis',
+    name: 'Beta Virginis',
+    shortName: 'BETA VIR',
+    kind: 'star',
+    // Paralaxe do Hipparcos (10,93 pc); no romance Tau Zero (1970), "32 anos-luz".
+    distanceLy: 35.65,
+    temperatureK: 6132,
+    radiusM: 1.68 * SOLAR_RADIUS_M,
+    defaultAccelG: DEFAULT_ACCEL_G,
+    raDeg: 177.6738,
+    decDeg: 1.7647,
+    blurb: 'Zavijava, uma estrela F9 um pouco maior que o Sol, na Virgem; o destino da Leonora Christine em Tau Zero.',
+    visualMag: 3.6,
+  },
   trappist1: {
     id: 'trappist1',
     name: 'TRAPPIST-1',
@@ -147,6 +176,7 @@ export const DESTINATIONS: Readonly<Record<DestinationId, Destination>> = {
     raDeg: 266.4168,
     decDeg: -29.0078,
     blurb: 'O buraco negro de 4 milhões de massas solares no centro da Via Láctea, escondido atrás da poeira.',
+    article: 'o',
   },
   andromeda: {
     id: 'andromeda',
@@ -162,8 +192,32 @@ export const DESTINATIONS: Readonly<Record<DestinationId, Destination>> = {
     raDeg: 10.6847,
     decDeg: 41.2692,
     blurb: 'A grande galáxia espiral vizinha, a 2,5 milhões de anos-luz: a viagem sai da Via Láctea.',
+    article: 'a',
+  },
+  virgoCluster: {
+    id: 'virgoCluster',
+    name: 'Aglomerado de Virgem (M87)',
+    shortName: 'VIRGEM',
+    kind: 'galaxy',
+    elliptical: true,
+    article: 'o',
+    // 16,5 Mpc, até M87, a elíptica gigante no centro do aglomerado.
+    distanceLy: 5.38e7,
+    // estrelas velhas de uma elíptica
+    temperatureK: 4800,
+    // escala do halo desenhado (vai até ~3 raios)
+    radiusM: 12_000 * PARSEC_M,
+    defaultAccelG: DEFAULT_ACCEL_G,
+    raDeg: 187.7059,
+    decDeg: 12.3911,
+    blurb:
+      'Mais de mil galáxias a 54 milhões de anos-luz; no centro, a elíptica gigante M87, com o buraco negro fotografado em 2019.',
   },
 };
+
+/** "rumo a Sirius A", "rumo ao Centro Galáctico", "rumo à Galáxia de Andrômeda". */
+export const towardName = (destination: Destination) =>
+  `${destination.article === 'o' ? 'ao' : destination.article === 'a' ? 'à' : 'a'} ${destination.name}`;
 
 /** Destinos na ordem de exibição (do mais próximo ao mais distante). */
 export const DESTINATION_LIST: readonly Destination[] = Object.values(DESTINATIONS);

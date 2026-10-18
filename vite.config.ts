@@ -51,7 +51,8 @@ export default defineConfig({
             handler: 'CacheFirst',
             options: {
               cacheName: 'mission-images',
-              expiration: { maxEntries: 80, maxAgeSeconds: 90 * 24 * 3600, purgeOnQuotaError: true },
+              // Cada foto vista conta duas vezes (miniatura e foto grande); ~200 fotos nas missões.
+              expiration: { maxEntries: 240, maxAgeSeconds: 90 * 24 * 3600, purgeOnQuotaError: true },
               cacheableResponse: { statuses: [0, 200] },
             },
           },

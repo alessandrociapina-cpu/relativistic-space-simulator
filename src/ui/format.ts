@@ -77,6 +77,8 @@ export function formatDuration(seconds: number): string {
 export function formatDistance(meters: number): string {
   // Na chegada sobra só o ruído de arredondamento (~10⁻²³ m): é zero.
   if (meters < 0.5) return '0 km';
+  // Acima de 10⁷ anos-luz (Aglomerado de Virgem), em notação científica: "53 800 000" não cabe no visor.
+  if (meters >= 1e7 * LIGHT_YEAR_M) return `${formatScientific(meters / LIGHT_YEAR_M, 4)} anos-luz`;
   if (meters >= 0.01 * LIGHT_YEAR_M) return `${sig4Fixed(meters / LIGHT_YEAR_M)} anos-luz`;
   if (meters >= 0.1 * AU_M) return `${sig4Fixed(meters / AU_M)} UA`;
   if (meters >= LIGHT_SECOND_M) return `${sig4Fixed(meters / LIGHT_SECOND_M)} s-luz`;

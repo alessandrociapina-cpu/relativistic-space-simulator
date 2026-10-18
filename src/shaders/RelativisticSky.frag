@@ -31,6 +31,7 @@ uniform float uTargetTemp;
 uniform int   uTargetType;       // 0 = estrela, 1 = buraco negro (Sgr A*), 2 = galáxia (Andrômeda)
 uniform float uTargetPointAmp;   // o alvo como estrela pontual, antes de virar disco
 uniform float uGalaxyGain;       // brilho superficial da galáxia-alvo (escala da Via Láctea)
+uniform float uGalaxySpiral;     // 1 = espiral (Andrômeda), 0 = elíptica gigante (M87, no Aglomerado de Virgem)
 uniform float uTargetGain;       // olho ou câmera adaptados a uma estrela-alvo grande e pouco luminosa
 uniform float uBackgroundGain;   // o fundo (estrelas e Via Láctea) perde brilho quando a exposição sobe por causa do alvo
 
@@ -275,20 +276,21 @@ vec3 renderBlackHoleTarget(vec3 rayDir, vec3 centerDir, float radiusRad, float b
     return diskColor * ((diskMask + lensedMask * 0.7) * shadowMask + photonRing);
 }
 
-// Disco espiral inclinado: bojo dourado e braços logarítmicos com FBM.
+// Disco espiral inclinado (bojo dourado e braços logarítmicos com FBM) ou, com uGalaxySpiral = 0, uma
+// elíptica gigante quase redonda: halo de estrelas velhas que cai devagar, núcleo brilhante e nenhum braço.
 vec3 renderGalaxyTarget(vec3 rayDir, vec3 centerDir, float radiusRad, float baseTempK, float doppler) {
     vec3 n = normalize(centerDir);
     if (angleBetween(rayDir, n) > radiusRad * 6.0) return vec3(0.0);
 
     vec3 right, localUp;
     tangentBasis(n, normalize(vec3(0.4, 0.9, 0.1)), right, localUp);
-    vec2 uv = vec2(dot(rayDir, right), dot(rayDir, localUp) * 2.4) / max(radiusRad, 1e-30);
+    vec2 uv = vec2(dot(rayDir, right), dot(rayDir, localUp) * mix(1.15, 2.4, uGalaxySpiral)) / max(radiusRad, 1e-30);
     float r = length(uv);
     float phi = atan(uv.y, uv.x + 1e-9);
 
     float spiral = cos(2.0 * phi - 4.5 * log(max(r, 0.05)) + fbm(vec3(uv * 2.5, 0.0)) * 1.8);
-    float armDensity = smoothstep(-0.2, 0.8, spiral) * exp(-r * 1.1);
-    float bulge = exp(-r * 3.5) * 1.8;
+    float armDensity = smoothstep(-0.2, 0.8, spiral) * exp(-r * 1.1) * uGalaxySpiral;
+    float bulge = exp(-r * mix(1.4, 3.5, uGalaxySpiral)) * 1.8 + (1.0 - uGalaxySpiral) * exp(-r * 8.0) * 2.0;
     return sampleBlackbodySensor(4500.0 * doppler) * bulge
          + sampleBlackbodySensor(baseTempK * 1.35 * doppler) * armDensity * 0.7;
 }

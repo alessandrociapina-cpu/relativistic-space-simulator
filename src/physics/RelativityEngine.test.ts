@@ -13,7 +13,14 @@ import {
   rapidityFromLog10Gamma,
   rocketMassRatio,
 } from './RelativityEngine';
-import { DESTINATIONS, DESTINATION_LIST, MAX_COAST_FRACTION, destinationMissionProfile, effectiveCoastEta } from './destinations';
+import {
+  DESTINATIONS,
+  DESTINATION_LIST,
+  MAX_COAST_FRACTION,
+  destinationMissionProfile,
+  effectiveCoastEta,
+  towardName,
+} from './destinations';
 
 const relErr = (actual: number, expected: number) => Math.abs(actual - expected) / Math.abs(expected);
 
@@ -280,10 +287,19 @@ describe('catálogo de destinos (§4.3)', () => {
     expect(distances).toEqual([...distances].sort((a, b) => a - b));
   });
 
+  it('"rumo a" com o artigo do nome: estrelas sem artigo, o aglomerado e a galáxia com contração', () => {
+    expect(towardName(DESTINATIONS.betaVirginis)).toBe('a Beta Virginis');
+    expect(towardName(DESTINATIONS.sgrA)).toBe('ao Centro Galáctico (Sagittarius A*)');
+    expect(towardName(DESTINATIONS.andromeda)).toBe('à Galáxia de Andrômeda (M31)');
+    expect(towardName(DESTINATIONS.virgoCluster)).toBe('ao Aglomerado de Virgem (M87)');
+  });
+
   it.each([
     ['proxima', 10.0, 0],
+    ['betaVirginis', 11.3, 1],
     ['sgrA', 15.5, 1],
     ['andromeda', 18.4, 1],
+    ['virgoCluster', 20.3, 1],
   ] as const)('%s a 1,61×10⁶ G: ≈ %f min de bordo', (id, minutes, digits) => {
     const p = destinationMissionProfile(DESTINATIONS[id]);
     expect(p.tauTotal / 60).toBeCloseTo(minutes, digits);

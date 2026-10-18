@@ -10,6 +10,8 @@ const X0 = 24;
 const X1 = 296;
 const LINE_Y = 104;
 const xAt = (u: number) => X0 + (X1 - X0) * u;
+/** Menor distância entre dois marcos no mapa (fração da largura) para os rótulos não se sobreporem. */
+const MARKER_MIN_GAP = 0.2;
 
 /** Estado da rota, comum ao monitor e à faixa do painel no celular. */
 function useRoute() {
@@ -30,7 +32,9 @@ function useRoute() {
     : []
   )
     .filter((m) => m.au < halfwayAu)
-    .map((m) => ({ ...m, u: sunMarkerPosition(m.au, geometry) }));
+    .map((m) => ({ ...m, u: sunMarkerPosition(m.au, geometry) }))
+    // Nas viagens muito longas, a escala log junta Saturno e a Nuvem de Oort perto do Sol: fica só o mais distante.
+    .filter((m, i, all) => all.every((o, j) => j <= i || o.u - m.u > MARKER_MIN_GAP));
 
   const status =
     flight.phase === 'arrived'

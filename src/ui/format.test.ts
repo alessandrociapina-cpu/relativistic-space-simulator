@@ -47,6 +47,8 @@ describe('formatação pt-BR', () => {
   it('distâncias em anos-luz, UA, segundos-luz e km', () => {
     expect(formatDistance(4.25 * LIGHT_YEAR_M)).toBe('4,250 anos-luz');
     expect(formatDistance(26_700 * LIGHT_YEAR_M)).toBe('26 700 anos-luz');
+    expect(formatDistance(2.537e6 * LIGHT_YEAR_M)).toBe('2 537 000 anos-luz');
+    expect(formatDistance(5.38e7 * LIGHT_YEAR_M)).toBe('5,380 × 10⁷ anos-luz');
     expect(formatDistance(1.5e12)).toBe('10,03 UA');
     expect(formatDistance(18.99 * LIGHT_SECOND_M)).toBe('18,99 s-luz');
     expect(formatDistance(1234)).toBe('1,234 km');
