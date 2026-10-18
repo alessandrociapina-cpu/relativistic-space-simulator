@@ -1,4 +1,5 @@
 import { Suspense, lazy } from 'react';
+import { AppNav } from './components/AppNav';
 import { SplashScreen } from './components/SplashScreen';
 import { useAppMode } from './ui/appMode';
 
@@ -17,16 +18,27 @@ function Loading({ label }: { label: string }) {
   );
 }
 
+/** A barra de navegação em cima e a tela da seção embaixo, ocupando o resto. */
 export default function App() {
   const mode = useAppMode();
-  if (mode === 'home') return <SplashScreen />;
-  return mode === 'probes' ? (
-    <Suspense fallback={<Loading label="Carregando o Sistema Solar…" />}>
-      <ProbesApp />
-    </Suspense>
-  ) : (
-    <Suspense fallback={<Loading label="Preparando a nave…" />}>
-      <RelativisticCockpit />
-    </Suspense>
+  return (
+    <div className="flex h-full w-full flex-col bg-black">
+      <AppNav mode={mode} />
+      <div className="relative min-h-0 flex-1">
+        <div className="absolute inset-0">
+          {mode === 'home' ? (
+            <SplashScreen />
+          ) : mode === 'probes' ? (
+            <Suspense fallback={<Loading label="Carregando o Sistema Solar…" />}>
+              <ProbesApp />
+            </Suspense>
+          ) : (
+            <Suspense fallback={<Loading label="Preparando a nave…" />}>
+              <RelativisticCockpit />
+            </Suspense>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }

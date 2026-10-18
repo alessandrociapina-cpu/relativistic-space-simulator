@@ -14,11 +14,17 @@ test('abertura: as duas viagens e a ficção científica hard', async ({ page })
   const errors = collectErrors(page);
   await page.goto('./');
   await expect(page.getByRole('heading', { name: 'Simulador Relativístico' })).toBeVisible();
+  const nav = page.getByRole('navigation', { name: 'Seções do app' });
+  await expect(nav.getByRole('link', { name: 'Início' })).toHaveAttribute('aria-current', 'page');
   await expect(page.getByRole('link', { name: /Quase à velocidade da luz/ })).toBeVisible();
   await expect(page.getByRole('link', { name: /Sondas históricas/ })).toBeVisible();
   await page.getByRole('link', { name: /Ficção científica hard/ }).click();
   await expect(page.getByRole('tab', { name: /Ficção científica hard/ })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByRole('article', { name: 'Hail Mary (Project Hail Mary)' })).toBeVisible();
+  await expect(nav.getByRole('link', { name: 'Ficção' })).toHaveAttribute('aria-current', 'page');
+  // A barra de navegação troca a aba do planejamento sem sair do cockpit.
+  await nav.getByRole('link', { name: 'Viagem' }).click();
+  await expect(page.getByRole('tab', { name: /Planejar/ })).toHaveAttribute('aria-selected', 'true');
   expect(errors).toEqual([]);
 });
 
@@ -50,5 +56,7 @@ test('sondas: o Sistema Solar abre com os eventos e as fórmulas', async ({ page
   await expect(events).toBeVisible();
   await events.getByRole('button').nth(1).click();
   await expect(page.locator('.katex').first()).toBeVisible();
+  await page.getByRole('navigation', { name: 'Seções do app' }).getByRole('link', { name: 'Início' }).click();
+  await expect(page.getByRole('heading', { name: 'Simulador Relativístico' })).toBeVisible();
   expect(errors).toEqual([]);
 });

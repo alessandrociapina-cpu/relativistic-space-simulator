@@ -184,6 +184,10 @@ export function ProbeHUD({ className = '' }: { className?: string }) {
   // Com a lista aberta, o painel sobe acima do cartão do evento.
   const [pickerOpen, setPickerOpen] = useState(false);
   const gallery = useProbeStore((s) => s.gallery);
+  const eventsOpen = useProbeStore((s) => s.eventsOpen);
+  const setEventsOpen = useProbeStore((s) => s.setEventsOpen);
+  // No celular, os números podem ser recolhidos para a cena ganhar espaço.
+  const [collapsed, setCollapsed] = useState(false);
   const openGallery = useProbeStore((s) => s.openGallery);
   const closeGallery = useProbeStore((s) => s.closeGallery);
   const imageCount = MISSION_IMAGES[selected].length;
@@ -263,20 +267,51 @@ export function ProbeHUD({ className = '' }: { className?: string }) {
       aria-label="Sonda"
       className={`relative rounded-md border border-cyan-400/30 bg-black/75 px-3 py-2 font-mono backdrop-blur-sm ${pickerOpen ? 'z-30' : ''} ${className}`}
     >
-      <div className="mb-1.5 flex gap-1.5">
-        <ProbePicker open={pickerOpen} setOpen={setPickerOpen} />
-        <button
-          type="button"
-          aria-label={`Imagens da missão (${imageCount})`}
-          title="As imagens mais marcantes da missão (Wikimedia Commons)"
-          className="shrink-0 rounded-sm border border-amber-300/70 bg-amber-400/15 px-2 py-1 text-[12px] font-semibold text-amber-100 shadow-[0_0_12px_rgba(251,191,36,0.25)] hover:bg-amber-400/30"
-          onClick={() => openGallery(selected)}
-        >
-          📷 Imagens<span className="ml-1 rounded-full bg-amber-300 px-1.5 text-[10px] font-bold text-black tabular-nums">{imageCount}</span>
-        </button>
+      <div className="mb-1.5 flex flex-col gap-1.5">
+        <div className="flex min-w-0 gap-1.5">
+          <ProbePicker open={pickerOpen} setOpen={setPickerOpen} />
+          <button
+            type="button"
+            aria-expanded={!collapsed}
+            aria-label={collapsed ? 'Mostrar os números da sonda' : 'Recolher os números da sonda'}
+            className="shrink-0 rounded-sm bg-slate-800/90 px-2 text-[11px] text-slate-300 hover:bg-slate-700 sm:hidden"
+            onClick={() => setCollapsed((c) => !c)}
+          >
+            {collapsed ? '▾' : '▴'}
+          </button>
+        </div>
+        {/* Eventos e imagens com o mesmo destaque: as duas portas de entrada para a história da missão. */}
+        <div className="grid grid-cols-2 gap-1.5">
+          <button
+            type="button"
+            aria-pressed={eventsOpen}
+            aria-label={`Eventos da missão (${mission.events.length})`}
+            title="A linha do tempo da missão: um toque leva ao evento, com a explicação"
+            className={`flex items-center justify-center gap-1 rounded-sm border px-2 py-1 text-[12px] font-semibold ${
+              eventsOpen
+                ? 'border-cyan-200 bg-cyan-400/80 text-black'
+                : 'border-cyan-300/70 bg-cyan-400/15 text-cyan-100 shadow-[0_0_12px_rgba(34,211,238,0.25)] hover:bg-cyan-400/30'
+            }`}
+            onClick={() => setEventsOpen(!eventsOpen)}
+          >
+            📅 Eventos
+            <span className={`rounded-full px-1.5 text-[10px] font-bold tabular-nums ${eventsOpen ? 'bg-black/80 text-cyan-200' : 'bg-cyan-300 text-black'}`}>
+              {mission.events.length}
+            </span>
+          </button>
+          <button
+            type="button"
+            aria-label={`Imagens da missão (${imageCount})`}
+            title="As imagens mais marcantes da missão (Wikimedia Commons)"
+            className="flex items-center justify-center gap-1 rounded-sm border border-amber-300/70 bg-amber-400/15 px-2 py-1 text-[12px] font-semibold text-amber-100 shadow-[0_0_12px_rgba(251,191,36,0.25)] hover:bg-amber-400/30"
+            onClick={() => openGallery(selected)}
+          >
+            📷 Imagens<span className="rounded-full bg-amber-300 px-1.5 text-[10px] font-bold text-black tabular-nums">{imageCount}</span>
+          </button>
+        </div>
       </div>
       {gallery && <MissionGallery missionId={gallery.missionId} initialIndex={gallery.index} onClose={closeGallery} />}
-      {body}
+      <div className={collapsed ? 'max-sm:hidden' : ''}>{body}</div>
       {next && (
         <button
           type="button"

@@ -25,6 +25,8 @@ interface CockpitUi {
   /** No celular o telescópio começa desligado e abre por uma tecla do painel. */
   readonly telescopeOpen: boolean;
   openPlanner: (tab?: PlannerTab) => void;
+  /** Troca a aba do planejamento aberto (a barra de navegação e as próprias abas). */
+  setPlannerTab: (tab: PlannerTab) => void;
   closePlanner: () => void;
   setTelescopeDirection: (direction: TelescopeDirection) => void;
   togglePanel: () => void;
@@ -39,6 +41,7 @@ export const useCockpitUi = create<CockpitUi>()((set) => ({
   panelCollapsed: false,
   telescopeOpen: false,
   openPlanner: (plannerTab = 'plan') => set((s) => ({ plannerOpen: true, plannerTab, plannerSession: s.plannerSession + 1 })),
+  setPlannerTab: (plannerTab) => set({ plannerTab }),
   closePlanner: () => set({ plannerOpen: false }),
   setTelescopeDirection: (telescopeDirection) => set({ telescopeDirection }),
   togglePanel: () => set((s) => ({ panelCollapsed: !s.panelCollapsed })),

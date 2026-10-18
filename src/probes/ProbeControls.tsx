@@ -53,6 +53,8 @@ export function ProbeControls({ className = '' }: { className?: string }) {
   const frame = frameMode === 'sun' ? null : autoFrame;
   const frameName = frame ? BODIES[frame].name : 'Sol';
   const frameFlash = useFlashOnChange(frameName);
+  // No celular, foco, escala e referencial ficam atrás de "⚙ Opções" para a cena ganhar espaço.
+  const [optionsOpen, setOptionsOpen] = useState(false);
   const { togglePlay, setT, setRate, setAutoSlow, setFocus, setScale, setShowOthers, setFrameMode } = useProbeStore.getState();
   const today = msToDays(Date.now());
 
@@ -109,8 +111,21 @@ export function ProbeControls({ className = '' }: { className?: string }) {
           <input type="checkbox" className="accent-cyan-400" checked={autoSlow} onChange={(e) => setAutoSlow(e.target.checked)} />
           Desacelerar nos encontros
         </label>
+        {/* Recolhido, a troca de referencial acende o próprio botão (a rota muda de forma de repente). */}
+        <button
+          type="button"
+          aria-expanded={optionsOpen}
+          aria-controls="probe-options"
+          className={`ml-auto rounded-sm bg-slate-800/80 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-700 sm:hidden ${
+            frameFlash && !optionsOpen ? 'animate-beacon text-amber-200 ring-2 ring-amber-300/90' : ''
+          }`}
+          onClick={() => setOptionsOpen((o) => !o)}
+        >
+          ⚙ Opções {optionsOpen ? '▴' : '▾'}
+          {frameFlash && !optionsOpen && <span className="ml-1">· {frameName}</span>}
+        </button>
       </div>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+      <div id="probe-options" className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 ${optionsOpen ? '' : 'max-sm:hidden'}`}>
         <label className="flex items-center gap-1.5">
           <span className="text-slate-400">Foco</span>
           <select
@@ -207,6 +222,9 @@ export function ProbeControls({ className = '' }: { className?: string }) {
           <input type="checkbox" className="accent-cyan-400" checked={showOthers} onChange={(e) => setShowOthers(e.target.checked)} />
           Mostrar outras sondas
         </label>
+        <p className="basis-full text-[10px] text-slate-500 sm:ml-auto sm:basis-auto">
+          Trajetórias do JPL Horizons; Veneras, Mariner 10, Vikings, Magellan e Apollo reconstruídas
+        </p>
       </div>
     </section>
   );
