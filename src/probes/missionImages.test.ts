@@ -45,6 +45,30 @@ describe('foto mais próxima de um evento', () => {
     }
   });
 
+  it('em cada missão, as fotos seguem a ordem das datas (as sem data primeiro)', () => {
+    // Só o mês ou só o ano é um intervalo: a ordem só falha se uma foto acabar antes de a anterior começar.
+    const span = (date: string): [number, number] => {
+      const month = /^([a-z]{3})\/(\d{4})$/.exec(date);
+      if (month) {
+        const mid = imageDays(date)!;
+        return [mid - 15, mid + 16];
+      }
+      const years = /^(\d{4})(?:–(\d{4}))?$/.exec(date);
+      if (years) return [isoToDays(`${years[1]}-01-01`), isoToDays(`${years[2] ?? years[1]}-12-31`)];
+      const day = imageDays(date)!;
+      return [day, day];
+    };
+    for (const [mission, images] of Object.entries(MISSION_IMAGES)) {
+      const firstDated = images.findIndex((i) => i.date !== undefined);
+      if (firstDated < 0) continue;
+      const dated = images.slice(firstDated);
+      expect(dated.every((i) => i.date !== undefined), mission).toBe(true);
+      for (let k = 1; k < dated.length; k++) {
+        expect(span(dated[k]!.date!)[1], `${mission} #${firstDated + k}`).toBeGreaterThanOrEqual(span(dated[k - 1]!.date!)[0]);
+      }
+    }
+  });
+
   it('o cartão de um evento abre a galeria na foto daquela data', () => {
     const images = MISSION_IMAGES.voyager2;
     const neptune = images.findIndex((i) => i.date === '25/08/1989');
