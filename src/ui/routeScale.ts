@@ -34,7 +34,18 @@ export function routePosition(flight: FlightState, profile: MissionProfile, geom
   if (flight.positionM <= profile.halfDistanceM) {
     return startPosition(geometry.startM + flight.positionM, geometry);
   }
+  return endPosition(flight.restDistanceRemainingM, profile, geometry);
+}
+
+/** Posição de um ponto a `remainingM` do alvo, na segunda metade do mapa (0,5 a 1). */
+function endPosition(remainingM: number, profile: MissionProfile, geometry: RouteGeometry): number {
   const end = geometry.arrivalTargetDistanceM;
-  const toTarget = flight.restDistanceRemainingM + end;
-  return 1 - (0.5 * Math.log(toTarget / end)) / Math.log((profile.halfDistanceM + end) / end);
+  return 1 - (0.5 * Math.log((remainingM + end) / end)) / Math.log((profile.halfDistanceM + end) / end);
+}
+
+/** Posição de um marco a `xM` metros da partida, em qualquer metade do mapa (os marcos de um roteiro). */
+export function routeMarkerPosition(xM: number, profile: MissionProfile, geometry: RouteGeometry): number {
+  return xM <= profile.halfDistanceM
+    ? startPosition(geometry.startM + xM, geometry)
+    : endPosition(profile.distanceM - xM, profile, geometry);
 }

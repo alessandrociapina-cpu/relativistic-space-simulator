@@ -22,7 +22,7 @@ export type SensorMode = (typeof SensorMode)[keyof typeof SensorMode];
 /** Leva o núcleo de uma estrela tipo solar (≈ 1,7×10⁻³ no sensor) ao meio da curva ACES. */
 export const DEFAULT_EXPOSURE = 200;
 
-const TARGET_TYPE: Readonly<Record<TargetKind, number>> = { star: 0, blackHole: 1, galaxy: 2 };
+const TARGET_TYPE: Readonly<Record<TargetKind, number>> = { star: 0, blackHole: 1, galaxy: 2, void: 3 };
 /**
  * Brilho superficial da galáxia-alvo: o de um disco visto de fora, na escala do
  * brilho difuso da Via Láctea (não o de uma superfície estelar).

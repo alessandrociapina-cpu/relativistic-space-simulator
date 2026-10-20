@@ -11,6 +11,7 @@ import { InstrumentPanel } from './InstrumentPanel';
 import { MainViewport } from './MainViewport';
 import { MissionPlanner } from './MissionPlanner';
 import { RouteMonitor } from './RouteMonitor';
+import { ScriptCard, ScriptStrip } from './ScriptStory';
 import { ShortcutHelp } from './ShortcutHelp';
 import { TelemetryHUD } from './TelemetryHUD';
 import { TelescopePIP } from './TelescopePIP';
@@ -64,6 +65,8 @@ export function RelativisticCockpit() {
       {/* Áreas vazias deixam o arrasto passar para o para-brisa. */}
       <div className="pointer-events-none absolute inset-0 flex flex-col pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)]">
         <TelemetryHUD className="pointer-events-auto w-full" />
+        {/* Num roteiro (Tau Zero), as fases da viagem logo abaixo do console. */}
+        <ScriptStrip className="pointer-events-auto mx-2 mt-1.5 lg:mx-[max(1.5rem,6vw)]" />
         {/* Telas penduradas nos cantos; o cartão de explicação fica entre elas na tela larga
             e abaixo delas no celular. O painel de efeitos cobre esta faixa à direita. */}
         <div className="relative flex min-h-0 flex-1 flex-col gap-2 px-2 pt-3 sm:pt-4 lg:flex-row lg:items-start lg:justify-between lg:gap-4 lg:px-[max(1.5rem,6vw)]">
@@ -75,6 +78,8 @@ export function RelativisticCockpit() {
           ) : (
             telescopeOpen && <TelescopePIP className="pointer-events-auto mx-auto w-full max-w-[20rem]" />
           )}
+          {/* Num roteiro, o cartão da fase: no meio do cockpit na tela larga; no celular, uma folha por cima do painel. */}
+          <ScriptCard className="pointer-events-auto select-text max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:z-[60] max-lg:max-h-[72dvh] max-lg:rounded-b-none max-lg:pb-[env(safe-area-inset-bottom)] lg:mt-4 lg:mb-5 lg:max-h-[calc(100%-1.25rem)] lg:min-w-0 lg:max-w-lg lg:flex-1" />
           <Suspense fallback={null}>
             <ExplanationCard className="pointer-events-auto mx-auto w-full max-w-md select-text lg:mx-0 lg:mt-8 lg:min-w-0 lg:flex-1" />
             <ActiveEffectsPanel className="pointer-events-auto fixed inset-0 z-[60] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] select-text lg:absolute lg:z-30 lg:inset-y-0 lg:right-0 lg:left-auto lg:w-[30rem] lg:rounded-md lg:border lg:border-cyan-400/30 lg:p-0" />

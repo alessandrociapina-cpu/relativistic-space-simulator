@@ -12,7 +12,8 @@ import {
   type MissionAssessment,
   type SciFiMission,
 } from '../physics/accelerationPresets';
-import { REST_RATIOS, missionProfileFor, plannedCoastEta } from '../physics/crewRest';
+import { REST_RATIOS, choiceProfile, missionProfileFor, plannedCoastEta } from '../physics/crewRest';
+import { MISSION_SCRIPTS } from '../physics/missionScripts';
 import {
   DESTINATIONS,
   DESTINATION_LIST,
@@ -32,7 +33,7 @@ import {
   sciFiHash,
   type PlannerTab,
 } from '../ui/missionLink';
-import { formatAccelG, formatCompact, formatGamma, formatProse, formatSpan, formatVelocity } from '../ui/format';
+import { formatAccelG, formatCompact, formatDistance, formatGamma, formatProse, formatSpan, formatVelocity } from '../ui/format';
 
 /** Velocidade de cruzeiro sugerida ao ligar o perfil com inércia (fração de c). */
 const DEFAULT_COAST_BETA = 0.9;
@@ -43,6 +44,7 @@ const KIND_LABEL: Readonly<Record<Destination['kind'], string>> = {
   star: 'estrela',
   blackHole: 'buraco negro',
   galaxy: 'galáxia',
+  void: 'espaço intergaláctico',
 };
 
 const CREW_OPTIONS: readonly { crew: CrewKind; text: string }[] = [
@@ -287,6 +289,14 @@ function viabilityText(
   continuousBurnS: number,
 ): { tone: string; text: string } {
   const g = formatAccelG(choice.accelG);
+  if (profile.script) {
+    return {
+      tone: 'border-emerald-400/40 bg-emerald-950/30 text-emerald-100',
+      text:
+        `Suportável, como no livro: a nave chega a ${g}, mas os campos internos seguram o peso de 1 g a bordo nas ` +
+        'queimas, sem desgaste e sem descansos.',
+    };
+  }
   // "o limite do corpo (sem proteção)", não "(nenhuma)".
   const protection = lowerFirst(a.endurance.protection).replace(/^nenhuma\b/, 'sem proteção');
   if (a.viability === 'hypothetical') {
@@ -393,8 +403,8 @@ function SciFiArticle({
   const choice = sciFiChoice(mission, restRatio);
   const { origin, destination, coastEta } = choice;
   const profile = useMemo(
-    () => missionProfileFor(destination, mission.accelG, coastEta, mission.crew, restRatio),
-    [destination, mission.accelG, coastEta, mission.crew, restRatio],
+    () => choiceProfile({ destination, accelG: mission.accelG, coastEta, crew: mission.crew, restRatio, script: mission.script }),
+    [destination, mission.accelG, coastEta, mission.crew, restRatio, mission.script],
   );
   const plain = destinationMissionProfile(destination, mission.accelG, coastEta);
   const verdict = viabilityText(choice, assessMission(mission.crew, mission.accelG, profile), profile, longestBurnS(plain));
@@ -421,13 +431,17 @@ function SciFiArticle({
           <SciFiParagraph title={mission.real ? 'O projeto' : 'Na obra'}>{mission.story}</SciFiParagraph>
           <SciFiParagraph title="A física">{mission.physics}</SciFiParagraph>
           <SciFiParagraph title="No simulador">{mission.simulator}</SciFiParagraph>
+          {profile.script && <ScriptPhaseTable profile={profile} />}
         </div>
         <aside className="flex min-w-0 flex-col gap-2">
           <div className="hull-panel rounded-lg px-3 py-2">
             <SummaryRow label="Destino" value={`${routeName(origin, destination)} · ${formatCompact(destination.distanceLy)} anos-luz`} />
             <SummaryRow label="A bordo" value={CREW_LABEL[mission.crew].label} />
-            <SummaryRow label="Aceleração α" value={formatAccelG(mission.accelG)} />
-            <SummaryRow label="Perfil" value={profileLabel(coastEta)} />
+            <SummaryRow
+              label="Aceleração α"
+              value={profile.script ? `${scriptAccelRange(profile)} (1 g a bordo)` : formatAccelG(mission.accelG)}
+            />
+            <SummaryRow label="Perfil" value={profile.script ? `${profile.script.phases.length} fases` : profileLabel(coastEta)} />
             <SummaryRow label="Tempo de bordo" value={formatSpan(profile.tauTotal)} />
             <SummaryRow label="Tempo na Terra" value={formatSpan(profile.tTotal)} />
             {rest && (
@@ -455,14 +469,17 @@ function SciFiArticle({
           )}
           <p className={`rounded-lg border px-3 py-2 text-[12px] leading-snug ${verdict.tone}`}>{verdict.text}</p>
           <CopyLinkButton hash={sciFiHash(mission, restRatio)} className="self-start" />
-          <div className="mt-auto grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={onLoad}
-              className="rounded-lg border border-slate-600 px-3 py-2 text-[12px] text-slate-100 hover:border-slate-400 hover:bg-slate-800"
-            >
-              Carregar no planejamento
-            </button>
+          <div className={`mt-auto grid gap-2 ${profile.script ? 'grid-cols-1' : 'grid-cols-2'}`}>
+            {/* Um roteiro não cabe no planejamento (as fases definem o voo): só embarca. */}
+            {!profile.script && (
+              <button
+                type="button"
+                onClick={onLoad}
+                className="rounded-lg border border-slate-600 px-3 py-2 text-[12px] text-slate-100 hover:border-slate-400 hover:bg-slate-800"
+              >
+                Carregar no planejamento
+              </button>
+            )}
             <button
               type="button"
               onClick={onEmbark}
@@ -474,6 +491,39 @@ function SciFiArticle({
         </aside>
       </div>
     </article>
+  );
+}
+
+/** "0,5 a 10 g": da menor à maior aceleração das fases de um roteiro. */
+function scriptAccelRange(profile: MissionProfile): string {
+  const accels = MISSION_SCRIPTS[profile.script!.id].phases.map((p) => Math.abs(p.accelG)).filter((g) => g > 0);
+  return `${formatProse(Math.min(...accels))} a ${formatAccelG(Math.max(...accels))}`;
+}
+
+/** As fases de um roteiro (§4.2.11), com a aceleração, os tempos de bordo e da Terra e o percurso de cada uma. */
+function ScriptPhaseTable({ profile }: { profile: MissionProfile }) {
+  const plan = profile.script!;
+  const script = MISSION_SCRIPTS[plan.id];
+  return (
+    <div>
+      <h3 className="font-display text-[10px] tracking-[0.25em] text-violet-300/90 uppercase">As fases da viagem</h3>
+      <ol className="mt-1 flex flex-col gap-1">
+        {script.phases.map((p, i) => {
+          const t = plan.phases[i]!;
+          return (
+            <li key={p.id} className="grid grid-cols-[1.4rem_1fr] gap-x-2 rounded-md border border-violet-300/20 bg-violet-950/20 px-2 py-1">
+              <span className="font-display row-span-2 text-[13px] font-bold text-violet-200">{i + 1}</span>
+              <span className="text-[13px] text-slate-100">
+                <span className="font-semibold">{p.title}</span> <span className="text-violet-200/80">· {p.badge}</span>
+              </span>
+              <span className="font-readout text-[11px] text-slate-400 tabular-nums">
+                {formatSpan(t.endTau - t.startTau)} a bordo · {formatSpan(t.earth1 - t.earth0)} na Terra · {formatDistance(t.x1 - t.x0)}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
   );
 }
 
@@ -546,13 +596,14 @@ function saveSciFiSeen(): void {
   }
 }
 
-const pickChoice = ({ origin, destination, accelG, coastEta, crew, restRatio }: MissionChoice): MissionChoice => ({
+const pickChoice = ({ origin, destination, accelG, coastEta, crew, restRatio, script }: MissionChoice): MissionChoice => ({
   origin,
   destination: DESTINATIONS[destination.id],
   accelG,
   coastEta,
   crew,
   restRatio,
+  script,
 });
 
 /**
@@ -575,8 +626,8 @@ function Planner() {
   // O cruzeiro do slider fica guardado no rascunho; o que vale é o limitado à aceleração escolhida.
   const coastEta = plannedCoastEta(target, draft.accelG, draft.coastEta, draft.crew, draft.restRatio);
   const profile = useMemo(
-    () => missionProfileFor(target, draft.accelG, coastEta, draft.crew, draft.restRatio),
-    [target, draft.accelG, coastEta, draft.crew, draft.restRatio],
+    () => choiceProfile({ destination: target, accelG: draft.accelG, coastEta, crew: draft.crew, restRatio: draft.restRatio, script: draft.script }),
+    [target, draft.accelG, coastEta, draft.crew, draft.restRatio, draft.script],
   );
   const flipEta = useMemo(
     () => missionProfileFor(target, draft.accelG, null, draft.crew, draft.restRatio).etaMax,
@@ -588,7 +639,8 @@ function Planner() {
   const presets = presetsFor(draft.crew);
   const presetActive = presets.some((p) => p.accelG === draft.accelG);
   const [customOpen, setCustomOpen] = useState(!presetActive);
-  const update = (patch: Partial<MissionChoice>) => setDraft((d) => ({ ...d, ...patch }));
+  // Qualquer mudança feita aqui deixa o roteiro (as fases dele definem a aceleração e o perfil).
+  const update = (patch: Partial<MissionChoice>) => setDraft((d) => ({ ...d, script: undefined, ...patch }));
   // A aba fica no estado da interface: a barra de navegação ("Viagem" e "Ficção") também a troca.
   const view = useCockpitUi((s) => s.plannerTab);
   const setView = useCockpitUi((s) => s.setPlannerTab);
@@ -601,6 +653,7 @@ function Planner() {
       crew: draft.crew,
       accelG: draft.accelG,
       coastEta: draft.coastEta,
+      script: draft.script,
     }) ?? null;
 
   useEffect(() => {
@@ -845,12 +898,25 @@ function Planner() {
           </Section>
 
           <Section step={3} title="Perfil e resumo">
-            <ProfileChoice flipEta={flipEta} coastEta={draft.coastEta} onChange={(coastEta) => update({ coastEta })} />
+            {profile.script ? (
+              <>
+                <p className="rounded-lg border border-violet-300/40 bg-violet-950/30 px-3 py-2 text-[12px] leading-snug text-violet-100">
+                  Roteiro em fases: as acelerações e o perfil vêm da história. Escolher outra aceleração, outro destino ou
+                  outra nave deixa o roteiro.
+                </p>
+                <ScriptPhaseTable profile={profile} />
+              </>
+            ) : (
+              <ProfileChoice flipEta={flipEta} coastEta={draft.coastEta} onChange={(coastEta) => update({ coastEta })} />
+            )}
             {profile.crewRest && <RestChoice ratio={draft.restRatio} onChange={(restRatio) => update({ restRatio })} />}
             <div className="hull-panel mt-1 rounded-lg px-3 py-2">
               <SummaryRow label="Destino" value={routeName(draft.origin, target)} />
               <SummaryRow label="A bordo" value={CREW_LABEL[draft.crew].label} />
-              <SummaryRow label="Aceleração α" value={formatAccelG(draft.accelG)} />
+              <SummaryRow
+                label="Aceleração α"
+                value={profile.script ? `${scriptAccelRange(profile)} (1 g a bordo)` : formatAccelG(draft.accelG)}
+              />
               <SummaryRow label="Tempo de bordo" value={formatSpan(profile.tauTotal)} />
               <SummaryRow label="Tempo na Terra" value={formatSpan(profile.tTotal)} />
               {profile.crewRest && (

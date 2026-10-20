@@ -4,6 +4,7 @@ import { G0, log10GammaFromRapidity } from '../physics/RelativityEngine';
 import { CREW_LABEL, assessMission } from '../physics/accelerationPresets';
 import { CMB_VISIBLE_GAMMA, activeWindowsAt } from '../physics/criticalEvents';
 import { engineCommandAt } from '../physics/maneuvers';
+import { MISSION_SCRIPTS } from '../physics/missionScripts';
 import { adjacentTimeScale, naturalTimeScale, timeScaleStep } from '../store/timeScales';
 import { useFlightStore } from '../store/useFlightStore';
 import { SKY_IN_A_POINT_GAMMA, useCockpitUi } from '../ui/cockpitUi';
@@ -75,6 +76,8 @@ function MissionPlate() {
   const manual = useFlightStore((s) => s.profile.maneuvers !== undefined);
   const openPlanner = useCockpitUi((s) => s.openPlanner);
   const { viability, rests } = assessMission(crew, accelG, profile);
+  const script = profile.script && MISSION_SCRIPTS[profile.script.id];
+  const accels = script ? script.phases.filter((p) => p.accelG > 0).map((p) => p.accelG) : [];
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
       <Plate className="max-lg:hidden">Missão</Plate>
@@ -84,13 +87,16 @@ function MissionPlate() {
           {destination.name}
         </div>
         <div className="font-readout truncate text-[11px] text-cyan-200">
-          α {formatAccelG(accelG)} · {profile.coastEta === null ? 'acelerar e frear' : 'com cruzeiro'}
+          {script
+            ? `roteiro em ${script.phases.length} fases · ${formatAccelG(Math.min(...accels)).replace(' g', '')} a ${formatAccelG(Math.max(...accels))}`
+            : `α ${formatAccelG(accelG)} · ${profile.coastEta === null ? 'acelerar e frear' : 'com cruzeiro'}`}
         </div>
         <div className="truncate text-[11px] text-slate-300">
           {CREW_LABEL[crew].icon} {CREW_LABEL[crew].label}
           {viability === 'hypothetical' && <span className="text-rose-300"> · hipotética</span>}
           {viability === 'over-limit' && <span className="text-amber-300"> · além do limite humano</span>}
           {rests && <span className="text-emerald-300/90"> · com descansos</span>}
+          {script && <span className="text-violet-200/90"> · 1 g a bordo</span>}
         </div>
         <div className="font-readout truncate text-[10px] text-slate-500">
           {manual ? (
@@ -158,6 +164,9 @@ function Timeline() {
   const tau = useFlightStore((s) => s.tau);
   const tauTotal = useFlightStore((s) => s.profile.tauTotal);
   const seek = useFlightStore((s) => s.seek);
+  // Num roteiro, uma marca no começo de cada fase.
+  const script = useFlightStore((s) => s.profile.script);
+  const phaseStarts = script?.phases.slice(1).map((p) => p.startTau) ?? null;
   return (
     <div className="flex min-w-0 flex-col gap-0.5">
       <div className="flex items-baseline justify-between gap-2">
@@ -168,16 +177,25 @@ function Timeline() {
           {formatDuration(tau)} / {formatDuration(tauTotal)}
         </span>
       </div>
-      <input
-        type="range"
-        aria-label="Linha do tempo do voo (tempo próprio)"
-        className="w-full accent-cyan-400"
-        min={0}
-        max={tauTotal}
-        step="any"
-        value={tau}
-        onChange={(e) => seek(Number(e.target.value))}
-      />
+      <div className="relative">
+        <input
+          type="range"
+          aria-label="Linha do tempo do voo (tempo próprio)"
+          className="w-full accent-cyan-400"
+          min={0}
+          max={tauTotal}
+          step="any"
+          value={tau}
+          onChange={(e) => seek(Number(e.target.value))}
+        />
+        {phaseStarts && (
+          <div aria-hidden className="pointer-events-none absolute inset-x-[7px] -bottom-0.5 h-1.5">
+            {phaseStarts.map((t) => (
+              <span key={t} className="absolute top-0 h-full w-px bg-violet-300/80" style={{ left: `${(t / tauTotal) * 100}%` }} />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -342,19 +360,27 @@ function useEngine() {
   });
   const command = useFlightStore((s) => (s.ignitionCountdownS === null ? engineCommandAt(s.profile, s.tau) : null));
   const toggleEngine = useFlightStore((s) => s.toggleEngine);
-  return { state, command, toggleEngine };
+  // Num roteiro, quem comanda o motor é a história.
+  const scripted = useFlightStore((s) => s.profile.script !== undefined);
+  return { state, command, toggleEngine, scripted };
 }
 
 const COMMAND_HINT = { cut: 'toque para desligar', relight: 'toque para religar' } as const;
 
 /** Lâmpada do motor, que também é o botão para desligá-lo (rampa até 0) e religá-lo (piloto automático). */
 function EngineControl() {
-  const { state, command, toggleEngine } = useEngine();
+  const { state, command, toggleEngine, scripted } = useEngine();
   const thrustG = useFlightStore((s) => s.flight.thrustAccel / G0);
   // Num descanso da tripulação o motor não aceita comandos: o piloto automático o religa.
   const relightIn = useFlightStore((s) => (s.flight.crewRest ? s.crewStatus?.untilChangeS ?? null : null));
   const { label, lamp } = ENGINE[state];
-  const hint = command ? COMMAND_HINT[command] : relightIn !== null ? `religa em ${formatSpan(relightIn)}` : '\u00a0';
+  const hint = command
+    ? COMMAND_HINT[command]
+    : relightIn !== null
+      ? `religa em ${formatSpan(relightIn)}`
+      : scripted
+        ? 'segue o roteiro'
+        : '\u00a0';
   return (
     <div className="flex flex-col items-center gap-1">
       <Plate help="engine">Motor</Plate>
@@ -390,10 +416,13 @@ const CREW_TONE: Readonly<Record<CrewTone, { lamp: string; text: string; bar: st
 function CrewGauge() {
   const status = useFlightStore((s) => s.crewStatus);
   const accelG = useFlightStore((s) => s.accelG);
+  // Num roteiro (Tau Zero), os campos internos seguram o peso: não há carga para medir.
+  const shielded = useFlightStore((s) => s.profile.script !== undefined);
   if (!status) return null;
   const { label, detail, tone } = crewText(status, accelG);
   const style = CREW_TONE[tone];
-  const shownStrain = status.condition === 'hypothetical' ? null : status.strain;
+  // Sem carga para mostrar: a hipotética (não sobreviveria) e a nave com campos internos (o peso de sempre).
+  const shownStrain = status.condition === 'hypothetical' || status.condition === 'fields' ? null : status.strain;
   return (
     <div className="flex min-w-0 flex-col gap-0.5" role="status" aria-label={`Tripulação: ${label}, ${detail}`}>
       <Plate help="crew" className="max-lg:hidden">
@@ -405,17 +434,19 @@ function CrewGauge() {
           <span className="font-display text-[8px] tracking-[0.15em] text-slate-400 uppercase lg:hidden">Tripulação</span>
           <InfoTip id="crew" className="lg:hidden" />
           <span className={`font-display min-w-0 truncate text-[9px] tracking-[0.12em] uppercase ${style.text}`}>{label}</span>
-          {shownStrain !== null && (
+          {shownStrain !== null && !shielded && (
             <span className="font-readout ml-auto w-[3.2em] shrink-0 text-right text-[10px] text-slate-300 tabular-nums">
               {formatStrain(shownStrain)}
             </span>
           )}
         </div>
-        <div className="relative h-1 overflow-hidden rounded-full bg-slate-800" aria-hidden>
-          <div className={`h-full rounded-full ${style.bar}`} style={{ width: `${Math.min(shownStrain ?? 1, 1) * 100}%` }} />
-          {/* As queimas planejadas param em 90 % do limite. */}
-          <div className="absolute inset-y-0 left-[90%] w-px bg-slate-300/60" />
-        </div>
+        {!shielded && (
+          <div className="relative h-1 overflow-hidden rounded-full bg-slate-800" aria-hidden>
+            <div className={`h-full rounded-full ${style.bar}`} style={{ width: `${Math.min(shownStrain ?? 1, 1) * 100}%` }} />
+            {/* As queimas planejadas param em 90 % do limite. */}
+            <div className="absolute inset-y-0 left-[90%] w-px bg-slate-300/60" />
+          </div>
+        )}
         <div className="font-readout truncate text-[10px] text-slate-400 tabular-nums">{detail}</div>
       </div>
     </div>

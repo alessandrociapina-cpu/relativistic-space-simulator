@@ -1,8 +1,9 @@
+import { LIGHT_YEAR_M } from '../physics/RelativityEngine';
 import { blackbodyCssColor } from '../physics/blackbody';
 import { AU_M, arrivalDistanceM, targetViewDistanceM } from '../physics/sky';
 import { useFlightStore } from '../store/useFlightStore';
 import { formatRouteDistance } from '../ui/format';
-import { OORT_CLOUD_AU, SATURN_AU, routeGeometry, routePosition, sunMarkerPosition } from '../ui/routeScale';
+import { OORT_CLOUD_AU, SATURN_AU, routeGeometry, routeMarkerPosition, routePosition, sunMarkerPosition } from '../ui/routeScale';
 import { CockpitMonitor } from './CockpitMonitor';
 import { InfoTip } from './InfoTip';
 
@@ -12,6 +13,13 @@ const LINE_Y = 104;
 const xAt = (u: number) => X0 + (X1 - X0) * u;
 /** Menor distância entre dois marcos no mapa (fração da largura) para os rótulos não se sobreporem. */
 const MARKER_MIN_GAP = 0.2;
+/** No vazio não há alvo a parar diante dele: a escala log da segunda metade vai até 1 km do ponto final. */
+const MIN_ARRIVAL_M = 1e3;
+/** Os marcos do mapa num roteiro (Tau Zero): onde o freio quebrou e onde a nave sai da galáxia. */
+const SCRIPT_MARKERS = [
+  { ly: 10, label: 'NEBULOSA' },
+  { ly: 1e5, label: 'FORA DA GALÁXIA' },
+] as const;
 
 /** Estado da rota, comum ao monitor e à faixa do painel no celular. */
 function useRoute() {
@@ -21,20 +29,22 @@ function useRoute() {
   const origin = useFlightStore((s) => s.origin);
   const playing = useFlightStore((s) => s.playing);
 
-  const geometry = routeGeometry(profile, arrivalDistanceM(destination), origin.homeOrbitM);
+  const geometry = routeGeometry(profile, Math.max(arrivalDistanceM(destination), MIN_ARRIVAL_M), origin.homeOrbitM);
   const halfwayAu = geometry.halfwaySunDistanceM / AU_M;
-  // Saturno e a Nuvem de Oort só na partida do Sol.
-  const markers = (origin.solarSystem
-    ? [
-        { au: SATURN_AU, label: 'DISTÂNCIA DE SATURNO' },
-        { au: OORT_CLOUD_AU, label: 'NUVEM DE OORT' },
-      ]
-    : []
-  )
-    .filter((m) => m.au < halfwayAu)
-    .map((m) => ({ ...m, u: sunMarkerPosition(m.au, geometry) }))
-    // Nas viagens muito longas, a escala log junta Saturno e a Nuvem de Oort perto do Sol: fica só o mais distante.
-    .filter((m, i, all) => all.every((o, j) => j <= i || o.u - m.u > MARKER_MIN_GAP));
+  // Num roteiro, os marcos da história; senão, Saturno e a Nuvem de Oort (só na partida do Sol).
+  const markers = profile.script
+    ? SCRIPT_MARKERS.map((m) => ({ label: m.label, u: routeMarkerPosition(m.ly * LIGHT_YEAR_M, profile, geometry) }))
+    : (origin.solarSystem
+        ? [
+            { au: SATURN_AU, label: 'DISTÂNCIA DE SATURNO' },
+            { au: OORT_CLOUD_AU, label: 'NUVEM DE OORT' },
+          ]
+        : []
+      )
+        .filter((m) => m.au < halfwayAu)
+        .map((m) => ({ label: m.label, u: sunMarkerPosition(m.au, geometry) }))
+        // Nas viagens muito longas, a escala log junta Saturno e a Nuvem de Oort perto do Sol: fica só o mais distante.
+        .filter((m, i, all) => all.every((o, j) => j <= i || o.u - m.u > MARKER_MIN_GAP));
 
   const status =
     flight.phase === 'arrived'
@@ -78,13 +88,15 @@ function RouteMap() {
       <rect width="320" height="240" fill="url(#route-grid)" />
       <line x1={X0} y1={LINE_Y} x2={X1} y2={LINE_Y} stroke="#38bdf8" strokeOpacity="0.55" strokeWidth="1.5" />
       {/* Marcos intermediários: tique na linha e rótulo na segunda fileira. */}
-      {markers.map((m) => {
+      {markers.map((m, i) => {
         const x = xAt(m.u);
+        // Rótulos alternados em duas fileiras, para marcos próximos não se sobreporem.
+        const drop = i % 2 === 0 ? 0 : 12;
         return (
           <g key={m.label}>
             <line x1={x} y1={LINE_Y - 5} x2={x} y2={LINE_Y + 5} stroke="#94a3b8" />
-            <line x1={x} y1={LINE_Y + 5} x2={x} y2={LINE_Y + 28} stroke="#94a3b8" strokeOpacity="0.35" />
-            <text x={x} y={LINE_Y + 38} fill="#94a3b8" fontSize="7.5" textAnchor="middle">
+            <line x1={x} y1={LINE_Y + 5} x2={x} y2={LINE_Y + 28 + drop} stroke="#94a3b8" strokeOpacity="0.35" />
+            <text x={x} y={LINE_Y + 38 + drop} fill="#94a3b8" fontSize="7.5" textAnchor="middle">
               {m.label}
             </text>
           </g>

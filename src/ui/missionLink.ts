@@ -32,6 +32,8 @@ const CREW_KINDS: readonly CrewKind[] = ['crewed', 'robotic', 'eridian'];
 export function sciFiChoice(mission: SciFiMission, restRatio: number): MissionChoice {
   const origin = ORIGINS[mission.originId ?? 'sol'];
   const destination = missionDestination(origin, mission.destinationId);
+  // Um roteiro define o voo pelas fases (o cruzeiro não se aplica).
+  if (mission.script) return { origin, destination, crew: mission.crew, accelG: mission.accelG, coastEta: null, restRatio, script: mission.script };
   const coastEta = plannedCoastEta(destination, mission.accelG, mission.coastEta, mission.crew, restRatio);
   return { origin, destination, crew: mission.crew, accelG: mission.accelG, coastEta, restRatio };
 }
@@ -41,6 +43,9 @@ export function sciFiChoice(mission: SciFiMission, restRatio: number): MissionCh
  * double): a aceleração de um preset continua sendo a do preset e a missão da ficção é reconhecida.
  */
 export function missionHash(choice: MissionChoice): string {
+  // Um roteiro vai pelo link da missão da ficção que o contém.
+  const scripted = choice.script && SCIFI_MISSIONS.find((m) => m.script === choice.script);
+  if (scripted) return sciFiHash(scripted, choice.restRatio);
   const params = new URLSearchParams();
   if (choice.origin.id !== 'sol') params.set('o', choice.origin.id);
   params.set('d', choice.destination.id);

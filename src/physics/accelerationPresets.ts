@@ -8,6 +8,7 @@
  */
 import type { MissionProfile } from './RelativityEngine';
 import { DEFAULT_ACCEL_G, type DestinationId } from './destinations';
+import type { ScriptId } from './missionScripts';
 import type { OriginId } from './origins';
 
 /**
@@ -271,8 +272,16 @@ export interface MissionAssessment {
   readonly rests: boolean;
 }
 
+/** Num roteiro (Tau Zero), os campos internos da nave seguram o peso de sempre a bordo. */
+const SHIELDED: Endurance = {
+  enduranceS: Infinity,
+  text: 'os campos internos da nave seguram 1 g a bordo',
+  protection: 'campos internos da nave',
+};
+
 /** A nave aguenta o empuxo desta missão? */
 export function assessMission(crew: CrewKind, accelG: number, profile: MissionProfile): MissionAssessment {
+  if (profile.script) return { viability: 'ok', endurance: SHIELDED, burnS: profile.burnEndTau, rests: false };
   const endurance = enduranceFor(crew, accelG);
   const burnS = longestBurnS(profile);
   const viability: MissionViability =
@@ -310,6 +319,8 @@ export interface SciFiMission {
   readonly withoutRests?: string;
   /** Um projeto real, não uma obra de ficção. */
   readonly real?: true;
+  /** Um roteiro em fases (§4.2.11): as fases definem o voo, e `accelG` é a aceleração mais alta. */
+  readonly script?: ScriptId;
 }
 
 export const SCIFI_MISSIONS: readonly SciFiMission[] = [
@@ -424,33 +435,36 @@ export const SCIFI_MISSIONS: readonly SciFiMission[] = [
   },
   {
     id: 'tau-zero-virgem',
-    label: 'Leonora Christine · sem freio',
+    label: 'Leonora Christine · a fuga',
     work: 'Tau Zero',
-    credit: 'romance de Poul Anderson (1970)',
-    destinationId: 'virgoCluster',
+    credit: 'romance de Poul Anderson (1970), até o capítulo 10',
+    destinationId: 'intergalacticVoid',
     crew: 'crewed',
-    accelG: 1,
+    accelG: 10,
     coastEta: null,
+    script: 'tau-zero',
     note:
-      'Tau Zero: com o freio avariado, a Leonora Christine segue a 1 g para fora da Via Láctea. Até o Aglomerado de ' +
-      'Virgem, ~34,5 anos de bordo contra 54 milhões de anos na Terra.',
+      'Tau Zero: com o freio avariado, a Leonora Christine foge da galáxia a 10 g e para no vazio, a 40 milhões de ' +
+      'anos-luz rumo a Virgem, em seis fases: menos de 5 anos de bordo e 40 milhões de anos na Terra.',
     story:
-      'No caminho, uma nebulosa avaria o sistema de frenagem. Desligar o motor para consertá-lo seria a morte: o ' +
-      'mesmo campo magnético que recolhe o combustível protege a tripulação do gás interestelar, mortal àquela ' +
-      'velocidade. A saída é acelerar para fora da galáxia, até um vácuo quase perfeito. O fator τ = √(1 − v²/c²) = ' +
-      '1/γ, a razão entre o tempo de bordo e o da Terra, cai cada vez mais: a tripulação vê galáxias passarem e ' +
-      'chega a assistir ao fim do Universo.',
+      'No caminho para Beta Virginis, uma nebulosa avaria o sistema de frenagem. Desligar o motor para consertá-lo ' +
+      'seria a morte: o mesmo campo magnético que recolhe o combustível protege a tripulação do gás interestelar, ' +
+      'mortal àquela velocidade. No capítulo 10, a tripulação decide acelerar para fora da galáxia, a dez gravidades ' +
+      'ou mais, até um vazio de gás tão rarefeito que os campos possam ser desligados, rumo a um aglomerado de ' +
+      'galáxias a ~40 milhões de anos-luz. O fator τ = √(1 − v²/c²) = 1/γ, a razão entre o tempo de bordo e o da ' +
+      'Terra, cai cada vez mais: a tripulação vê galáxias passarem e, mais adiante no livro, chega a assistir ao ' +
+      'fim do Universo.',
     physics:
-      'Com aceleração constante, o tempo de bordo cresce só com o logaritmo da distância, τ ≈ 2(c/α) ln(αD/c²): a ' +
-      '1 g, os 54 milhões de anos-luz até M87, no centro do Aglomerado de Virgem, levam ~34,5 anos de bordo, com γ ≈ ' +
-      '2,8 × 10⁷ no meio do caminho. Um foguete de fótons precisaria de ~3 × 10¹⁵ vezes a própria massa em ' +
-      'combustível; o estatorreator escapa disso recolhendo o hidrogênio do caminho, mas para 1 g o campo teria de ' +
-      'varrer o gás de um círculo de ~3\u00a0500 km de raio (estimativa de Peter Schattschneider).',
+      'Com aceleração própria constante, γ cresce exponencialmente com o tempo de bordo: a 10 g, multiplica por e ≈ ' +
+      '2,7 a cada 35 dias. Em um ano e meio de bordo a nave passa de γ ≈ 33 a 1,5 × 10⁸; 30 dias de motor desligado ' +
+      'valem então 12 milhões de anos lá fora. Um foguete de fótons precisaria de e^(2η) ≈ 10¹⁷ vezes a própria ' +
+      'massa em combustível; o estatorreator escapa disso recolhendo o hidrogênio do caminho.',
     simulator:
-      'No livro a nave não para em destino nenhum, e o vazio entre os aglomerados não é um ponto do mapa: aqui, a ' +
-      'escala da fuga é a distância até o Aglomerado de Virgem, com flip no meio do caminho e frenagem até M87. ' +
-      'Virgem fica perto do polo norte galáctico: a nave sai por cima do disco e vê a Via Láctea de fora, cada vez ' +
-      'menor atrás dela. A 1 g, sem descansos.',
+      'A viagem tem seis fases e cartões que explicam cada uma (a partida a 0,5 g, 3 g rumo a Beta Virginis, a ' +
+      'nebulosa e a decisão, a fuga a 10 g, o reparo com o motor desligado e a frenagem), e o voo pausa em cada uma. ' +
+      'Os números antes do capítulo 10 (0,5 g, 3 g, a nebulosa a 10 anos-luz) e os 30 dias de reparo são estimativas ' +
+      'do simulador. No livro a rota espirala pelo centro da galáxia; aqui ela segue reta rumo a Virgem, que fica ' +
+      'perto do polo norte galáctico. A bordo, os campos internos da nave seguram 1 g.',
   },
   {
     id: 'expanse',
@@ -540,9 +554,11 @@ export const findSciFiMission = (choice: {
   readonly crew: CrewKind;
   readonly accelG: number;
   readonly coastEta: number | null;
+  readonly script?: ScriptId | undefined;
 }): SciFiMission | undefined =>
   SCIFI_MISSIONS.find(
     (m) =>
+      m.script === choice.script &&
       (m.originId ?? 'sol') === choice.originId &&
       m.destinationId === choice.destinationId &&
       m.crew === choice.crew &&

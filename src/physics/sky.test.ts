@@ -18,7 +18,8 @@ describe('raios angulares do Sol e do alvo', () => {
     for (const d of DESTINATION_LIST) {
       const p = destinationMissionProfile(d);
       const r = computeBodyAngularRadii(computeFlightState(p, p.tauTotal), d);
-      expect(r.targetRadiusRad).toBeCloseTo(Math.asin(1 / ARRIVAL_STANDOFF_RADII[d.kind]), 12);
+      // No vazio intergaláctico não há alvo para desenhar.
+      expect(r.targetRadiusRad).toBeCloseTo(d.kind === 'void' ? 0 : Math.asin(1 / ARRIVAL_STANDOFF_RADII[d.kind]), 12);
     }
     const arrival = computeBodyAngularRadii(computeFlightState(profile, profile.tauTotal), proxima);
     expect((2 * arrival.targetRadiusRad * 180) / Math.PI / 70).toBeGreaterThan(0.5);

@@ -10,7 +10,7 @@ import {
   findSciFiMission,
   presetsFor,
 } from './accelerationPresets';
-import { missionProfileFor } from './crewRest';
+import { choiceProfile } from './crewRest';
 import { ORIGINS, missionDestination } from './origins';
 
 const proxima = DESTINATIONS.proxima;
@@ -90,7 +90,7 @@ const scifiTarget = (id: string) => {
 };
 const scifiProfile = (id: string, restRatio?: number) => {
   const m = scifi(id);
-  return missionProfileFor(scifiTarget(id), m.accelG, m.coastEta, m.crew, restRatio);
+  return choiceProfile({ destination: scifiTarget(id), accelG: m.accelG, coastEta: m.coastEta, crew: m.crew, script: m.script, ...(restRatio && { restRatio }) });
 };
 const choiceOf = (id: string) => ({ ...scifi(id), originId: scifi(id).originId ?? ('sol' as const) });
 
@@ -180,17 +180,22 @@ describe('missões da ficção científica hard e projetos reais', () => {
     expect(rocketMassRatio(profile)).toBeCloseTo(1500, -2);
   });
 
-  it('Tau Zero, sem freio: 1 g até o Aglomerado de Virgem em ~34,5 anos de bordo e 54 milhões de anos na Terra', () => {
-    expect(scifi('tau-zero-virgem').destinationId).toBe('virgoCluster');
+  it('Tau Zero, a fuga: o roteiro do capítulo 10, em seis fases até o vazio, a 40 milhões de anos-luz rumo a Virgem', () => {
+    const m = scifi('tau-zero-virgem');
+    expect(m.script).toBe('tau-zero');
+    expect(m.destinationId).toBe('intergalacticVoid');
     const profile = scifiProfile('tau-zero-virgem');
-    expect(profile.tauTotal / YEAR).toBeCloseTo(34.5, 1);
-    expect(profile.tTotal / YEAR / 1e6).toBeCloseTo(53.8, 1);
-    expect(profile.gammaMax / 1e7).toBeCloseTo(2.78, 2);
-    // O tempo de bordo cresce com o logaritmo da distância: τ ≈ 2(c/α) ln(αD/c²).
-    const a = 9.80665;
-    const approx = ((2 * 299_792_458) / a) * Math.log((a * DESTINATIONS.virgoCluster.distanceLy * 9.4607304725808e15) / 299_792_458 ** 2);
-    expect(profile.tauTotal / approx).toBeCloseTo(1, 6);
-    expect(rocketMassRatio(profile) / 1e15).toBeCloseTo(3.08, 2);
+    expect(profile.script?.phases).toHaveLength(6);
+    expect(profile.tauTotal / YEAR).toBeCloseTo(4.89, 2);
+    expect(profile.tTotal / YEAR / 1e6).toBeCloseTo(40, 3);
+    expect(profile.gammaMax / 1e8).toBeCloseTo(1.45, 2);
+    // e^(2η) ≈ 10¹⁷: o foguete de fótons não daria conta; o estatorreator recolhe o combustível do caminho.
+    expect(Math.log10(rocketMassRatio(profile))).toBeCloseTo(16.9, 1);
+    // Os campos internos seguram 1 g a bordo: o veredito é suportável, sem descansos.
+    expect(assessMission(m.crew, m.accelG, profile).endurance.enduranceS).toBe(Infinity);
+    // A escolha da ficção leva o roteiro, e o link volta a ela.
+    expect(findSciFiMission({ ...choiceOf('tau-zero-virgem') })?.id).toBe('tau-zero-virgem');
+    expect(findSciFiMission({ ...choiceOf('tau-zero-virgem'), script: undefined })).toBeUndefined();
   });
 
   it('Starshot: queima de ~3,4 min até 0,2c e ~21 anos de viagem', () => {

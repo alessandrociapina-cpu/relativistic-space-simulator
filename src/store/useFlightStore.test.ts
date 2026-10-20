@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { SCIFI_MISSIONS } from '../physics/accelerationPresets';
 import { DEFAULT_ACCEL_G } from '../physics/destinations';
+import { engineCommandAt } from '../physics/maneuvers';
+import { sciFiChoice } from '../ui/missionLink';
+import { phaseTimeScale } from './timeScales';
 import { COUNTDOWN_FROM_S, onFlightEvent, type FlightEvent } from './flightEvents';
 import { useFlightStore } from './useFlightStore';
 
@@ -353,5 +357,62 @@ describe('descansos da tripulação no loop', () => {
       { type: 'crew-rest', resting: false },
     ]);
     expect(store().crewStatus?.condition).toBe('thrust');
+  });
+});
+
+describe('roteiro de Tau Zero (§4.2.11)', () => {
+  const tauZero = () => sciFiChoice(SCIFI_MISSIONS.find((m) => m.script === 'tau-zero')!, 3);
+  const phaseSpan = (id: string) => {
+    const p = store().profile.script!.phases.find((x) => x.id === id)!;
+    return p.endTau - p.startTau;
+  };
+
+  it('abre no cartão da primeira fase, no ritmo dela, com os campos internos a bordo e o motor travado', () => {
+    store().configureMission(tauZero());
+    expect(store().script).toBe('tau-zero');
+    expect(store().beat).toMatchObject({ id: 'partida', kind: 'phase', tau: 0 });
+    expect(store().timeScale).toBe(phaseTimeScale(phaseSpan('partida')));
+    expect(store().crewStatus?.condition).toBe('ready');
+    launch();
+    expect(store().beat).toBeNull();
+    store().tick(1);
+    expect(store().crewStatus).toMatchObject({ condition: 'fields', accelG: 1, strain: 0 });
+    expect(engineCommandAt(store().profile, store().tau)).toBeNull();
+  });
+
+  it('para em cada passo da história, com o cartão, e cada fase começa no ritmo dela', () => {
+    store().configureMission(tauZero());
+    launch();
+    const beats = store().beats;
+    for (const next of beats.slice(1)) {
+      run(1, 100_000, () => !store().playing);
+      expect(store().beat).toEqual(next);
+      expect(store().tau).toBe(next.tau);
+      if (next.kind === 'phase') expect(store().timeScale).toBe(phaseTimeScale(phaseSpan(next.id)));
+      if (next.kind === 'arrival') break;
+      // Retomar fecha o cartão; a fase continua na faixa de etapas.
+      store().togglePlay();
+      expect(store().beat).toBeNull();
+    }
+    expect(store().flight.phase).toBe('arrived');
+  });
+
+  it('sem pausa, os passos abrem o cartão com o voo andando; a faixa de etapas leva a qualquer passo', () => {
+    store().configureMission(tauZero());
+    store().setPauseAtBeats(false);
+    launch();
+    run(1, 100_000, () => store().beat !== null);
+    expect(store().beat?.id).toBe('cruzeiro');
+    expect(store().playing).toBe(true);
+    store().goToBeat('reparo');
+    expect(store()).toMatchObject({ playing: false, beat: { id: 'reparo' } });
+    expect(store().flight).toMatchObject({ phase: 'coasting', engine: 'off' });
+    expect(store().crewStatus).toMatchObject({ condition: 'fields', accelG: 0 });
+    // O scrub fecha o cartão; trocar de missão sai do roteiro.
+    store().seek(store().tau * 0.5);
+    expect(store().beat).toBeNull();
+    store().setAccelG(1);
+    expect(store().script).toBeUndefined();
+    expect(store().beats).toEqual([]);
   });
 });

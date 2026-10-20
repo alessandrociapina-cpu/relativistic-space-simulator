@@ -28,7 +28,7 @@ uniform vec3  uTargetDir;
 uniform float uTargetRadiusRad;
 uniform float uEinsteinRadiusRad; // raio de Einstein físico do buraco negro, 2√(GM/(c²D)); 0 nos outros alvos
 uniform float uTargetTemp;
-uniform int   uTargetType;       // 0 = estrela, 1 = buraco negro (Sgr A*), 2 = galáxia (Andrômeda)
+uniform int   uTargetType;       // 0 = estrela, 1 = buraco negro (Sgr A*), 2 = galáxia (Andrômeda), 3 = vazio (nenhum alvo)
 uniform float uTargetPointAmp;   // o alvo como estrela pontual, antes de virar disco
 uniform float uGalaxyGain;       // brilho superficial da galáxia-alvo (escala da Via Láctea)
 uniform float uGalaxySpiral;     // 1 = espiral (Andrômeda), 0 = elíptica gigante (M87, no Aglomerado de Virgem)
@@ -429,14 +429,14 @@ vec3 renderSky(RelativisticRay ray) {
     // beaming (como as estrelas do catálogo). O ponto fica fora da oclusão do próprio disco, que é menor
     // que um pixel enquanto ele aparece.
     float targetCoverage = 0.0;
-    vec3 targetDisk;
+    vec3 targetDisk = vec3(0.0);
     vec3 targetPoint = vec3(0.0);
     if (uTargetType == 0) {
         targetDisk = renderRealisticStarDisk(ray.sourceDir, uTargetDir, uTargetRadiusRad, uTargetTemp, ray.doppler, targetCoverage) * uTargetGain;
         targetPoint = renderPointSource(ray, uTargetDir, uTargetPointAmp, uTargetTemp, uTargetRadiusRad);
     } else if (uTargetType == 1) {
         targetDisk = renderBlackHoleTarget(ray.sourceDir, uTargetDir, uTargetRadiusRad, uTargetTemp, ray.doppler, targetCoverage) * ray.psfDilution;
-    } else {
+    } else if (uTargetType == 2) {
         targetDisk = renderGalaxyTarget(ray.sourceDir, uTargetDir, uTargetRadiusRad, uTargetTemp, ray.doppler) * uGalaxyGain * ray.psfDilution;
     }
     float occlusion = max(sunCoverage, targetCoverage);

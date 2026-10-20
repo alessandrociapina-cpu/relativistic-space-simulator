@@ -6,6 +6,8 @@
  * essa subtração perde todos os dígitos, mesmo em 64 bits.
  */
 
+import type { ScriptPlan } from './missionScripts';
+
 // ── §4.1 Constantes físicas exatas ───────────────────────────────────────────
 /** Velocidade da luz (m/s). */
 export const C = 299_792_458;
@@ -83,6 +85,8 @@ export interface MissionProfile {
   readonly crewRest?: CrewRestCycle;
   /** O voo depois de o piloto desligar ou religar o motor (ausente: o plano). */
   readonly maneuvers?: Maneuvers;
+  /** Roteiro em fases (§4.2.11): onde cada fase e cada marco da história ficam no voo. */
+  readonly script?: ScriptPlan;
 }
 
 /** Queimas e descansos alternados para a tripulação se recuperar (§4.2.9). */

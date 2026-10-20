@@ -47,7 +47,8 @@ export const useExplainSettings = create<ExplainSettings>()((set) => ({
 /**
  * No modo Explicar, pausar no meio do voo abre o painel de efeitos;
  * retomar o fecha. A chegada e a troca de modo, que também param o relógio,
- * não abrem. O scrub tira o destaque vindo do cartão, que era de outro instante.
+ * não abrem, nem a pausa num passo da história de um roteiro (o cartão dele
+ * já explica). O scrub tira o destaque vindo do cartão, que era de outro instante.
  */
 export function useEffectsPanelOnPause() {
   useEffect(
@@ -63,7 +64,7 @@ export function useEffectsPanelOnPause() {
           return;
         }
         const midFlight = s.tau > 0 && s.tau < s.profile.tauTotal;
-        if (explain.enabled && midFlight && !explain.panelOpen) explain.openPanel();
+        if (explain.enabled && midFlight && !explain.panelOpen && s.beat === null) explain.openPanel();
       }),
     [],
   );

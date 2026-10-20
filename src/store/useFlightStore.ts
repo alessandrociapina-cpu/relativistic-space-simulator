@@ -5,8 +5,9 @@ import { DESTINATIONS, type Destination, type DestinationId } from '../physics/d
 import {
   DEFAULT_REST_RATIO,
   crewStatusAt,
+  choiceProfile,
   crewToleranceFor,
-  missionProfileFor,
+  shieldedCrewStatus,
   type CrewStatus,
   type CrewTolerance,
 } from '../physics/crewRest';
@@ -18,10 +19,11 @@ import {
   type PhotometryAndEyeState,
 } from '../physics/EyeAndPhotometry';
 import { cutEngine, engineCommandAt, engineRampTau, relightEngine } from '../physics/maneuvers';
+import { MISSION_SCRIPTS, scriptBeats, type ScriptBeat, type ScriptId } from '../physics/missionScripts';
 import { ORIGINS, canTravel, missionDestination, type Origin } from '../physics/origins';
 import { computeBodyAngularRadii } from '../physics/sky';
 import { activeEffects, newAnnouncements, type EffectId } from '../ui/explanations';
-import { stepDownTimeScale } from './timeScales';
+import { phaseTimeScale, stepDownTimeScale } from './timeScales';
 import {
   COUNTDOWN_FROM_S,
   computeMilestones,
@@ -51,6 +53,8 @@ export interface MissionChoice {
   readonly crew: CrewKind;
   /** Com piloto humano e descansos: quantas vezes o descanso dura a queima (3 ou 5). */
   readonly restRatio: number;
+  /** Roteiro em fases (§4.2.11), como a fuga de Tau Zero: as fases definem o voo, não `accelG` e `coastEta`. */
+  readonly script?: ScriptId | undefined;
 }
 
 export interface FlightStore extends MissionChoice {
@@ -85,6 +89,12 @@ export interface FlightStore extends MissionChoice {
   readonly insight: EffectId | null;
   /** Efeitos já anunciados nesta missão: cada um ganha um cartão por voo. */
   readonly announcedEffects: readonly EffectId[];
+  /** Os passos da história de um roteiro (o começo de cada fase, os marcos e a chegada); vazio sem roteiro. */
+  readonly beats: readonly ScriptBeat[];
+  /** O passo da história no cartão do roteiro; `null` fora dele (o voo segue ou o usuário fechou). */
+  readonly beat: ScriptBeat | null;
+  /** Num roteiro, pausa em cada passo da história para o cartão ser lido. */
+  readonly pauseAtBeats: boolean;
 
   /** Nova missão (planejamento): parada em τ = 0. */
   configureMission: (choice: MissionChoice) => void;
@@ -100,6 +110,11 @@ export interface FlightStore extends MissionChoice {
   /** Desliga o motor (a aceleração cai aos poucos até zero) ou o religa (piloto automático até o alvo). */
   toggleEngine: () => void;
   showInsight: (id: EffectId | null) => void;
+  /** Vai a um passo da história (a faixa de etapas): pausa no instante dele, com o cartão aberto. */
+  goToBeat: (id: string) => void;
+  /** Fecha (`null`) ou abre o cartão de um passo da história sem mexer no voo. */
+  showBeat: (id: string | null) => void;
+  setPauseAtBeats: (on: boolean) => void;
   /** Avança o relógio de bordo por `dtRealS` segundos reais (chamado a cada frame). */
   tick: (dtRealS: number) => void;
 }
@@ -118,7 +133,10 @@ function deriveCrewStatus(
   flight: FlightState,
   { profile, crewTolerance, playing }: Pick<FlightStore, 'profile' | 'crewTolerance' | 'playing'>,
 ): CrewStatus | null {
-  return crewTolerance && crewStatusAt(profile, flight, crewTolerance, playing || flight.tau > 0);
+  const started = playing || flight.tau > 0;
+  // Num roteiro, os campos internos da nave seguram o peso de sempre a bordo (Tau Zero).
+  if (profile.script) return shieldedCrewStatus(flight, started, MISSION_SCRIPTS[profile.script.id].interiorG);
+  return crewTolerance && crewStatusAt(profile, flight, crewTolerance, started);
 }
 
 /** Explicações de um voo novo: nenhum efeito anunciado ainda. */
@@ -126,7 +144,7 @@ function newFlightLog(): Pick<FlightStore, 'insight' | 'announcedEffects'> {
   return { insight: null, announcedEffects: [] };
 }
 
-/** O voo efetivo e o que depende dele: janelas críticas, marcos e a curva de luz. */
+/** O voo efetivo e o que depende dele: janelas críticas, marcos, a curva de luz e os passos do roteiro. */
 function flightPlan(profile: MissionProfile) {
   const criticalWindows = computeCriticalWindows(profile);
   return {
@@ -134,16 +152,25 @@ function flightPlan(profile: MissionProfile) {
     criticalWindows,
     milestones: computeMilestones(profile, criticalWindows),
     eyeTimeline: computeEyeTimeline(profile),
+    beats: profile.script ? scriptBeats(profile.script, profile.tauTotal) : [],
   };
 }
 
+/** O degrau de tempo com que uma fase do roteiro começa (~40 s na tela); `null` se o passo não é uma fase. */
+function beatTimeScale(profile: MissionProfile, beat: ScriptBeat): number | null {
+  const phase = beat.kind === 'phase' ? profile.script?.phases.find((p) => p.id === beat.id) : undefined;
+  return phase ? phaseTimeScale(phase.endTau - phase.startTau) : null;
+}
+
 /** Nova missão parada no instante da partida. */
-function newMission({ origin, destination: chosen, accelG, coastEta, crew, restRatio }: MissionChoice) {
+function newMission({ origin, destination: chosen, accelG, coastEta, crew, restRatio, script }: MissionChoice) {
   // Partida e chegada na mesma estrela não existem: volta à partida da Terra.
   const from = canTravel(origin, chosen.id) ? origin : ORIGINS.sol;
   const destination = missionDestination(from, chosen);
-  // Com piloto humano além da tolerância contínua, o plano alterna queimas e descansos.
-  const profile = missionProfileFor(destination, accelG, coastEta, crew, restRatio);
+  // Um roteiro define o voo pelas fases; sem ele, com piloto humano além da tolerância contínua, o plano
+  // alterna queimas e descansos.
+  const profile = choiceProfile({ destination, accelG, coastEta, crew, restRatio, script });
+  const plan = flightPlan(profile);
   return {
     origin: from,
     destination,
@@ -151,9 +178,12 @@ function newMission({ origin, destination: chosen, accelG, coastEta, crew, restR
     coastEta,
     crew,
     restRatio,
-    crewTolerance: crew === 'crewed' ? crewToleranceFor(accelG, restRatio) : null,
+    script,
+    crewTolerance: crew === 'crewed' ? crewToleranceFor(script ? 1 : accelG, restRatio) : null,
     plannedProfile: profile,
-    ...flightPlan(profile),
+    ...plan,
+    // O roteiro abre no cartão da primeira fase.
+    beat: plan.beats[0] ?? null,
     tau: 0,
     playing: false,
     ignitionCountdownS: null,
@@ -184,10 +214,14 @@ export const useFlightStore = create<FlightStore>()((set, get) => {
     crew: 'crewed',
     restRatio: DEFAULT_REST_RATIO,
   });
-  /** Troca de missão: começa sempre em tempo real (1 s/s); o painel sugere acelerar. */
+  /**
+   * Troca de missão: começa sempre em tempo real (1 s/s) e o painel sugere acelerar; um roteiro começa no
+   * ritmo da primeira fase. Mudar a aceleração, o perfil ou o destino deixa o roteiro.
+   */
   const remission = (patch: Partial<MissionChoice>) => {
     const { origin, destination, accelG, coastEta, crew, restRatio } = get();
-    update({ ...newMission({ origin, destination, accelG, coastEta, crew, restRatio, ...patch }), timeScale: 1 });
+    const mission = newMission({ origin, destination, accelG, coastEta, crew, restRatio, ...patch });
+    update({ ...mission, timeScale: (mission.beat && beatTimeScale(mission.profile, mission.beat)) ?? 1 });
   };
   const initialFlight = computeFlightState(initial.profile, 0);
 
@@ -195,6 +229,7 @@ export const useFlightStore = create<FlightStore>()((set, get) => {
     ...initial,
     timeScale: 1,
     autoStepDown: true,
+    pauseAtBeats: true,
     timeScaleTouched: false,
     flight: initialFlight,
     photometry: derivePhotometry(initialFlight, initial),
@@ -206,20 +241,23 @@ export const useFlightStore = create<FlightStore>()((set, get) => {
     setCoastEta: (coastEta) => remission({ coastEta }),
     setCrew: (crew) => remission({ crew }),
     togglePlay: () => {
-      const { playing, ignitionCountdownS, tau, profile, plannedProfile } = get();
+      const { playing, ignitionCountdownS, tau, profile, plannedProfile, beats } = get();
       if (ignitionCountdownS !== null) return update({ ignitionCountdownS: null });
       if (playing) return update({ playing: false });
-      if (tau > 0 && tau < profile.tauTotal) return update({ playing: true });
-      // Partida (ou repetição): contagem regressiva antes da ignição, de volta ao plano.
+      // Retomar fecha o cartão do roteiro: a faixa de etapas continua mostrando a fase.
+      if (tau > 0 && tau < profile.tauTotal) return update({ playing: true, beat: null });
+      // Partida (ou repetição): contagem regressiva antes da ignição, de volta ao plano (e à primeira fase).
       const replan = profile === plannedProfile ? {} : flightPlan(plannedProfile);
-      update({ tau: 0, ignitionCountdownS: COUNTDOWN_FROM_S, ...replan, ...newFlightLog() });
+      const first = beats[0];
+      const pace = first ? { timeScale: beatTimeScale(plannedProfile, first) ?? get().timeScale } : {};
+      update({ tau: 0, ignitionCountdownS: COUNTDOWN_FROM_S, ...replan, ...pace, beat: null, ...newFlightLog() });
       emitFlightEvents([countdown('ignition', COUNTDOWN_FROM_S)]);
     },
     // O scrub não anuncia efeitos e dispensa o cartão, que falaria de outro instante. O slider guarda só
     // ~15 algarismos: no fim da linha do tempo, τ fica a um fio de τ_total e ainda não seria a chegada.
     seek: (tau) => {
       const { tauTotal } = get().profile;
-      update({ tau: tau >= tauTotal * (1 - 1e-13) ? tauTotal : clamp(tau, 0, tauTotal), insight: null });
+      update({ tau: tau >= tauTotal * (1 - 1e-13) ? tauTotal : clamp(tau, 0, tauTotal), insight: null, beat: null });
     },
     setTimeScale: (timeScale) => set({ timeScale, timeScaleTouched: true }),
     setAutoStepDown: (autoStepDown) => set({ autoStepDown }),
@@ -232,6 +270,21 @@ export const useFlightStore = create<FlightStore>()((set, get) => {
       update({ ...flightPlan(next), insight: null });
     },
     showInsight: (insight) => set({ insight }),
+    goToBeat: (id) => {
+      const { beats, profile, timeScale } = get();
+      const beat = beats.find((b) => b.id === id);
+      if (!beat) return;
+      update({
+        tau: beat.tau,
+        playing: false,
+        ignitionCountdownS: null,
+        beat,
+        insight: null,
+        timeScale: beatTimeScale(profile, beat) ?? timeScale,
+      });
+    },
+    showBeat: (id) => set({ beat: id === null ? null : (get().beats.find((b) => b.id === id) ?? null) }),
+    setPauseAtBeats: (pauseAtBeats) => set({ pauseAtBeats }),
 
     tick: (dtRealS) => {
       const s = get();
@@ -264,7 +317,18 @@ export const useFlightStore = create<FlightStore>()((set, get) => {
           timeScale = slower;
         }
       }
-      update({ tau, timeScale, playing: tau < s.profile.tauTotal });
+      // Um passo da história do roteiro neste frame: o voo para nele (se o usuário quiser) com o cartão aberto,
+      // e uma fase nova começa no ritmo dela.
+      const beat = s.beats.find((b) => b.tau > s.tau && b.tau <= tau) ?? null;
+      let playing = tau < s.profile.tauTotal;
+      if (beat) {
+        if (s.pauseAtBeats) {
+          tau = beat.tau;
+          playing = false;
+        }
+        timeScale = beatTimeScale(s.profile, beat) ?? timeScale;
+      }
+      update({ tau, timeScale, playing, ...(beat && { beat }) });
       emitFlightEvents(detectFlightEvents(s.milestones, s.tau, tau, s.timeScale));
       const rest = s.profile.crewRest;
       const restChime = rest && detectCrewRestEvent(s.flight.crewRest, get().flight.crewRest, rest.burnTau + rest.restTau, s.timeScale);

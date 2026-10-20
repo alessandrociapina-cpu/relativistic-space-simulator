@@ -10,6 +10,7 @@ import {
   C,
   G0,
   T_CMB_0,
+  ascentTauAt,
   computeFlightState,
   computeMissionProfile,
   computeNoBrakeProperTime,
@@ -24,6 +25,8 @@ import {
 import type { CrewKind } from '../physics/accelerationPresets';
 import { brakingDistance as restBrakingDistance, nextBurnAt } from '../physics/crewRest';
 import type { Destination } from '../physics/destinations';
+import { MISSION_SCRIPTS } from '../physics/missionScripts';
+import { bowRadiation, gasDensityOnRoute } from '../sky/interstellarGas';
 import { ORIGINS, type Origin } from '../physics/origins';
 import { CMB_VISIBLE_GAMMA, preFlipWindowS } from '../physics/criticalEvents';
 import { WIEN_NM_K, peakCmbLux, peakCmbLuxRapidity, type PhotometryAndEyeState } from '../physics/EyeAndPhotometry';
@@ -158,9 +161,6 @@ const FUSION_EXHAUST_BETA = 0.1;
 /** Constante de Boltzmann (eV/K) e energia de repouso do próton (eV). */
 const K_B_EV = 8.617333262e-5;
 const PROTON_REST_EV = 938.27208816e6;
-/** Energia de repouso do próton (J) e densidade do hidrogênio interestelar, ~1 átomo/cm³ (m⁻³). */
-const PROTON_REST_J = 1.50327761802e-10;
-const ISM_DENSITY_M3 = 1e6;
 /** Luz do Sol na órbita da Terra (W/m²), para comparar. */
 const SOLAR_CONSTANT_W_M2 = 1361;
 const C2 = C * C;
@@ -255,52 +255,135 @@ const velocityOf = (f: FlightState) => formatVelocity(f.beta, f.oneMinusBeta);
 /** γ no texto: "1,67", "1 348", "3,53 × 10⁶". */
 const gammaText = (gamma: number) => (gamma < 100 ? formatFixed(gamma, 2) : num(gamma));
 
+/** A missão de um plano comum: acelerar e frear (com cruzeiro ou descansos, se houver). */
+function plainMission({ destination, accelG, alpha, profile, crewed, home }: Scene): Body {
+  return {
+    summary:
+      (profile.crewRest
+        ? `Acelerar com α constante em queimas de até ${formatSpan(profile.crewRest.burnTau)}, separadas por ` +
+          `descansos de ${formatSpan(profile.crewRest.restTau)} sem peso, ` +
+          (profile.coastEta === null
+            ? 'girar a nave no meio do caminho'
+            : `seguir por inércia a v = ${formatVelocity(Math.tanh(profile.etaMax), Math.exp(-profile.etaMax) / profile.gammaMax)}, girar a nave`) +
+          ' e frear do mesmo jeito até parar em '
+        : profile.coastEta === null
+        ? 'Acelerar com α constante até o meio do caminho, girar a nave e frear com a mesma α até parar em '
+        : `Acelerar com α constante até v = ${formatVelocity(Math.tanh(profile.etaMax), Math.exp(-profile.etaMax) / profile.gammaMax)}, ` +
+          'desligar o motor e seguir por inércia, depois girar a nave e frear com a mesma α até parar em ') +
+      `${destination.name}: ${formatSpan(profile.tauTotal)} de bordo e ${formatSpan(profile.tTotal)} ${home.inHome}.`,
+    details: [
+      'A aceleração própria α é a que um acelerômetro a bordo mede, e ela é constante. A aceleração medida ' +
+        `${home.ofHome} não é: cai como α/γ³ à medida que a nave se aproxima de c.`,
+      !crewed
+        ? accelG > 60_000
+          ? `A bordo vai uma sonda robótica, mas nem ela aguentaria ${num(accelG)} g: o limite conhecido, de ` +
+            'nanossondas de silício, fica em dezenas de milhares de g. O valor alto encurta a viagem para minutos e ' +
+            'deixa cada efeito óptico visível em tempo real.'
+          : `A bordo vai uma sonda robótica. Máquinas não desmaiam: a ${num(accelG)} g, o limite é a resistência ` +
+            'dos materiais, que quase não depende do tempo de exposição.'
+        : accelG > 50
+          ? `Nenhum corpo humano resistiria a ${num(accelG)} g: o limite fica em algumas dezenas de g, ` +
+            'por segundos. O valor alto encurta a viagem para minutos e deixa cada efeito óptico visível em tempo real.'
+          : accelG <= 1.5
+            ? `A ${formatFixed(accelG, accelG < 1 ? 2 : 1)} g, a tripulação sente um peso parecido com o da Terra ` +
+              'durante todo o empuxo: é o perfil clássico de uma viagem tripulada.'
+            : `A ${num(accelG)} g, a tripulação pesa ${num(accelG)} vezes mais que na Terra durante o empuxo, e o ` +
+              'corpo só aguenta isso por tempo limitado' +
+              (profile.crewRest
+                ? `: por isso o plano divide o empuxo em ${num(profile.crewRest.burns)} queimas, com descansos entre elas.`
+                : '.'),
+    ],
+    formulas: [
+      { tex: tex`\alpha = N_G\,g_0 = ${n(accelG)} \times ${n(G0, 6)}\ \mathrm{m/s^2} = ${n(alpha)}\ \mathrm{m/s^2}` },
+      ...missionTotalsFormulas(profile),
+    ],
+  };
+}
+
+/** Densidades de 1 a 10⁻⁷ átomo/cm³: "1,03 átomo/cm³", "2,60 × 10⁻⁷ átomo/cm³". */
+const densityText = (density: number) => `${density >= 1e-3 ? num(density) : formatScientific(density)} átomo/cm³`;
+
+/** A frenagem de um roteiro: a mesma rapidez apareceu na subida, mas num instante que não é o espelho. */
+function scriptBraking(flight: FlightState, profile: MissionProfile): Body {
+  const ascent = ascentTauAt(profile, flight.eta, profile.brakeStartTau);
+  const left = profile.tauTotal - flight.tau;
+  return {
+    summary:
+      'Com o freio consertado, o motor agora empurra contra o movimento, a 10 g, e a rapidez cai em linha reta com o ' +
+      `tempo de bordo. Faltam ${formatSpan(left)} de bordo para parar.`,
+    details: [
+      'Aberração, Doppler e a cor da CMB dependem só da velocidade: o céu repete, de trás para a frente, o da subida. ' +
+        'Mas a subida teve fases de 0,5, 3 e 10 g, e a frenagem é toda a 10 g: o céu de agora apareceu na subida ' +
+        (ascent === null ? 'num outro ritmo.' : `em τ = ${formatSpan(ascent)}, não no instante espelho τ_total − τ.`),
+    ],
+    formulas: [
+      { tex: tex`\eta = \frac{\alpha\,(\tau_{\text{total}} - \tau)}{c} = ${n(flight.eta, 4)}` },
+      { card: true, tex: tex`L_0 = \frac{c^2}{\alpha}\,(\gamma - 1) = ${texDistance(flight.restDistanceRemainingM)}` },
+    ],
+  };
+}
+
+/** O reparo de um roteiro (Tau Zero): o motor desligado no vazio, a rapidez parada e o relógio da Terra disparado. */
+function scriptRepair(flight: FlightState, profile: MissionProfile, home: Origin): Body {
+  const toBrake = profile.brakeStartTau - flight.tau;
+  const repairTau = profile.brakeStartTau - profile.burnEndTau;
+  return {
+    summary:
+      `O motor está desligado para o reparo do freio, e a nave segue por inércia a v = ${velocityOf(flight)}: sem peso ` +
+      `a bordo, e o céu congela. Cada dia de bordo vale ${formatSpan(86_400 * flight.gamma)} ${home.inHome}. A frenagem ` +
+      `começa em ${formatSpan(toBrake)}.`,
+    details: [
+      `Sem empuxo, a rapidez fica parada em η = ${formatFixed(flight.eta, 2)}: dx/dτ = c·sinh η e dt/dτ = cosh η. ` +
+        `Os ${formatSpan(repairTau)} do reparo valem ${formatSpan(repairTau * flight.gamma)} ${home.inHome}, e a nave ` +
+        `percorre ${formatDistance(C * Math.sinh(flight.eta) * repairTau)} nesse tempo.`,
+    ],
+    formulas: [
+      { tex: tex`\eta = ${n(flight.eta, 4)}, \qquad \frac{dx}{d\tau} = c\,\sinh\eta = ${texSpeed(C * Math.sinh(flight.eta))}` },
+      { card: true, tex: tex`\Delta t_{\text{reparo}} = \gamma\,\Delta\tau_{\text{reparo}} = ${texDuration(repairTau * flight.gamma)}` },
+    ],
+  };
+}
+
+/** A missão de um roteiro em fases (Tau Zero): cada fase com a sua aceleração, até parar no destino. */
+function scriptMission({ destination, profile, home }: Scene): Body {
+  const plan = profile.script!;
+  const script = MISSION_SCRIPTS[plan.id];
+  const phases = script.phases.map((p, i) => ({ ...p, t: plan.phases[i]! }));
+  const thrust = phases.filter((p) => p.accelG > 0);
+  return {
+    summary:
+      `${script.title}, em ${num(phases.length)} fases com acelerações diferentes, até parar em ${destination.name}: ` +
+      `${formatSpan(profile.tauTotal)} de bordo e ${formatSpan(profile.tTotal)} ${home.inHome}.`,
+    details: [
+      ...phases.map(
+        (p, i) =>
+          `${i + 1}. ${p.title} (${p.accelG === 0 ? 'motor desligado' : `${formatFixed(Math.abs(p.accelG), Math.abs(p.accelG) < 1 ? 1 : 0)} g`}): ` +
+          `${formatSpan(p.t.endTau - p.t.startTau)} de bordo, ${formatSpan(p.t.earth1 - p.t.earth0)} ${home.inHome} e ` +
+          `${formatDistance(p.t.x1 - p.t.x0)} de caminho. ${p.summary}`,
+      ),
+      'Em cada fase, a aceleração própria é constante: a rapidez cresce (ou cai) em linha reta, Δη = a·Δτ/c, e a ' +
+        'distância e o tempo da Terra saem em forma fechada, (c²/a)·Δcosh η e (c/a)·Δsinh η. As rapidezes das fases se ' +
+        'somam, como as velocidades não se somariam.',
+      `A bordo, os campos internos da nave seguram o peso de ${num(script.interiorG)} g nas queimas, como no livro.`,
+    ],
+    formulas: [
+      {
+        card: true,
+        tex: tex`\eta_{\max} = \sum_i \frac{a_i\,\Delta\tau_i}{c} = ${thrust.map((p) => n(p.t.eta1 - p.t.eta0, 3)).join(' + ')} = ${n(profile.etaMax, 4)}`,
+      },
+      { tex: tex`\gamma_{\max} = \cosh\eta_{\max} = ${n(profile.gammaMax, 4)}` },
+      { tex: tex`\tau_{\text{total}} = \sum_i \Delta\tau_i = ${texDuration(profile.tauTotal)}` },
+      { tex: tex`t_{\text{total}} = \sum_i \frac{c}{a_i}\,\Delta\sinh\eta_i + \gamma\,\Delta\tau_{\text{reparo}} = ${texDuration(profile.tTotal)}` },
+    ],
+  };
+}
+
 const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
   mission: {
     title: 'A missão',
     announce: false,
     isActive: () => true,
-    explain: ({ destination, accelG, alpha, profile, crewed, home }) => ({
-      summary:
-        (profile.crewRest
-          ? `Acelerar com α constante em queimas de até ${formatSpan(profile.crewRest.burnTau)}, separadas por ` +
-            `descansos de ${formatSpan(profile.crewRest.restTau)} sem peso, ` +
-            (profile.coastEta === null
-              ? 'girar a nave no meio do caminho'
-              : `seguir por inércia a v = ${formatVelocity(Math.tanh(profile.etaMax), Math.exp(-profile.etaMax) / profile.gammaMax)}, girar a nave`) +
-            ' e frear do mesmo jeito até parar em '
-          : profile.coastEta === null
-          ? 'Acelerar com α constante até o meio do caminho, girar a nave e frear com a mesma α até parar em '
-          : `Acelerar com α constante até v = ${formatVelocity(Math.tanh(profile.etaMax), Math.exp(-profile.etaMax) / profile.gammaMax)}, ` +
-            'desligar o motor e seguir por inércia, depois girar a nave e frear com a mesma α até parar em ') +
-        `${destination.name}: ${formatSpan(profile.tauTotal)} de bordo e ${formatSpan(profile.tTotal)} ${home.inHome}.`,
-      details: [
-        'A aceleração própria α é a que um acelerômetro a bordo mede, e ela é constante. A aceleração medida ' +
-          `${home.ofHome} não é: cai como α/γ³ à medida que a nave se aproxima de c.`,
-        !crewed
-          ? accelG > 60_000
-            ? `A bordo vai uma sonda robótica, mas nem ela aguentaria ${num(accelG)} g: o limite conhecido, de ` +
-              'nanossondas de silício, fica em dezenas de milhares de g. O valor alto encurta a viagem para minutos e ' +
-              'deixa cada efeito óptico visível em tempo real.'
-            : `A bordo vai uma sonda robótica. Máquinas não desmaiam: a ${num(accelG)} g, o limite é a resistência ` +
-              'dos materiais, que quase não depende do tempo de exposição.'
-          : accelG > 50
-            ? `Nenhum corpo humano resistiria a ${num(accelG)} g: o limite fica em algumas dezenas de g, ` +
-              'por segundos. O valor alto encurta a viagem para minutos e deixa cada efeito óptico visível em tempo real.'
-            : accelG <= 1.5
-              ? `A ${formatFixed(accelG, accelG < 1 ? 2 : 1)} g, a tripulação sente um peso parecido com o da Terra ` +
-                'durante todo o empuxo: é o perfil clássico de uma viagem tripulada.'
-              : `A ${num(accelG)} g, a tripulação pesa ${num(accelG)} vezes mais que na Terra durante o empuxo, e o ` +
-                'corpo só aguenta isso por tempo limitado' +
-                (profile.crewRest
-                  ? `: por isso o plano divide o empuxo em ${num(profile.crewRest.burns)} queimas, com descansos entre elas.`
-                  : '.'),
-      ],
-      formulas: [
-        { tex: tex`\alpha = N_G\,g_0 = ${n(accelG)} \times ${n(G0, 6)}\ \mathrm{m/s^2} = ${n(alpha)}\ \mathrm{m/s^2}` },
-        ...missionTotalsFormulas(profile),
-      ],
-    }),
+    explain: (s) => (s.profile.script ? scriptMission(s) : plainMission(s)),
   },
 
   kinematics: {
@@ -476,16 +559,17 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
     title: 'O meio interestelar vira radiação',
     announce: true,
     isActive: (s) => s.flight.gamma >= EFFECT_THRESHOLDS.ismGamma,
-    explain: ({ flight, crewed }) => {
+    explain: ({ flight, crewed, home, destination }) => {
       // γ − 1 sem cancelamento: 2 sinh²(η/2).
       const gammaM1 = 2 * Math.sinh(flight.eta / 2) ** 2;
-      const protonEv = gammaM1 * PROTON_REST_EV;
+      // O gás do lugar: ~1 átomo/cm³ no disco da galáxia, ~10⁻⁶ e menos entre as galáxias.
+      const density = gasDensityOnRoute(home, destination, flight.positionM);
       // Fluxo de prótons na proa, γ·n·βc (a densidade cresce por γ no referencial da nave), vezes a energia de cada um.
-      const powerW = flight.gamma * ISM_DENSITY_M3 * flight.beta * C * gammaM1 * PROTON_REST_J;
+      const { protonEv, powerWm2: powerW } = bowRadiation(flight.eta, density);
       return {
         summary:
-          `A v = ${velocityOf(flight)}, cada átomo de hidrogênio do meio interestelar (cerca de 1 por cm³) bate na ` +
-          `proa com ${formatEnergyEv(protonEv)}: são ${formatScientific(powerW)} W em cada metro quadrado do escudo ` +
+          `A v = ${velocityOf(flight)}, cada átomo de hidrogênio do gás no caminho (${densityText(density)} aqui) bate ` +
+          `na proa com ${formatEnergyEv(protonEv)}: são ${formatScientific(powerW)} W em cada metro quadrado do escudo ` +
           `frontal, ${num(powerW / SOLAR_CONSTANT_W_M2)} vezes a luz do Sol na Terra.`,
         details: [
           'No referencial da nave, o gás entre as estrelas vem ao encontro dela a quase c e mais denso por γ (contração ' +
@@ -495,6 +579,9 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
             (crewed
               ? 'Sem um escudo, a tripulação receberia uma dose letal de radiação em instantes, e o casco seria vaporizado.'
               : 'Sem um escudo, a eletrônica da sonda seria destruída e o casco vaporizado.'),
+          'O gás muda com o lugar: cerca de 1 átomo por cm³ no disco da Via Láctea, centésimos acima dele, milésimos no ' +
+            'halo quente em volta da galáxia e ~2,5 × 10⁻⁷ no espaço entre os grupos de galáxias, a média dos átomos do ' +
+            'universo (um modelo simples, para ordens de grandeza).',
           'Viagens relativísticas precisariam de um escudo de ablação na proa (um bloco que se desgasta aos poucos), de ' +
             'um campo magnético que desviasse as partículas carregadas ou de um laser que ionizasse o gás à frente. Os ' +
             'grãos de poeira, raros mas milhares de vezes mais pesados, seriam ainda piores.',
@@ -506,7 +593,7 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
           },
           {
             tex: tex`\frac{P}{A} = \gamma\,n_H\,\beta c\,(\gamma - 1)\,m_p c^2 = ${n(powerW)}\ \mathrm{W/m^2}`,
-            note: 'com n_H ≈ 1 átomo/cm³',
+            note: `com n_H ≈ ${densityText(density)} no lugar da nave`,
           },
         ],
       };
@@ -727,7 +814,7 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
       const remaining = atFlip.restDistanceRemainingM;
       const contracted = atFlip.contractedDistanceRemainingM;
       const toFlip = flip - flight.tau;
-      const flipAndBurn = profile.coastEta === null && !profile.maneuvers && !profile.crewRest;
+      const flipAndBurn = profile.coastEta === null && !profile.maneuvers && !profile.crewRest && !profile.script;
       const noBrake = computeNoBrakeProperTime(profile);
       return {
         summary:
@@ -742,7 +829,10 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
           flipAndBurn
             ? `Se não freasse, a nave cruzaria esse trecho em cerca de ${formatSpan(noBrake)} de bordo ` +
               '(≈ (c/α)·ln 2) e passaria pelo alvo a quase c.'
-            : profile.crewRest
+            : profile.script
+              ? 'A frenagem, com o freio consertado, desfaz toda a rapidez de uma vez, a 10 g, e começa a (c²/α)(γ − 1) ' +
+                'do ponto de parada para chegar nele exatamente parada.'
+              : profile.crewRest
               ? 'A frenagem repete a subida ao contrário, com as mesmas queimas e descansos, e começa a L_frenagem do ' +
                 'alvo: a distância das queimas, (c²/α)(γ − 1), mais a percorrida nos descansos.'
               : 'A frenagem leva o mesmo tempo de bordo que a aceleração, e começa a (c²/α)(γ_c − 1) do alvo para parar ' +
@@ -772,6 +862,7 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
     // Nos descansos da frenagem (§4.2.9) a nave segue na metade de frenagem.
     isActive: (s) => isDescending(s.profile, s.flight),
     explain: ({ flight, profile }) => {
+      if (profile.script) return scriptBraking(flight, profile);
       const mirror = profile.tauTotal - flight.tau;
       return {
         summary:
@@ -802,7 +893,7 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
     title: 'O alvo à frente, azulado',
     announce: true,
     isActive: (s) =>
-      isDescending(s.profile, s.flight) && inRange(s.flight.gamma, BLUESHIFT_HOLOGRAM_GAMMA),
+      s.destination.kind !== 'void' && isDescending(s.profile, s.flight) && inRange(s.flight.gamma, BLUESHIFT_HOLOGRAM_GAMMA),
     explain: ({ destination, flight, dFront }) => {
       const seenK = destination.temperatureK * dFront;
       return {
@@ -882,6 +973,7 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
     announce: true,
     isActive: (s) => s.flight.phase === 'coasting' && !s.flight.crewRest,
     explain: ({ flight, profile, home }) => {
+      if (profile.script) return scriptRepair(flight, profile, home);
       const m = profile.maneuvers;
       if (m && flight.tau >= m.firstTau) {
         // Inércia depois de o piloto desligar o motor, até a frenagem automática.
@@ -962,9 +1054,12 @@ const EFFECTS: Readonly<Record<EffectId, EffectDefinition>> = {
             'rapidez de pico.',
           `Um foguete de fusão ideal, com exaustão a 0,1c, precisaria de ${num(fusion)} vezes a massa final: a razão ` +
             'do foguete de fótons elevada à 10ª potência.',
-          profile.coastEta === null
-            ? 'Cruzar a uma velocidade menor, com o perfil acelerar, cruzar e frear, reduz essa conta drasticamente.'
-            : 'O cruzeiro limita a rapidez de pico e, com ela, o combustível.',
+          profile.script
+            ? 'O estatorreator de Bussard da Leonora Christine escapa dessa conta: não leva o combustível, recolhe o ' +
+              'hidrogênio do caminho com um campo magnético.'
+            : profile.coastEta === null
+              ? 'Cruzar a uma velocidade menor, com o perfil acelerar, cruzar e frear, reduz essa conta drasticamente.'
+              : 'O cruzeiro limita a rapidez de pico e, com ela, o combustível.',
         ],
         formulas: [
           { tex: tex`\frac{m_0}{m_1} = e^{\,2\eta_{\max}\,c/v_e}` },

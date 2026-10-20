@@ -2,8 +2,8 @@ import katex from 'katex';
 import { describe, expect, it } from 'vitest';
 import { computeFlightState, flipTauOf, rocketMassRatio, type MissionProfile } from '../physics/RelativityEngine';
 import { cutEngine, relightEngine } from '../physics/maneuvers';
-import { ERID_G, type CrewKind } from '../physics/accelerationPresets';
-import { missionProfileFor } from '../physics/crewRest';
+import { ERID_G, SCIFI_MISSIONS, type CrewKind } from '../physics/accelerationPresets';
+import { choiceProfile, missionProfileFor } from '../physics/crewRest';
 import { DESTINATIONS, DESTINATION_LIST, destinationMissionProfile, type Destination } from '../physics/destinations';
 import { computeEyeTimeline, computePhotometryAndEyeState } from '../physics/EyeAndPhotometry';
 import { ORIGINS, canTravel, missionDestination } from '../physics/origins';
@@ -18,6 +18,7 @@ import {
   type ExplainContext,
 } from './explanations';
 import { formatProse } from './format';
+import { sciFiChoice } from './missionLink';
 
 /** Contexto das explicações no instante τ, como o store o monta. */
 function contextFactory(destination: Destination, accelG = destination.defaultAccelG, coastEta: number | null = null) {
@@ -188,9 +189,45 @@ describe('textos e fórmulas com os valores do instante', () => {
     const tau10 = (Math.acosh(10) * 299_792_458) / destinationMissionProfile(proxima).properAccel;
     const at10 = explainEffect('ism-radiation', proximaAt(tau10));
     expect(at10.summary).toMatch(/8,44 GeV/);
-    expect(at10.summary).toMatch(/4,04 × 10⁶ W/); // β = 0,995
+    // β = 0,995, com o gás perto do Sol (1,03 átomo/cm³ no modelo da rota): 4,04 × 10⁶ W/m² por átomo/cm³.
+    expect(at10.summary).toMatch(/1,03 átomo\/cm³ aqui/);
+    expect(at10.summary).toMatch(/4,16 × 10⁶ W/);
     expect(activeEffects(proximaAt(tau10 - 0.01))).not.toContain('ism-radiation');
     expect(activeEffects(proximaAt(tau10 + 0.01))).toContain('ism-radiation');
+  });
+
+  it('meio interestelar no roteiro de Tau Zero: o gás cai de ~1 átomo/cm³ para ~10⁻⁷ fora das galáxias', () => {
+    const choice = sciFiChoice(SCIFI_MISSIONS.find((m) => m.script === 'tau-zero')!, 3);
+    const profile = choiceProfile(choice);
+    const plan = profile.script!;
+    const repair = plan.phases.find((p) => p.id === 'reparo')!;
+    const ctx = { ...choice, profile } as const;
+    const at = (tau: number) => {
+      const flight = computeFlightState(profile, tau);
+      return { ...ctx, flight, photometry: computePhotometryAndEyeState(flight, profile, computeEyeTimeline(profile), 0) };
+    };
+    const inVoid = explainEffect('ism-radiation', at((repair.startTau + repair.endTau) / 2));
+    expect(inVoid.summary).toMatch(/× 10⁻⁷ átomo\/cm³ aqui/);
+    // ~10¹⁷ eV por próton e ~10¹⁴ W/m² mesmo no vazio, a γ ≈ 1,5 × 10⁸.
+    expect(inVoid.summary).toMatch(/1\d\d PeV/);
+    expect(inVoid.summary).toMatch(/× 10¹⁴ W/);
+    // O reparo, a missão em fases e a frenagem têm textos próprios; o vazio não tem alvo azulado.
+    expect(explainEffect('coasting', at((repair.startTau + repair.endTau) / 2)).summary).toMatch(/reparo do freio/);
+    expect(explainEffect('mission', at(0)).details).toHaveLength(plan.phases.length + 2);
+    const braking = plan.phases.find((p) => p.id === 'frenagem')!;
+    const mid = at((braking.startTau + braking.endTau) / 2);
+    expect(explainEffect('braking', mid).details[0]).toMatch(/não no instante espelho/);
+    expect(activeEffects(mid)).not.toContain('target-blueshift');
+    // Todas as fórmulas do roteiro passam no KaTeX estrito, no começo, no meio e no fim de cada fase.
+    for (const p of plan.phases) {
+      for (const tau of [p.startTau, (p.startTau + p.endTau) / 2, p.endTau]) {
+        for (const id of EFFECT_ORDER) {
+          for (const { tex } of explainEffect(id, at(tau)).formulas) {
+            expect(() => katex.renderToString(tex, { throwOnError: true, strict: 'error' })).not.toThrow();
+          }
+        }
+      }
+    }
   });
 
   it('dilatação do tempo: o rádio da Terra chega de ~19 s depois da partida no meio do caminho', () => {

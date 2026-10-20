@@ -38,6 +38,10 @@ export function crewText(status: CrewStatus, planG: number): CrewText {
         detail: status.accelG > 0 ? `motor desliga em ${until}` : 'o corpo não aguentou a carga',
         tone: 'danger',
       };
+    case 'fields':
+      return status.accelG > 0
+        ? { label: `Campos internos · ${formatAccelG(status.accelG)}`, detail: 'o peso de sempre a bordo', tone: 'ok' }
+        : { label: 'Sem peso', detail: 'motor desligado', tone: 'rest' };
     case 'hypothetical':
       return { label: 'Não sobreviveria', detail: `nenhum ser humano aguenta ${formatAccelG(planG)}`, tone: 'danger' };
     case 'arrived':
