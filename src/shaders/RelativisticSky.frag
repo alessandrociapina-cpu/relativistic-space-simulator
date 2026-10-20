@@ -28,7 +28,7 @@ uniform vec3  uTargetDir;
 uniform float uTargetRadiusRad;
 uniform float uEinsteinRadiusRad; // raio de Einstein físico do buraco negro, 2√(GM/(c²D)); 0 nos outros alvos
 uniform float uTargetTemp;
-uniform int   uTargetType;       // 0 = estrela, 1 = buraco negro (Sgr A*), 2 = galáxia (Andrômeda)
+uniform int   uTargetType;       // 0 = estrela, 1 = buraco negro (Sgr A*), 2 = galáxia (Andrômeda), 3 = vazio (nenhum alvo)
 uniform float uTargetPointAmp;   // o alvo como estrela pontual, antes de virar disco
 uniform float uGalaxyGain;       // brilho superficial da galáxia-alvo (escala da Via Láctea)
 uniform float uGalaxySpiral;     // 1 = espiral (Andrômeda), 0 = elíptica gigante (M87, no Aglomerado de Virgem)
@@ -41,6 +41,9 @@ uniform sampler2D uStarCells;    // catálogo HYG em células de um cubo (N × 6
 uniform float uStarCellsN;
 uniform float uStarGain;         // 0 enquanto a grade não ficou pronta
 uniform vec3  uShipOffset;       // nave agora − nave na montagem da grade (anos-luz)
+uniform sampler2D uGalaxyCells;  // galáxias do OpenNGC (e a Via Láctea vista de fora): duas por célula, 2 texels cada (4N × 6N)
+uniform float uGalaxyCellsN;
+uniform vec3  uGalaxyShipOffset; // nave agora − nave na montagem da grade de galáxias (anos-luz)
 uniform sampler2D uMilkyWayA;    // brilho difuso em coordenadas galácticas: log₁₀ε e fração do bojo
 uniform sampler2D uMilkyWayB;
 uniform float uMilkyWayMix;
@@ -346,6 +349,48 @@ vec3 renderCatalogStar(RelativisticRay ray) {
     return sampleBlackbodySensor(t10 * 10.0 * ray.doppler) * amp * profile * beaming * uStarGain;
 }
 
+// Uma galáxia do catálogo: uma mancha gaussiana com o tamanho aparente de agora (σ físico sobre a distância),
+// alargada pela PSF. O pico é o de uma estrela de mesmo brilho dividido pelo alargamento σ_eff/σ_PSF, o mesmo de
+// galaxyCells.ts; a cor é o corpo negro da luz integrada, deslocado pelo Doppler.
+vec3 renderGalaxySlot(RelativisticRay ray, vec4 pos, vec4 shape) {
+    if (pos.w <= 0.0) return vec3(0.0);
+    vec3 rel = pos.xyz - uGalaxyShipOffset;
+    float dist2 = dot(rel, rel);
+    vec3 dir = rel * inversesqrt(dist2);
+    if (dot(ray.sourceDir, dir) <= 0.0) return vec3(0.0);
+    float amp = 2.2 * pow(pos.w / dist2, 0.8);
+    float sigmaPsf = pointSigma(ray);
+    float sigmaGal = shape.x * inversesqrt(dist2);
+    float sigma2 = sigmaPsf * sigmaPsf + sigmaGal * sigmaGal;
+    vec3 c = cross(ray.sourceDir, dir);
+    float profile = exp(-0.5 * dot(c, c) / sigma2) * sigmaPsf * inversesqrt(sigma2);
+    if (profile * amp < 1e-4) return vec3(0.0);
+    float beaming = clamp(ray.solidAngleJac * ray.psfDilution, 0.0, 65.0);
+    return sampleBlackbodySensor(shape.y * ray.doppler) * amp * profile * beaming;
+}
+
+// As duas galáxias que mais brilham na célula do cubo que contém a direção (num aglomerado, uma só deixaria a
+// mancha da vizinha cortada na borda da célula).
+vec3 renderCatalogGalaxy(RelativisticRay ray) {
+    vec3 a = abs(ray.sourceDir);
+    float face;
+    vec2 uv;
+    if (a.x >= a.y && a.x >= a.z) { face = ray.sourceDir.x > 0.0 ? 0.0 : 1.0; uv = ray.sourceDir.yz / a.x; }
+    else if (a.y >= a.z)          { face = ray.sourceDir.y > 0.0 ? 2.0 : 3.0; uv = ray.sourceDir.xz / a.y; }
+    else                          { face = ray.sourceDir.z > 0.0 ? 4.0 : 5.0; uv = ray.sourceDir.xy / a.z; }
+    vec2 cell = min(floor((uv * 0.5 + 0.5) * uGalaxyCellsN), uGalaxyCellsN - 1.0);
+    float row = (face * uGalaxyCellsN + cell.y + 0.5) / (6.0 * uGalaxyCellsN);
+    float width = 4.0 * uGalaxyCellsN;
+    vec3 sum = vec3(0.0);
+    for (int slot = 0; slot < 2; slot++) {
+        float x0 = 4.0 * cell.x + 2.0 * float(slot);
+        vec4 pos = texture2D(uGalaxyCells, vec2((x0 + 0.5) / width, row));
+        vec4 shape = texture2D(uGalaxyCells, vec2((x0 + 1.5) / width, row));
+        sum += renderGalaxySlot(ray, pos, shape);
+    }
+    return sum;
+}
+
 // Brilho difuso da Via Láctea na direção de origem: log₁₀ε e fração do bojo,
 // interpolados entre os dois mapas mais próximos da posição da nave.
 vec2 milkyWaySample(vec3 sourceDir) {
@@ -362,7 +407,8 @@ vec3 hash33(vec3 p3) {
 
 // Estrelas de fundo procedurais, além do catálogo: a camada 0 é a população
 // local, que só aparece onde há mais estrelas que perto do Sol (rumo ao centro
-// galáctico); a camada 1 é o pó de estrelas fracas, mais denso na faixa da Via Láctea.
+// galáctico); a camada 1 é o pó de estrelas fracas, mais denso na faixa da Via Láctea
+// e ausente fora da galáxia, onde não há estrelas por perto.
 vec3 renderBackgroundStars(RelativisticRay ray, float glowRel) {
     vec3 stars = vec3(0.0);
     float localBoost = log(max(uStarDensity, 1.0)) / log(10.0);
@@ -370,7 +416,7 @@ vec3 renderBackgroundStars(RelativisticRay ray, float glowRel) {
         float gridScale = (layer == 0) ? 130.0 : 320.0;
         float probability = (layer == 0)
             ? clamp(0.008 * (pow(max(uStarDensity, 1.0), 0.4) - 1.0), 0.0, 0.18)
-            : clamp(0.03 * pow(glowRel, 0.8), 0.004, 0.25);
+            : clamp(0.03 * pow(glowRel, 0.8), 0.004 * min(uStarDensity, 1.0), 0.25);
         vec3 cell = floor(ray.sourceDir * gridScale);
         vec3 rnd  = hash33(cell + float(layer) * 17.3);
         if (rnd.x > 1.0 - probability) {
@@ -419,7 +465,7 @@ vec3 renderSky(RelativisticRay ray) {
     // centro galáctico desviado para o azul não virar uma parede branca.
     float glowLevel = dot(glow, vec3(0.2126, 0.7152, 0.0722)) * uExposure;
     glow *= 1.0 / (1.0 + 1.5 * max(glowLevel - 0.25, 0.0));
-    vec3 stars = (glow + renderCatalogStar(bgRay) + renderBackgroundStars(bgRay, eps / 0.07)) * uBackgroundGain
+    vec3 stars = (glow + renderCatalogStar(bgRay) + renderCatalogGalaxy(bgRay) + renderBackgroundStars(bgRay, eps / 0.07)) * uBackgroundGain
                + renderPointSource(ray, uSunDir, uSunPointAmp, uSunTemp, uSunRadiusRad);
 
     // Sol atrás e alvo à frente; os discos opacos escondem as estrelas atrás deles.
@@ -429,14 +475,14 @@ vec3 renderSky(RelativisticRay ray) {
     // beaming (como as estrelas do catálogo). O ponto fica fora da oclusão do próprio disco, que é menor
     // que um pixel enquanto ele aparece.
     float targetCoverage = 0.0;
-    vec3 targetDisk;
+    vec3 targetDisk = vec3(0.0);
     vec3 targetPoint = vec3(0.0);
     if (uTargetType == 0) {
         targetDisk = renderRealisticStarDisk(ray.sourceDir, uTargetDir, uTargetRadiusRad, uTargetTemp, ray.doppler, targetCoverage) * uTargetGain;
         targetPoint = renderPointSource(ray, uTargetDir, uTargetPointAmp, uTargetTemp, uTargetRadiusRad);
     } else if (uTargetType == 1) {
         targetDisk = renderBlackHoleTarget(ray.sourceDir, uTargetDir, uTargetRadiusRad, uTargetTemp, ray.doppler, targetCoverage) * ray.psfDilution;
-    } else {
+    } else if (uTargetType == 2) {
         targetDisk = renderGalaxyTarget(ray.sourceDir, uTargetDir, uTargetRadiusRad, uTargetTemp, ray.doppler) * uGalaxyGain * ray.psfDilution;
     }
     float occlusion = max(sunCoverage, targetCoverage);

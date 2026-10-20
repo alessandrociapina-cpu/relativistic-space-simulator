@@ -14,9 +14,11 @@ export const AU_M = 1.495978707e11;
  * ocupa mais da metade da altura do para-brisa (70°); o buraco negro e a
  * galáxia ficam mais longe, para o disco de acreção e os braços caberem.
  */
-export const ARRIVAL_STANDOFF_RADII: Readonly<Record<TargetKind, number>> = { star: 3, blackHole: 8, galaxy: 6 };
+export const ARRIVAL_STANDOFF_RADII: Readonly<Record<TargetKind, number>> = { star: 3, blackHole: 8, galaxy: 6, void: 0 };
 
 export function angularRadius(radiusM: number, distanceM: number): number {
+  // No vazio não há alvo (raio 0), nem na chegada, a distância 0.
+  if (radiusM <= 0) return 0;
   return Math.asin(Math.min(1, radiusM / distanceM));
 }
 

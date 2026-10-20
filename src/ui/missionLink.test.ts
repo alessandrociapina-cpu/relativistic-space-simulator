@@ -49,6 +49,7 @@ describe('a missão no endereço', () => {
           crew: full.crew,
           accelG: full.accelG,
           coastEta: full.coastEta,
+          script: full.script,
         })?.id,
       ).toBe(m.id);
     }

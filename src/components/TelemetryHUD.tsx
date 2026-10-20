@@ -18,6 +18,7 @@ import {
 } from '../ui/format';
 import type { IndicatorId } from '../ui/indicatorHelp';
 import { InfoTip } from './InfoTip';
+import { useScriptPhaseLabel } from './ScriptStory';
 
 // Verbos, para o selo da fase não se confundir com o visor da aceleração α.
 const PHASE_LABEL: Readonly<Record<FlightPhase, string>> = {
@@ -142,12 +143,14 @@ export function TelemetryHUD({ className = '' }: { className?: string }) {
   const properAccel = useFlightStore((s) => s.plannedProfile.properAccel);
   const isEyeHazard = useFlightStore((s) => s.photometry.isEyeHazard);
   const whiteout = useFlightStore((s) => s.photometry.isWhiteoutHudActive && s.crew === 'crewed');
+  // Num roteiro, o visor da aceleração diz a fase ("fase 4 · a fuga a 10 g").
+  const scriptPhase = useScriptPhaseLabel();
 
   const cmbVisible = flight.gamma >= CMB_VISIBLE_GAMMA.min && flight.gamma <= CMB_VISIBLE_GAMMA.max;
   const preFlip = activeWindowsAt(windows, flight.tau).some((w) => w.kind === 'pre-flip');
   // A aceleração própria sentida a bordo: cai até zero quando o motor é desligado.
-  const accelDetail =
-    flight.engine === 'ramp'
+  const accelDetail = scriptPhase ??
+    (flight.engine === 'ramp'
       ? 'desligando o motor'
       : flight.engine === 'off'
         ? flight.phase === 'arrived'
@@ -157,7 +160,7 @@ export function TelemetryHUD({ className = '' }: { className?: string }) {
             : `motor desligado · ${formatAccelG(accelG)} nas queimas`
         : flight.thrustAccel > properAccel * 1.000001
           ? 'frenagem de emergência'
-          : (findPreset(crew, accelG)?.title ?? 'personalizada');
+          : (findPreset(crew, accelG)?.title ?? 'personalizada'));
 
   return (
     <section

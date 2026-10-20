@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 // Só as âncoras: a física e o catálogo da ficção ficam no pedaço do cockpit, carregado à parte.
 import { APP_HASH, SCIFI_TAB_HASH } from '../ui/appMode';
+import { APP_BUILD, formatBuildTime, useAppUpdate } from '../ui/buildInfo';
 
 const STAR_COUNT = 700;
 
@@ -142,6 +143,43 @@ function Choice({ href, icon, kicker, title, text, action, onHover }: ChoiceProp
   );
 }
 
+/**
+ * A versão do app (o instante do build e o commit), para conferir se uma atualização já chegou; quando o
+ * service worker instala uma versão nova em segundo plano, "Recarregar" passa a usá-la.
+ */
+function AppVersion() {
+  const updateReady = useAppUpdate((s) => s.ready);
+  const { time, commit, commitUrl } = APP_BUILD;
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 font-readout text-[11px] text-slate-400 tabular-nums">
+      <span>
+        Versão de {formatBuildTime(time)}
+        {commit && (
+          <>
+            {' · '}
+            {commitUrl ? (
+              <a href={commitUrl} target="_blank" rel="noreferrer" className="underline decoration-slate-600 underline-offset-2 hover:text-cyan-200">
+                {commit}
+              </a>
+            ) : (
+              commit
+            )}
+          </>
+        )}
+      </span>
+      {updateReady && (
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="font-display rounded-md border border-amber-300/60 bg-amber-400/15 px-2 py-0.5 text-[10px] tracking-[0.15em] text-amber-100 uppercase hover:bg-amber-400/30"
+        >
+          Nova versão instalada · Recarregar
+        </button>
+      )}
+    </div>
+  );
+}
+
 /** Tela de abertura: escolher entre a viagem relativística e as sondas históricas. */
 export function SplashScreen() {
   const [warp, setWarp] = useState(false);
@@ -199,8 +237,9 @@ export function SplashScreen() {
             Ver as missões <span aria-hidden>›</span>
           </span>
         </a>
-        <footer className="font-display text-center text-[10px] tracking-[0.25em] text-slate-500 uppercase">
-          Cinemática em 64 bits · funciona offline
+        <footer className="flex flex-col items-center gap-2 text-center">
+          <span className="font-display text-[10px] tracking-[0.25em] text-slate-500 uppercase">Cinemática em 64 bits · funciona offline</span>
+          <AppVersion />
         </footer>
       </div>
     </main>

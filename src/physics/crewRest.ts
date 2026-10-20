@@ -14,9 +14,11 @@
  */
 import { enduranceFor, longestBurnS, type CrewKind } from './accelerationPresets';
 import { MAX_COAST_FRACTION, destinationMissionProfile, type Destination } from './destinations';
+import { MISSION_SCRIPTS, scriptProfile, type ScriptId } from './missionScripts';
 import {
   C,
   G0,
+  LIGHT_YEAR_M,
   flightSegments,
   hyperbolicSums,
   segmentAt,
@@ -249,6 +251,21 @@ export const missionProfileFor = (
   restRatio = DEFAULT_REST_RATIO,
 ) => crewAwareProfile(destinationMissionProfile(destination, accelG, coastEta), crew, accelG, restRatio);
 
+/** O voo de uma escolha do planejamento: o roteiro em fases (§4.2.11), se houver, ou o plano para a nave escolhida. */
+export function choiceProfile(choice: {
+  readonly destination: Destination;
+  readonly accelG: number;
+  readonly coastEta: number | null;
+  readonly crew: CrewKind;
+  readonly restRatio?: number;
+  readonly script?: ScriptId | undefined;
+}): MissionProfile {
+  const { destination, accelG, coastEta, crew, restRatio = DEFAULT_REST_RATIO, script } = choice;
+  return script
+    ? scriptProfile(MISSION_SCRIPTS[script], destination.distanceLy * LIGHT_YEAR_M)
+    : missionProfileFor(destination, accelG, coastEta, crew, restRatio);
+}
+
 /**
  * O cruzeiro limitado a 0,999 da rapidez de pico sem cruzeiro (com os descansos da tripulação, se
  * houver): trocar para uma aceleração menor não vira Flip-and-Burn sem aviso (`effectiveCoastEta`).
@@ -362,7 +379,8 @@ export const burnEndAt = (profile: MissionProfile, tau: number) => phaseEndTau(f
 /** Início da próxima queima, no descanso (ou na inércia) em curso no instante τ (s de bordo). */
 export const nextBurnAt = (profile: MissionProfile, tau: number) => phaseEndTau(flightSegments(profile), tau, false);
 
-export type CrewCondition = 'ready' | 'easy' | 'thrust' | 'rest' | 'coast' | 'over-limit' | 'hypothetical' | 'arrived';
+/** `fields`: os campos internos da nave seguram o peso de sempre a bordo, qualquer que seja a aceleração (Tau Zero). */
+export type CrewCondition = 'ready' | 'easy' | 'thrust' | 'rest' | 'coast' | 'over-limit' | 'hypothetical' | 'arrived' | 'fields';
 
 export interface CrewStatus {
   readonly condition: CrewCondition;
@@ -372,6 +390,16 @@ export interface CrewStatus {
   readonly accelG: number;
   /** Até o fim da queima ou do descanso em curso (s de bordo); `null` quando não se aplica. */
   readonly untilChangeS: number | null;
+}
+
+/**
+ * A tripulação de uma nave com campos internos (o roteiro de Tau Zero, §4.2.11): nas queimas, o peso de
+ * `interiorG` a bordo, sem desgaste, qualquer que seja a aceleração da nave; sem peso com o motor desligado.
+ */
+export function shieldedCrewStatus(flight: FlightState, started: boolean, interiorG: number): CrewStatus {
+  if (flight.phase === 'arrived') return { condition: 'arrived', strain: 0, accelG: 0, untilChangeS: null };
+  if (!started) return { condition: 'ready', strain: 0, accelG: 0, untilChangeS: null };
+  return { condition: 'fields', strain: 0, accelG: flight.engine === 'off' ? 0 : interiorG, untilChangeS: null };
 }
 
 /** O estado do piloto humano no instante do voo. */

@@ -175,7 +175,8 @@ function bisect(f: (s: number) => number, s1: number): number {
 
 /** O motor pode ser desligado (empuxo) ou religado (inércia, antes do fim do voo e fora dos descansos)? */
 export function engineCommandAt(profile: MissionProfile, tau: number): 'cut' | 'relight' | null {
-  if (!(tau > 0 && tau < profile.tauTotal)) return null;
+  // Num roteiro (§4.2.11) quem comanda o motor é a história.
+  if (profile.script || !(tau > 0 && tau < profile.tauTotal)) return null;
   const s = computeFlightState(profile, tau);
   if (s.engine === 'thrust') return 'cut';
   if (s.engine === 'off' && s.phase === 'coasting' && !s.crewRest) return 'relight';

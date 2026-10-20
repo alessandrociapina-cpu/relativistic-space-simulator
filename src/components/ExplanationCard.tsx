@@ -40,7 +40,9 @@ export function ExplanationCard({ className = '' }: { className?: string }) {
   const enabled = useExplainSettings((s) => s.enabled);
   const panelOpen = useExplainSettings((s) => s.panelOpen);
   const shown = useHeldInsight(useFlightStore((s) => s.insight));
-  if (!enabled || panelOpen || shown === null) return null;
+  // O cartão da história de um roteiro tem a vez.
+  const storyOpen = useFlightStore((s) => s.beat !== null);
+  if (!enabled || panelOpen || storyOpen || shown === null) return null;
   return <InsightCard id={shown} className={className} />;
 }
 

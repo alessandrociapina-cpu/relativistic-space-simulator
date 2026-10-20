@@ -27,10 +27,11 @@ export type DestinationId =
   | 'trappist1'
   | 'sgrA'
   | 'andromeda'
+  | 'intergalacticVoid'
   | 'virgoCluster';
 
-/** Como o alvo é desenhado no shader (`uTargetType`: 0, 1, 2). */
-export type TargetKind = 'star' | 'blackHole' | 'galaxy';
+/** Como o alvo é desenhado no shader (`uTargetType`: 0, 1, 2; 3 no vazio, sem alvo nenhum). */
+export type TargetKind = 'star' | 'blackHole' | 'galaxy' | 'void';
 
 export interface Destination {
   readonly id: DestinationId;
@@ -42,7 +43,7 @@ export interface Destination {
   readonly distanceLy: number;
   /** Temperatura de corpo negro do alvo (K). */
   readonly temperatureK: number;
-  /** Raio do alvo (m): da estrela, da sombra do buraco negro ou do disco da galáxia. */
+  /** Raio do alvo (m): da estrela, da sombra do buraco negro ou do disco da galáxia; 0 no vazio. */
   readonly radiusM: number;
   /** Aceleração própria padrão (múltiplos de g₀). */
   readonly defaultAccelG: number;
@@ -193,6 +194,24 @@ export const DESTINATIONS: Readonly<Record<DestinationId, Destination>> = {
     decDeg: 41.2692,
     blurb: 'A grande galáxia espiral vizinha, a 2,5 milhões de anos-luz: a viagem sai da Via Láctea.',
     article: 'a',
+  },
+  intergalacticVoid: {
+    id: 'intergalacticVoid',
+    name: 'Vazio intergaláctico',
+    shortName: 'VAZIO',
+    kind: 'void',
+    article: 'o',
+    // O vácuo do capítulo 10 de Tau Zero, a caminho de um aglomerado a ~40 milhões de anos-luz: aqui, na
+    // direção de M87, 14 milhões de anos-luz antes do Aglomerado de Virgem.
+    distanceLy: 4.0e7,
+    // Nada para desenhar: a radiação de fundo, 2,725 K.
+    temperatureK: 2.72548,
+    radiusM: 0,
+    defaultAccelG: DEFAULT_ACCEL_G,
+    raDeg: 187.7059,
+    decDeg: 12.3911,
+    blurb:
+      'Um ponto no meio do nada, a 40 milhões de anos-luz, a caminho do Aglomerado de Virgem: nenhuma estrela por perto, só galáxias distantes.',
   },
   virgoCluster: {
     id: 'virgoCluster',

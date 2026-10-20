@@ -77,6 +77,15 @@ export function adjacentTimeScale(current: number, direction: -1 | 1): number {
   return TIME_SCALE_LADDER[Math.min(Math.max(i + direction, 0), TIME_SCALE_LADDER.length - 1)]!.value;
 }
 
+/** Cada fase de um roteiro (§4.2.11) começa no degrau que a faz durar perto disto na tela (s reais). */
+export const PHASE_REAL_S = 40;
+
+/** O degrau mais próximo (em escala log) do que faz uma fase de `durationS` de bordo durar ~40 s na tela. */
+export function phaseTimeScale(durationS: number): number {
+  const target = Math.log(durationS / PHASE_REAL_S);
+  return TIME_SCALE_LADDER.reduce((best, s) => (Math.abs(Math.log(s.value) - target) < Math.abs(Math.log(best) - target) ? s.value : best), 1);
+}
+
 /**
  * Multiplicador do Auto-Step Down ao entrar numa janela crítica: o maior
  * degrau com que ela dura ≥ 20 s reais, nunca abaixo de 1x (na demonstração,

@@ -7,6 +7,7 @@ import type { TargetKind } from '../physics/destinations';
 import { instrumentAutoExposure, resolvedTargetGain } from '../physics/sensorResponse';
 import { computeBodyAngularRadii } from '../physics/sky';
 import { sensorLutTexture, skyUniforms } from '../sky/skyResources';
+import { GALAXY_CELLS_N } from '../sky/galaxyCells';
 import { STAR_CELLS_N } from '../sky/starCells';
 import { useFlightStore } from '../store/useFlightStore';
 
@@ -22,12 +23,14 @@ export type SensorMode = (typeof SensorMode)[keyof typeof SensorMode];
 /** Leva o núcleo de uma estrela tipo solar (≈ 1,7×10⁻³ no sensor) ao meio da curva ACES. */
 export const DEFAULT_EXPOSURE = 200;
 
-const TARGET_TYPE: Readonly<Record<TargetKind, number>> = { star: 0, blackHole: 1, galaxy: 2 };
+const TARGET_TYPE: Readonly<Record<TargetKind, number>> = { star: 0, blackHole: 1, galaxy: 2, void: 3 };
 /**
  * Brilho superficial da galáxia-alvo: o de um disco visto de fora, na escala do
  * brilho difuso da Via Láctea (não o de uma superfície estelar).
  */
 const GALAXY_SURFACE_GAIN = 0.6;
+/** Abaixo desta densidade de estrelas (relativa à vizinhança do Sol), a nave está fora da galáxia: céu profundo. */
+const DEEP_FIELD_STAR_DENSITY = 1e-3;
 /** Quanto o fundo escurece quando a exposição sobe por causa do alvo (expoente do ganho). */
 const BACKGROUND_DIMMING = 0.75;
 
@@ -76,6 +79,9 @@ function createSkyMaterial() {
     uStarCellsN: { value: STAR_CELLS_N },
     uStarGain: { value: 0 },
     uShipOffset: { value: new THREE.Vector3() },
+    uGalaxyCells: { value: null as THREE.Texture | null },
+    uGalaxyCellsN: { value: GALAXY_CELLS_N },
+    uGalaxyShipOffset: { value: new THREE.Vector3() },
     uMilkyWayA: { value: null as THREE.Texture | null },
     uMilkyWayB: { value: null as THREE.Texture | null },
     uMilkyWayMix: { value: 0 },
@@ -153,6 +159,8 @@ export function RelativisticSky({
     u.uStarCells.value = sky.starCells;
     u.uStarGain.value = sky.starGain;
     u.uShipOffset.value.set(...sky.shipOffset);
+    u.uGalaxyCells.value = sky.galaxyCells;
+    u.uGalaxyShipOffset.value.set(...sky.galaxyShipOffset);
     u.uMilkyWayA.value = sky.milkyWayA;
     u.uMilkyWayB.value = sky.milkyWayB;
     u.uMilkyWayMix.value = sky.milkyWayMix;
@@ -168,10 +176,12 @@ export function RelativisticSky({
         targetTempK: destination.temperatureK,
         targetRadiusRestRad: bodies.targetRadiusRad,
         defaultExposure: exposure,
+        deepField: sky.starDensity < DEEP_FIELD_STAR_DENSITY,
       });
       u.uTargetGain.value = 1;
-      // Exposição alta por causa do alvo resolvido: o fundo não estoura junto.
-      u.uBackgroundGain.value = Math.min(1, (exposure / u.uExposure.value) ** BACKGROUND_DIMMING);
+      // Exposição alta por causa do alvo resolvido: o fundo não estoura junto (no céu profundo, o fundo é o que se quer ver).
+      u.uBackgroundGain.value =
+        sky.starDensity < DEEP_FIELD_STAR_DENSITY ? 1 : Math.min(1, (exposure / u.uExposure.value) ** BACKGROUND_DIMMING);
     } else {
       u.uExposure.value = exposure;
       u.uTargetGain.value =

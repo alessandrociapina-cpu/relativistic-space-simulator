@@ -276,8 +276,11 @@ export function CenterHologramProjector() {
     sunDistanceAu,
     cmbTempK: p.cmbTempAheadK,
     cmbPeakNm: p.cmbWienPeakNm,
+    hasTarget: destination.kind !== 'void',
   });
-  if (hologram === 'none' || effectsPanelOpen || (telescopeOpen && !wide)) return null;
+  // No celular, o cartão da história de um roteiro também precisa da altura.
+  const storyOpen = useFlightStore((s) => s.beat !== null);
+  if (hologram === 'none' || effectsPanelOpen || (telescopeOpen && !wide) || (storyOpen && !wide)) return null;
 
   let content: ReactNode;
   switch (hologram) {

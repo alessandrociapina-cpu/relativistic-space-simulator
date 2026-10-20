@@ -30,11 +30,13 @@ export interface HologramContext {
   readonly sunDistanceAu: number;
   readonly cmbTempK: number;
   readonly cmbPeakNm: number;
+  /** Há um alvo para ver à frente (no vazio intergaláctico, não). */
+  readonly hasTarget?: boolean;
 }
 
 const inRange = (x: number, min: number, max: number) => x >= min && x <= max;
 
-export function selectHologramMode({ flight, profile, sunDistanceAu, cmbTempK, cmbPeakNm }: HologramContext): HologramMode {
+export function selectHologramMode({ flight, profile, sunDistanceAu, cmbTempK, cmbPeakNm, hasTarget = true }: HologramContext): HologramMode {
   // Pico de Wien da CMB atravessando a vizinhança do visível.
   const cmbNearVisible = inRange(cmbPeakNm, 260, 980);
 
@@ -53,7 +55,7 @@ export function selectHologramMode({ flight, profile, sunDistanceAu, cmbTempK, c
   if (accelerating && inRange(sunDistanceAu, 5, 32)) return 'solar-system';
   if (inFlight && cmbNearVisible) return 'cmb-spectrum';
   if (accelerating && cmbTempK > 15_000 && cmbTempK < 180_000) return 'lux-curve';
-  if (decelerating && inRange(flight.gamma, BLUESHIFT_HOLOGRAM_GAMMA.min, BLUESHIFT_HOLOGRAM_GAMMA.max)) {
+  if (hasTarget && decelerating && inRange(flight.gamma, BLUESHIFT_HOLOGRAM_GAMMA.min, BLUESHIFT_HOLOGRAM_GAMMA.max)) {
     return 'target-blueshift';
   }
   return 'none';
