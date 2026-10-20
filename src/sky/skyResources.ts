@@ -6,12 +6,13 @@
  */
 import * as THREE from 'three';
 import { LIGHT_YEAR_M, type FlightState } from '../physics/RelativityEngine';
-import { DESTINATIONS, type Destination } from '../physics/destinations';
+import type { Destination } from '../physics/destinations';
 import { ORIGINS, originDistanceLy, originLuminosity, originPositionLy, type Origin } from '../physics/origins';
 import { SENSOR_LUT, buildSensorLut } from '../physics/sensorResponse';
 import { targetViewDistanceM } from '../physics/sky';
 import galaxyCatalog from './data/galaxies.json';
 import {
+  GALACTIC_CENTER_ICRS_LY,
   GALAXY_CELLS_N,
   GALAXY_SLOTS,
   buildGalaxyCells,
@@ -21,7 +22,7 @@ import {
   type GalaxyCellsBuild,
 } from './galaxyCells';
 import { SKY_MAP_SIZE, relativeStarDensity, shipPositionKpc, skyMapKeyframes } from './galaxyModel';
-import { equatorialUnit, scale, skyFrameFor, type SkyFrame } from './skyFrame';
+import { skyFrameFor, type SkyFrame } from './skyFrame';
 import type { SkyMapRequest, SkyMapResult, StarBuildMessage, StarBuildResult, StarSetupMessage } from './skyMapMessages';
 import { STAR_CELLS_N, displayAmplitude, needsRebuild } from './starCells';
 
@@ -110,8 +111,6 @@ const galaxyCellsTexture = floatTexture(
   GALAXY_TEXELS_WIDE,
   6 * GALAXY_CELLS_N,
 );
-/** O centro galáctico (Sgr A*) em ICRS, anos-luz: a Via Láctea vista de fora. */
-const GALACTIC_CENTER_ICRS_LY = scale(equatorialUnit(DESTINATIONS.sgrA.raDeg, DESTINATIONS.sgrA.decDeg), DESTINATIONS.sgrA.distanceLy);
 
 const galaxySky: { trip: string; catalog: readonly CatalogGalaxy[]; built: GalaxyCellsBuild | null; lastBuild: number } = {
   trip: '',

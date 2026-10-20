@@ -24,6 +24,8 @@ interface CockpitUi {
   readonly panelCollapsed: boolean;
   /** No celular o telescópio começa desligado e abre por uma tecla do painel. */
   readonly telescopeOpen: boolean;
+  /** Nomes das estrelas e galáxias reais no telescópio. */
+  readonly skyLabels: boolean;
   openPlanner: (tab?: PlannerTab) => void;
   /** Troca a aba do planejamento aberto (a barra de navegação e as próprias abas). */
   setPlannerTab: (tab: PlannerTab) => void;
@@ -31,6 +33,7 @@ interface CockpitUi {
   setTelescopeDirection: (direction: TelescopeDirection) => void;
   togglePanel: () => void;
   toggleTelescope: () => void;
+  toggleSkyLabels: () => void;
 }
 
 export const useCockpitUi = create<CockpitUi>()((set) => ({
@@ -40,12 +43,14 @@ export const useCockpitUi = create<CockpitUi>()((set) => ({
   telescopeDirection: 'rear',
   panelCollapsed: false,
   telescopeOpen: false,
+  skyLabels: true,
   openPlanner: (plannerTab = 'plan') => set((s) => ({ plannerOpen: true, plannerTab, plannerSession: s.plannerSession + 1 })),
   setPlannerTab: (plannerTab) => set({ plannerTab }),
   closePlanner: () => set({ plannerOpen: false }),
   setTelescopeDirection: (telescopeDirection) => set({ telescopeDirection }),
   togglePanel: () => set((s) => ({ panelCollapsed: !s.panelCollapsed })),
   toggleTelescope: () => set((s) => ({ telescopeOpen: !s.telescopeOpen })),
+  toggleSkyLabels: () => set((s) => ({ skyLabels: !s.skyLabels })),
 }));
 
 /** Breakpoint `lg` do Tailwind: a partir dele, o cockpit tem as telas penduradas. */

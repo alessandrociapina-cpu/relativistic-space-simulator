@@ -20,7 +20,8 @@ export type IndicatorId =
   | 'gammaDial'
   | 'engine'
   | 'crew'
-  | 'route';
+  | 'route'
+  | 'telescope';
 
 export const INDICATOR_HELP: Readonly<Record<IndicatorId, IndicatorHelp>> = {
   velocity: {
@@ -112,5 +113,15 @@ export const INDICATOR_HELP: Readonly<Record<IndicatorId, IndicatorHelp>> = {
     text:
       'O caminho da estrela de partida (o Sol, ou 40 Eridani A) ao alvo em escala logarítmica até a metade, espelhada até o alvo: o começo e o fim da ' +
       'viagem, perto das estrelas, aparecem tão detalhados quanto o meio. O triângulo âmbar é a nave.',
+  },
+  telescope: {
+    title: 'Telescópio',
+    text:
+      'O céu de verdade, visto da posição da nave: as 8 920 estrelas visíveis a olho nu do catálogo HYG, nas posições ' +
+      'reais e com paralaxe, 688 galáxias do catálogo OpenNGC e a Via Láctea de um modelo da galáxia. Os pontos fracos ' +
+      'e numerosos, mais densos na faixa da Via Láctea, são estrelas abaixo do limite do catálogo, espalhadas ' +
+      'estatisticamente: não são estrelas individuais reais. Com "Nomes", os objetos reais com nome que aparecem na ' +
+      'tela ganham um rótulo que os acompanha. Em alta velocidade, a aberração junta à frente até as estrelas que ' +
+      'ficaram para trás, e o Doppler muda a cor delas.',
   },
 };

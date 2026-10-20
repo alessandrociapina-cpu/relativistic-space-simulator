@@ -14,6 +14,9 @@
  * - da lei de Hubble, v/H₀ com H₀ = 70 km/s/Mpc, a partir de 1 000 km/s (abaixo, a velocidade própria pesa
  *   demais e a galáxia fica de fora).
  *
+ * As galáxias com número de Messier ou nome popular ganham um rótulo (`labels`, pelo nome do OpenNGC), para
+ * o telescópio: "M87", "Andrômeda (M31)", "Grande Nuvem de Magalhães".
+ *
  * Uso: npm run build:galaxies (atrás do proxy do ambiente cloud, com NODE_USE_ENV_PROXY=1).
  */
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -85,6 +88,24 @@ const LOCAL_VOLUME_MPC = {
   NGC6946: 7.7,
 };
 
+/** Rótulos em português das galáxias com nome popular (pelo nome do OpenNGC); as demais de Messier viram "M87". */
+const PT_BR_LABELS = {
+  'ESO056-115': 'Grande Nuvem de Magalhães',
+  NGC0292: 'Pequena Nuvem de Magalhães',
+  NGC0224: 'Andrômeda (M31)',
+  NGC0598: 'Triângulo (M33)',
+  NGC5128: 'Centauro A',
+  NGC0253: 'Escultor (NGC 253)',
+  NGC6822: 'Galáxia de Barnard',
+  NGC3031: 'Bode (M81)',
+  NGC3034: 'Charuto (M82)',
+  NGC4594: 'Sombreiro (M104)',
+  NGC4826: 'Olho Negro (M64)',
+  NGC5055: 'Girassol (M63)',
+  NGC5194: 'Rodamoinho (M51)',
+  NGC5236: 'Cata-Vento do Sul (M83)',
+};
+
 async function loadCsv(name) {
   const cached = join(CACHE, name);
   try {
@@ -154,8 +175,10 @@ for (const file of FILES) {
     }
     // Sem V medida, a cor típica de uma galáxia (B − V ≈ 0,8).
     const v = Number.isFinite(vMag) ? vMag : blue - 0.8;
+    const messier = num(f[col.M]);
     galaxies.push({
       name,
+      label: PT_BR_LABELS[name] ?? (messier > 0 ? `M${messier}` : null),
       row: [
         round(ra, 4),
         round(dec, 4),
@@ -177,6 +200,7 @@ await writeFile(
     source: 'OpenNGC (Mattia Verga, CC BY-SA 4.0), https://github.com/mattiaverga/OpenNGC',
     fields: ['raDeg', 'decDeg', 'distanceMpc', 'vMag', 'majorAxisArcmin', 'colorTempK'],
     names: galaxies.map((g) => g.name),
+    labels: Object.fromEntries(galaxies.filter((g) => g.label).map((g) => [g.name, g.label])),
     galaxies: galaxies.flatMap((g) => g.row),
   })}\n`,
 );

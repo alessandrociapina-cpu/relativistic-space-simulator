@@ -105,6 +105,13 @@ function createSkyMaterial() {
   return { material, uniforms };
 }
 
+/** O que o céu usou no quadro (exposição, ganho do fundo, PSF), para os rótulos do telescópio medirem o brilho igual. */
+export interface SkyReadout {
+  exposure: number;
+  backgroundGain: number;
+  psfAngleRad: number;
+}
+
 interface RelativisticSkyProps {
   sensorMode?: SensorMode;
   exposure?: number;
@@ -112,6 +119,8 @@ interface RelativisticSkyProps {
   pilotEye?: boolean;
   /** Autoexposição de instrumento voltado para a frente (telescópio). */
   autoExposure?: boolean;
+  /** Recebe, a cada quadro, a exposição, o ganho do fundo e a PSF usados. */
+  readout?: SkyReadout;
 }
 
 export function RelativisticSky({
@@ -119,6 +128,7 @@ export function RelativisticSky({
   exposure = DEFAULT_EXPOSURE,
   pilotEye = false,
   autoExposure = false,
+  readout,
 }: RelativisticSkyProps) {
   const { material, uniforms: u } = useMemo(createSkyMaterial, []);
   useEffect(() => () => material.dispose(), [material]);
@@ -195,6 +205,11 @@ export function RelativisticSky({
             })
           : 1;
       u.uBackgroundGain.value = u.uTargetGain.value ** -0.3;
+    }
+    if (readout) {
+      readout.exposure = u.uExposure.value;
+      readout.backgroundGain = u.uBackgroundGain.value;
+      readout.psfAngleRad = u.uPsfAngleRad.value;
     }
     u.uEyeSensitivity.value = pilotEye ? photometry.eyeSensitivity : 1;
     u.uGlareIntensity.value = pilotEye ? photometry.glareIntensity : 0;

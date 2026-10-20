@@ -56,18 +56,17 @@ export interface CatalogOrigin {
 const SUN_BV = 0.65;
 
 /**
- * Lê o vetor plano do JSON (5 números por estrela) já no referencial da nave, com as posições a partir da
- * estrela de partida. O alvo (Sirius, por exemplo) e a estrela de partida saem do catálogo: o shader os
- * desenha à parte. Partindo de outra estrela, o Sol entra no céu (de Erid, uma estrela de magnitude 3,3).
+ * Converte as estrelas do vetor plano (5 números por estrela) para o referencial da nave, com as posições a
+ * partir da estrela de partida, chamando `add` com o índice de cada uma. O alvo (Sirius, por exemplo) e a
+ * estrela de partida ficam de fora: o shader os desenha à parte.
  */
-export function parseCatalog(
+function forEachCatalogStar(
   flat: readonly number[],
   icrsToShip: Mat3,
-  targetDistanceLy = Infinity,
-  origin: CatalogOrigin | null = null,
-): CatalogStar[] {
-  const stars: CatalogStar[] = [];
-  const originLy = origin?.positionLy ?? null;
+  targetDistanceLy: number,
+  originLy: Vec3 | null,
+  add: (star: CatalogStar, index: number) => void,
+): void {
   const originDistLy = originLy ? length(originLy) : 0;
   for (let i = 0; i + 4 < flat.length; i += 5) {
     const distPc = flat[i + 4]! > 0 ? flat[i + 4]! : UNKNOWN_DIST_PC;
@@ -83,19 +82,62 @@ export function parseCatalog(
       dir[2] < 0 &&
       Math.abs(relLy - targetDistanceLy) < TARGET_MATCH.distance * targetDistanceLy;
     if (isTarget) continue;
-    stars.push({
-      position: scale(dir, relLy),
-      luminosity: 10 ** (-0.4 * flat[i + 2]!) * distLy * distLy,
-      temperatureK: bvToTemperature(flat[i + 3]!),
-    });
+    add(
+      {
+        position: scale(dir, relLy),
+        luminosity: 10 ** (-0.4 * flat[i + 2]!) * distLy * distLy,
+        temperatureK: bvToTemperature(flat[i + 3]!),
+      },
+      i / 5,
+    );
   }
-  if (origin && originLy) {
-    stars.push({
-      position: apply(icrsToShip, scale(originLy, -1)),
-      luminosity: origin.sunLuminosity,
-      temperatureK: bvToTemperature(SUN_BV),
-    });
-  }
+}
+
+/** O Sol como estrela do céu, numa partida de outra estrela. */
+function sunAsStar(icrsToShip: Mat3, origin: CatalogOrigin): CatalogStar {
+  return {
+    position: apply(icrsToShip, scale(origin.positionLy, -1)),
+    luminosity: origin.sunLuminosity,
+    temperatureK: bvToTemperature(SUN_BV),
+  };
+}
+
+/**
+ * Lê o vetor plano do JSON (5 números por estrela) já no referencial da nave, com as posições a partir da
+ * estrela de partida. O alvo (Sirius, por exemplo) e a estrela de partida saem do catálogo: o shader os
+ * desenha à parte. Partindo de outra estrela, o Sol entra no céu (de Erid, uma estrela de magnitude 3,3).
+ */
+export function parseCatalog(
+  flat: readonly number[],
+  icrsToShip: Mat3,
+  targetDistanceLy = Infinity,
+  origin: CatalogOrigin | null = null,
+): CatalogStar[] {
+  const stars: CatalogStar[] = [];
+  forEachCatalogStar(flat, icrsToShip, targetDistanceLy, origin?.positionLy ?? null, (star) => stars.push(star));
+  if (origin) stars.push(sunAsStar(icrsToShip, origin));
+  return stars;
+}
+
+export interface NamedCatalogStar extends CatalogStar {
+  readonly name: string;
+}
+
+/**
+ * As estrelas com nome próprio (`named-stars.json`, no formato do catálogo), como `parseCatalog`: os rótulos do
+ * telescópio. Partindo de outra estrela, o Sol entra com o nome.
+ */
+export function parseNamedStars(
+  json: { readonly names: readonly string[]; readonly stars: readonly number[] },
+  icrsToShip: Mat3,
+  targetDistanceLy = Infinity,
+  origin: CatalogOrigin | null = null,
+): NamedCatalogStar[] {
+  const stars: NamedCatalogStar[] = [];
+  forEachCatalogStar(json.stars, icrsToShip, targetDistanceLy, origin?.positionLy ?? null, (star, i) =>
+    stars.push({ ...star, name: json.names[i]! }),
+  );
+  if (origin) stars.push({ ...sunAsStar(icrsToShip, origin), name: 'Sol' });
   return stars;
 }
 
