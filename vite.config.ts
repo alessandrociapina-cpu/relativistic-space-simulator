@@ -1,13 +1,37 @@
 /// <reference types="vitest/config" />
+import { execSync } from 'node:child_process';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
+/**
+ * A versão mostrada na abertura (`src/ui/buildInfo.ts`): o instante do build e o commit. No GitHub Actions,
+ * o commit e o repositório vêm das variáveis do workflow; fora dele, do git local.
+ */
+function buildInfo() {
+  let commit = process.env.GITHUB_SHA ?? '';
+  if (!commit) {
+    try {
+      commit = execSync('git rev-parse HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    } catch {
+      commit = '';
+    }
+  }
+  const repo = process.env.GITHUB_REPOSITORY;
+  const server = process.env.GITHUB_SERVER_URL ?? 'https://github.com';
+  return {
+    time: new Date().toISOString(),
+    commit: commit.slice(0, 7),
+    commitUrl: repo && commit ? `${server}/${repo}/commit/${commit}` : null,
+  };
+}
+
 // `base: './'` keeps asset URLs relative so the build works under the
 // GitHub Pages sub-path (https://<user>.github.io/relativistic-space-simulator/).
 export default defineConfig({
   base: './',
+  define: { __APP_BUILD__: JSON.stringify(buildInfo()) },
   plugins: [
     react(),
     tailwindcss(),

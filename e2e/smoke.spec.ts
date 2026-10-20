@@ -18,8 +18,11 @@ test('abertura: as duas viagens e a ficção científica hard', async ({ page })
   await expect(nav.getByRole('link', { name: 'Início' })).toHaveAttribute('aria-current', 'page');
   await expect(page.getByRole('link', { name: /Quase à velocidade da luz/ })).toBeVisible();
   await expect(page.getByRole('link', { name: /Sondas históricas/ })).toBeVisible();
+  // A versão (instante do build e commit), para conferir se uma atualização chegou.
+  await expect(page.getByText(/Versão de \d{2}\/\d{2}\/\d{4}, \d{2}:\d{2}/)).toBeVisible();
   await page.getByRole('link', { name: /Ficção científica hard/ }).click();
-  await expect(page.getByRole('tab', { name: /Ficção científica hard/ })).toHaveAttribute('aria-selected', 'true');
+  // O cockpit carrega sob demanda: no primeiro acesso, com o servidor frio, passa dos 5 s padrão.
+  await expect(page.getByRole('tab', { name: /Ficção científica hard/ })).toHaveAttribute('aria-selected', 'true', { timeout: 20_000 });
   await expect(page.getByRole('article', { name: 'Hail Mary (Project Hail Mary)' })).toBeVisible();
   await expect(nav.getByRole('link', { name: 'Ficção' })).toHaveAttribute('aria-current', 'page');
   // A barra de navegação troca a aba do planejamento sem sair do cockpit.
