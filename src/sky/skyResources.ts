@@ -6,12 +6,22 @@
  */
 import * as THREE from 'three';
 import { LIGHT_YEAR_M, type FlightState } from '../physics/RelativityEngine';
-import type { Destination } from '../physics/destinations';
+import { DESTINATIONS, type Destination } from '../physics/destinations';
 import { ORIGINS, originDistanceLy, originLuminosity, originPositionLy, type Origin } from '../physics/origins';
 import { SENSOR_LUT, buildSensorLut } from '../physics/sensorResponse';
 import { targetViewDistanceM } from '../physics/sky';
+import galaxyCatalog from './data/galaxies.json';
+import {
+  GALAXY_CELLS_N,
+  GALAXY_SLOTS,
+  buildGalaxyCells,
+  needsGalaxyRebuild,
+  parseGalaxies,
+  type CatalogGalaxy,
+  type GalaxyCellsBuild,
+} from './galaxyCells';
 import { SKY_MAP_SIZE, relativeStarDensity, shipPositionKpc, skyMapKeyframes } from './galaxyModel';
-import { skyFrameFor, type SkyFrame } from './skyFrame';
+import { equatorialUnit, scale, skyFrameFor, type SkyFrame } from './skyFrame';
 import type { SkyMapRequest, SkyMapResult, StarBuildMessage, StarBuildResult, StarSetupMessage } from './skyMapMessages';
 import { STAR_CELLS_N, displayAmplitude, needsRebuild } from './starCells';
 
@@ -92,6 +102,40 @@ function updateStars(destination: Destination, origin: Origin, frame: SkyFrame, 
   }
 }
 
+// ── Grade de galáxias ────────────────────────────────────────────────────────
+// Poucas centenas de galáxias: a montagem (~1 ms) roda na própria thread, no máximo a cada 150 ms.
+const GALAXY_TEXELS_WIDE = 2 * GALAXY_SLOTS * GALAXY_CELLS_N;
+const galaxyCellsTexture = floatTexture(
+  new Float32Array(GALAXY_TEXELS_WIDE * 6 * GALAXY_CELLS_N * 4),
+  GALAXY_TEXELS_WIDE,
+  6 * GALAXY_CELLS_N,
+);
+/** O centro galáctico (Sgr A*) em ICRS, anos-luz: a Via Láctea vista de fora. */
+const GALACTIC_CENTER_ICRS_LY = scale(equatorialUnit(DESTINATIONS.sgrA.raDeg, DESTINATIONS.sgrA.decDeg), DESTINATIONS.sgrA.distanceLy);
+
+const galaxySky: { trip: string; catalog: readonly CatalogGalaxy[]; built: GalaxyCellsBuild | null; lastBuild: number } = {
+  trip: '',
+  catalog: [],
+  built: null,
+  lastBuild: -Infinity,
+};
+
+function updateGalaxies(destination: Destination, origin: Origin, frame: SkyFrame, shipLy: number) {
+  if (galaxySky.trip !== tripKey(origin, destination)) {
+    galaxySky.trip = tripKey(origin, destination);
+    galaxySky.catalog = parseGalaxies(galaxyCatalog, frame.icrsToShip, destination, originPositionLy(origin), GALACTIC_CENTER_ICRS_LY);
+    galaxySky.built = null;
+  }
+  const now = performance.now();
+  const stale = galaxySky.built === null || needsGalaxyRebuild(galaxySky.built, shipLy);
+  if (!stale || now - galaxySky.lastBuild < STAR_REBUILD_MS) return;
+  galaxySky.lastBuild = now;
+  galaxySky.built = buildGalaxyCells(galaxySky.catalog, shipLy);
+  (galaxyCellsTexture.image.data as Float32Array).set(galaxySky.built.data);
+  galaxyCellsTexture.needsUpdate = true;
+  resultsVersion++;
+}
+
 // ── Mapas da Via Láctea ──────────────────────────────────────────────────────
 const EARTH_KEY = 'terra';
 /** Mapas fora da Terra são menores: só servem às viagens ao centro galáctico e a Andrômeda. */
@@ -169,6 +213,9 @@ export interface SkyUniforms {
   /** Nave agora menos nave na montagem da grade (anos-luz, referencial da nave). */
   readonly shipOffset: readonly [number, number, number];
   readonly starGain: number;
+  /** A grade de galáxias e a nave agora menos a nave na montagem dela (anos-luz). */
+  readonly galaxyCells: THREE.DataTexture;
+  readonly galaxyShipOffset: readonly [number, number, number];
   readonly milkyWayA: THREE.Texture;
   readonly milkyWayB: THREE.Texture;
   readonly milkyWayMix: number;
@@ -237,6 +284,7 @@ export function skyUniforms(flight: FlightState, destination: Destination, origi
   const shipLy = flight.positionM / LIGHT_YEAR_M;
 
   updateStars(destination, origin, sky.frame, shipLy);
+  updateGalaxies(destination, origin, sky.frame, shipLy);
   // Reordena os mapas pedidos de vez em quando, conforme a nave anda (ou o scrub salta).
   const now = performance.now();
   if (now - lastDemandAt > 1000) {
@@ -253,6 +301,8 @@ export function skyUniforms(flight: FlightState, destination: Destination, origi
     starCells: starCellsTexture,
     shipOffset: [0, 0, built ? -(shipLy - built.shipDistanceLy) : 0],
     starGain: built ? 1 : 0,
+    galaxyCells: galaxyCellsTexture,
+    galaxyShipOffset: [0, 0, galaxySky.built ? -(shipLy - galaxySky.built.shipDistanceLy) : 0],
     ...milkyWayPair(sky, shipLy),
     shipToGalactic: sky.shipToGalactic,
     starDensity: relativeStarDensity(shipPositionKpc(sky.frame.targetGalactic, shipLy)),

@@ -13,7 +13,8 @@
     "test:e2e": "playwright test",
     "fetch:horizons": "node scripts/fetch-horizons.mjs",
     "reconstruct": "node scripts/reconstruct.mjs",
-    "build:stars": "node scripts/build-star-catalog.mjs"
+    "build:stars": "node scripts/build-star-catalog.mjs",
+    "build:galaxies": "node scripts/build-galaxy-catalog.mjs"
   },
   "dependencies": {
     "@fontsource/orbitron": "^5.3.0",

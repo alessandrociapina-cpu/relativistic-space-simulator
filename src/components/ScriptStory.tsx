@@ -11,6 +11,7 @@ import {
 } from '../physics/missionScripts';
 import { useFlightStore } from '../store/useFlightStore';
 import { bowRadiation, gasDensityOnRoute } from '../sky/interstellarGas';
+import { useCockpitUi } from '../ui/cockpitUi';
 import { formatAccelG, formatDistance, formatEnergyEv, formatGamma, formatProse, formatScientific, formatSpan } from '../ui/format';
 
 /** Cor de cada tipo de fase: acelerando (verde a ciano), motor desligado (azul), freando (violeta). */
@@ -54,7 +55,7 @@ function StepChip({ phase, timing, n, state }: { phase: ScriptPhase; timing: Pha
       >
         <span className="flex min-w-0 items-baseline gap-1 text-[9px] leading-tight">
           <span className={`font-display font-bold ${state === 'now' ? tone.text : ''}`}>{state === 'done' ? '✓' : n}</span>
-          <span className="truncate opacity-80">{phase.badge}</span>
+          <span className={`truncate opacity-80 ${state === 'now' ? tone.text : ''}`}>{phase.badge}</span>
         </span>
         <span className={`truncate text-[11px] leading-tight ${state === 'now' ? 'font-semibold text-white' : ''}`}>{phase.title}</span>
         {state === 'now' && (
@@ -218,7 +219,9 @@ function useBeatFacts(beat: ScriptBeat): FactItem[] {
 export function ScriptCard({ className = '' }: { className?: string }) {
   const beat = useFlightStore((s) => s.beat);
   const plan = useFlightStore((s) => s.profile.script ?? null);
-  if (!beat || !plan) return null;
+  // Com o planejamento aberto, o cartão espera (no celular, a folha cobriria o embarque).
+  const plannerOpen = useCockpitUi((s) => s.plannerOpen);
+  if (!beat || !plan || plannerOpen) return null;
   return <BeatCard key={beat.id} beat={beat} scriptId={plan.id} className={className} />;
 }
 

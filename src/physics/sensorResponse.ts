@@ -21,6 +21,11 @@ const AUTO_EXPOSURE_LEVEL = 0.6;
 const CMB_RADIANCE_SCALE = 0.38;
 /** O alvo só comanda a exposição quando cobre pelo menos este raio, em pixels. */
 const RESOLVED_TARGET_PX = 3;
+/**
+ * Fora da galáxia, sem estrelas por perto nem CMB no visível, o instrumento integra por mais tempo (uma
+ * exposição de céu profundo): as galáxias fracas aparecem.
+ */
+export const DEEP_FIELD_GAIN = 40;
 
 export interface AutoExposureInput {
   readonly eta: number;
@@ -32,12 +37,15 @@ export interface AutoExposureInput {
   /** Raio angular do alvo no referencial de repouso (rad). */
   readonly targetRadiusRestRad: number;
   readonly defaultExposure: number;
+  /** Céu profundo: a nave fora da galáxia, sem estrelas por perto (a exposição longa vale se nada brilhar). */
+  readonly deepField?: boolean;
 }
 
 /**
  * Autoexposição de um instrumento olhando para a frente: mede pelo objeto mais
  * brilhante no campo, o pico da CMB (diluído pela PSF) ou a superfície do alvo
- * quando resolvida. Sem nada brilhante, fica na exposição de céu estrelado.
+ * quando resolvida. Sem nada brilhante, fica na exposição de céu estrelado, ou
+ * na de céu profundo fora da galáxia.
  */
 export function instrumentAutoExposure(input: AutoExposureInput): number {
   const dopplerAhead = Math.exp(input.eta);
@@ -50,7 +58,8 @@ export function instrumentAutoExposure(input: AutoExposureInput): number {
     const brightest = Math.max(cmb, sensorLuminance(input.targetTempK * dopplerAhead, input.sensorMode));
     if (brightest > 0) return AUTO_EXPOSURE_LEVEL / brightest;
   }
-  return cmb > 0 ? Math.min(input.defaultExposure, AUTO_EXPOSURE_LEVEL / cmb) : input.defaultExposure;
+  const starry = input.deepField ? input.defaultExposure * DEEP_FIELD_GAIN : input.defaultExposure;
+  return cmb > 0 ? Math.min(starry, AUTO_EXPOSURE_LEVEL / cmb) : starry;
 }
 
 const XYZ_TO_LINEAR_SRGB = [
