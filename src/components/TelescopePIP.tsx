@@ -1,5 +1,5 @@
 import '../quietThree';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import type { PerspectiveCamera } from 'three';
 import { WINDSHIELD_FOV_DEG, recommendedRearZoom } from '../physics/EyeAndPhotometry';
@@ -8,7 +8,8 @@ import { useFlightStore } from '../store/useFlightStore';
 import { useCockpitUi, type TelescopeDirection } from '../ui/cockpitUi';
 import { formatScientific, formatSpaceNumber } from '../ui/format';
 import { CockpitMonitor, MonitorButtons } from './CockpitMonitor';
-import { RelativisticSky, SensorMode } from './RelativisticSky';
+import { RelativisticSky, SensorMode, type SkyReadout } from './RelativisticSky';
+import { TelescopeLabelLayer, TelescopeLabelTracker } from './TelescopeLabels';
 
 const SENSORS = [
   { value: SensorMode.Visible, label: 'VIS', title: 'Visível (380–750 nm)' },
@@ -93,6 +94,9 @@ export function TelescopePIP({ className = '' }: { className?: string }) {
   const originStar = useFlightStore((s) => s.origin.starName);
   const starSubject = originStar === 'Sol' ? 'O Sol' : originStar;
   const hint = useFlightStore((s) => (direction === 'rear' ? rearHint(s.origin.starTempK * Math.exp(-s.flight.eta), sensorMode) : null));
+  // O céu conta ao rastreador dos rótulos a exposição e a PSF de cada quadro; os nós dos rótulos ficam fixos.
+  const readout = useRef<SkyReadout>({ exposure: 1, backgroundGain: 1, psfAngleRad: 1e-3 }).current;
+  const labelNodes = useRef<(HTMLDivElement | null)[]>([]);
 
   return (
     <CockpitMonitor
@@ -100,6 +104,7 @@ export function TelescopePIP({ className = '' }: { className?: string }) {
       subtitle={direction === 'rear' ? originStar : target}
       className={className}
       tilt="left"
+      help="telescope"
       footer={
         <>
           <MonitorButtons
@@ -126,8 +131,10 @@ export function TelescopePIP({ className = '' }: { className?: string }) {
         camera={{ position: [0, 0, 0], rotation: [0, Math.PI, 0], fov: WINDSHIELD_FOV_DEG / 13, near: 0.1, far: 100 }}
       >
         <Aim direction={direction} />
-        <RelativisticSky sensorMode={sensorMode} autoExposure={direction === 'front'} />
+        <RelativisticSky sensorMode={sensorMode} autoExposure={direction === 'front'} readout={readout} />
+        <TelescopeLabelTracker direction={direction} sensorMode={sensorMode} readout={readout} nodes={labelNodes} originVisible={!hint} />
       </Canvas>
+      <TelescopeLabelLayer nodes={labelNodes} />
       {hint && (
         <p className="pointer-events-none absolute inset-x-2 bottom-2 rounded-sm bg-black/70 px-2 py-1 text-center text-[10px] leading-snug text-amber-100">
           {hint === 'ir'

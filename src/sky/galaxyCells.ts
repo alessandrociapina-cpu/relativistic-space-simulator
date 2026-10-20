@@ -8,7 +8,7 @@
  * Fora da galáxia, a própria Via Láctea entra na grade como galáxia (a ~26 700 anos-luz do Sol, rumo a Sgr
  * A*): dentro dela, o modelo do brilho difuso (`galaxyModel.ts`) a desenha.
  */
-import type { Destination } from '../physics/destinations';
+import { DESTINATIONS, type Destination } from '../physics/destinations';
 import { PARSEC_LY, STAR_SIGMA_MAX, cubeFace, displayAmplitude } from './starCells';
 import { apply, equatorialUnit, length, scale, sub, type Mat3, type Vec3 } from './skyFrame';
 
@@ -28,6 +28,13 @@ const SIGMA_PER_RADIUS = 1 / 3;
 const MILKY_WAY = { absMagV: -20.9, radiusKpc: 15, temperatureK: 5800 } as const;
 /** Dentro deste raio (anos-luz, em torno do centro galáctico), a Via Láctea é o brilho difuso do modelo. */
 export const MILKY_WAY_INSIDE_LY = 300_000;
+/** O centro galáctico (Sgr A*) em ICRS, anos-luz: a Via Láctea vista de fora. */
+export const GALACTIC_CENTER_ICRS_LY = scale(
+  equatorialUnit(DESTINATIONS.sgrA.raDeg, DESTINATIONS.sgrA.decDeg),
+  DESTINATIONS.sgrA.distanceLy,
+);
+/** O nome da própria Via Láctea na grade (e no rótulo do telescópio). */
+export const MILKY_WAY_NAME = 'Via Láctea';
 
 export interface CatalogGalaxy {
   readonly name: string;
@@ -40,9 +47,11 @@ export interface CatalogGalaxy {
   readonly temperatureK: number;
 }
 
-interface GalaxyCatalogJson {
+export interface GalaxyCatalogJson {
   readonly names: readonly string[];
   readonly galaxies: readonly number[];
+  /** Rótulos das galáxias com número de Messier ou nome popular, pelo nome do OpenNGC. */
+  readonly labels?: Readonly<Record<string, string>>;
 }
 
 /** Ângulo (rad) e fração de distância dentro dos quais uma galáxia do catálogo é o próprio alvo (Andrômeda, M87). */
@@ -84,7 +93,7 @@ export function parseGalaxies(
   if (galacticCenterIcrsLy) {
     const rel = sub(galacticCenterIcrsLy, originLy);
     out.push({
-      name: 'Via Láctea',
+      name: MILKY_WAY_NAME,
       position: apply(icrsToShip, rel),
       luminosity: 10 ** (-0.4 * MILKY_WAY.absMagV) * (10 * PARSEC_LY) ** 2,
       sigmaLy: MILKY_WAY.radiusKpc * 1000 * PARSEC_LY * SIGMA_PER_RADIUS,
@@ -133,7 +142,7 @@ export function buildGalaxyCells(galaxies: readonly CatalogGalaxy[], shipDistanc
     const rel = sub(galaxy.position, ship);
     const dist = length(rel);
     if (!(dist > 0)) continue;
-    if (galaxy.name === 'Via Láctea' && dist < MILKY_WAY_INSIDE_LY) continue;
+    if (galaxy.name === MILKY_WAY_NAME && dist < MILKY_WAY_INSIDE_LY) continue;
     nearestLy = Math.min(nearestLy, dist);
     const amp = displayAmplitude(galaxy.luminosity, dist);
     const sigmaRad = galaxy.sigmaLy / dist;
